@@ -106,4 +106,120 @@ describe('widget datasource remapping', () => {
       ),
     ).toThrow('source_spend');
   });
+
+  it('matches expression identifiers using DuckDB casing rules', () => {
+    const definition = remapWidgetDefinition(
+      {
+        type: 'scorecard',
+        title: 'Spend',
+        dataSourceId: 'source',
+        dateRangeFieldId: 'source_date',
+        metric: {
+          source: { kind: 'expression', expression: 'SUM(mediacost)' },
+          dataType: 'currency',
+        },
+      },
+      source,
+      'target',
+      {
+        fields: [
+          { id: 'target_date', canonicalName: 'date', columnName: 'day' },
+          { id: 'target_spend', canonicalName: 'spend', columnName: 'target_cost' },
+        ],
+        calculatedFields: [],
+      },
+    );
+    if (definition.type !== 'scorecard' || definition.metric.source.kind !== 'expression')
+      throw new Error('Expected an expression scorecard.');
+    expect(definition.metric.source.expression).toBe('SUM("target_cost")');
+  });
+
+  it('expands an expression field mapped to a target calculated field', () => {
+    const definition = remapWidgetDefinition(
+      {
+        type: 'scorecard',
+        title: 'Spend',
+        dataSourceId: 'source',
+        dateRangeFieldId: 'source_date',
+        metric: {
+          source: { kind: 'expression', expression: 'SUM("MediaCost")' },
+          dataType: 'currency',
+        },
+      },
+      source,
+      'target',
+      {
+        fields: [{ id: 'target_date', canonicalName: 'date', columnName: 'day' }],
+        calculatedFields: [
+          {
+            id: 'target_spend',
+            canonicalName: 'spend',
+            expression: 'gross_cost - rebate',
+          },
+        ],
+      },
+    );
+    if (definition.type !== 'scorecard' || definition.metric.source.kind !== 'expression')
+      throw new Error('Expected an expression scorecard.');
+    expect(definition.metric.source.expression).toBe('SUM((gross_cost - rebate))');
+  });
+
+  it('rejects a missing expression mapping even when the raw column exists with other semantics', () => {
+    expect(() =>
+      remapWidgetDefinition(
+        {
+          type: 'scorecard',
+          title: 'Spend',
+          dataSourceId: 'source',
+          dateRangeFieldId: 'source_date',
+          metric: {
+            source: { kind: 'expression', expression: 'SUM("MediaCost")' },
+            dataType: 'currency',
+          },
+        },
+        source,
+        'target',
+        {
+          fields: [
+            { id: 'target_date', canonicalName: 'date', columnName: 'day' },
+            { id: 'target_revenue', canonicalName: 'revenue', columnName: 'MediaCost' },
+          ],
+          calculatedFields: [],
+        },
+      ),
+    ).toThrow('no canonical field spend');
+  });
+
+  it('rejects expression identifiers that are ambiguous under DuckDB casing rules', () => {
+    expect(() =>
+      remapWidgetDefinition(
+        {
+          type: 'scorecard',
+          title: 'Spend',
+          dataSourceId: 'source',
+          dateRangeFieldId: 'source_date',
+          metric: {
+            source: { kind: 'expression', expression: 'SUM(MEDIACOST)' },
+            dataType: 'currency',
+          },
+        },
+        {
+          ...source,
+          fields: [
+            ...source.fields,
+            { id: 'source_duplicate', canonicalName: 'gross_spend', columnName: 'mediacost' },
+          ],
+        },
+        'target',
+        {
+          fields: [
+            { id: 'target_date', canonicalName: 'date', columnName: 'day' },
+            { id: 'target_spend', canonicalName: 'spend', columnName: 'net_cost' },
+            { id: 'target_gross', canonicalName: 'gross_spend', columnName: 'gross_cost' },
+          ],
+          calculatedFields: [],
+        },
+      ),
+    ).toThrow('ambiguous field identifier MEDIACOST');
+  });
 });

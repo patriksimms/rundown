@@ -14,6 +14,7 @@ import { Separator } from '#/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '#/components/ui/tabs';
 import { Textarea } from '#/components/ui/textarea';
 import type { DashboardDocument, DashboardWidget, WidgetDefinition } from '#/domain/schema';
+import { sharedUserLabel } from '#/domain/sharing';
 import { useWebMcpTools } from '#/webmcp/use-webmcp-tools';
 
 export const Route = createFileRoute('/dashboards/$dashboardId')({ component: DashboardPage });
@@ -688,23 +689,23 @@ function Sharing({
       {sharing.grants.length ? (
         <div className="mt-8 space-y-3">
           <h3 className="text-sm font-medium">People with access</h3>
-          {sharing.grants.map((grant) => (
-            <div className="flex items-center gap-3 text-sm" key={grant.clerkUserId}>
-              <span className="min-w-0 flex-1 truncate">
-                {grant.displayName ? `${grant.displayName} · ` : ''}
-                {grant.userEmail ?? grant.clerkUserId}
-              </span>
-              <span className="text-muted-foreground">{grant.role}</span>
-              <Button
-                aria-label={`Revoke ${grant.clerkUserId}`}
-                size="icon-sm"
-                variant="ghost"
-                onClick={() => revokeGrant(grant.clerkUserId)}
-              >
-                <Trash2Icon />
-              </Button>
-            </div>
-          ))}
+          {sharing.grants.map((grant) => {
+            const label = sharedUserLabel(grant);
+            return (
+              <div className="flex items-center gap-3 text-sm" key={grant.clerkUserId}>
+                <span className="min-w-0 flex-1 truncate">{label}</span>
+                <span className="text-muted-foreground">{grant.role}</span>
+                <Button
+                  aria-label={`Revoke ${label}`}
+                  size="icon-sm"
+                  variant="ghost"
+                  onClick={() => revokeGrant(grant.clerkUserId)}
+                >
+                  <Trash2Icon />
+                </Button>
+              </div>
+            );
+          })}
         </div>
       ) : null}
     </div>
