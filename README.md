@@ -20,9 +20,9 @@ bun run build
 
 ## Cloudflare deployment
 
-Connect this GitHub repository through **Cloudflare Workers & Pages → Create application → Import a repository**.
+The app is available at [rundown.rundown.workers.dev](https://rundown.rundown.workers.dev). Cloudflare deploys every push to `main`; pushes to other branches create preview versions.
 
-Use these Workers Builds settings:
+The GitHub repository is connected with these Workers Builds settings:
 
 ```text
 Production branch: main
