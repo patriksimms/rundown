@@ -242,9 +242,9 @@ Input schemas are JSON Schema `type: object` documents generated from the same z
 
 ## 13. Risks and spikes, in order
 
-1. Resolved: moving Ducklings into a second private Worker produces a 10,211.58 KiB compressed query
-   Worker and a 726.69 KiB app Worker. Both fit their independent 10 MiB limits. Temporary-table
-   isolation prevents user expressions from performing external reads.
+1. Resolved: moving Ducklings into a second private Worker produces a 10,198.75 KiB compressed query
+   Worker and a 437.92 KiB app Worker after `oxc` minification. Both fit their independent 10 MiB
+   limits. Temporary-table isolation prevents user expressions from performing external reads.
 2. ChatGPT desktop browser discovering tools on a Clerk-authenticated TanStack Start page, including after client-side navigation. Register tools after hydration, re-register on route change.
 3. Memory. Workers have a 128 MB isolate limit, and source materialization means memory grows with the
    decoded datasource. Test the representative R2 export in preview before production rollout.

@@ -100,9 +100,10 @@ The Worker expects these private resources:
 | Worker   | `rundown-query`       | `rundown-query-preview`       |
 
 The query Worker has no route and `workers_dev` is disabled. It is reachable only through the app
-Worker's `QUERY_ENGINE` Service Binding. Its compressed upload is 10,211.58 KiB, about 28 KiB below
-Cloudflare's 10 MiB paid-Worker limit. Keep dependencies and generic validation libraries out of
-that Worker unless a dry-run proves the bundle still fits.
+Worker's `QUERY_ENGINE` Service Binding. Vite minifies production bundles with `oxc`. The query
+Worker's compressed upload is 10,198.75 KiB, about 41 KiB below Cloudflare's 10 MiB paid-Worker
+limit. Keep dependencies and generic validation libraries out of that Worker unless a dry-run proves
+the bundle still fits.
 
 To recreate the infrastructure in another Cloudflare account, enable R2 once in the dashboard and create the private buckets with:
 
