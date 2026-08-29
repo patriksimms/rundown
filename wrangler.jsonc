@@ -1,9 +1,33 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "rundown",
+  "account_id": "17c619232f5d84567cd69896e892f326",
   "main": "@tanstack/react-start/server-entry",
   "compatibility_date": "2026-08-29",
   "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "rundown-app",
+      "database_id": "320d2de2-61ae-4e18-97b0-839ae748f2b9",
+      "preview_database_id": "e75e6c03-a9cf-404a-8d10-14d20f393697",
+      "migrations_dir": "drizzle",
+    },
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "QUERY_CACHE",
+      "id": "54b4bb2fee024effa8e3bc5f995aea17",
+      "preview_id": "47783b0d496e4257bb1fe168cfbf28f6",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "DATA",
+      "bucket_name": "rundown-data",
+      "preview_bucket_name": "rundown-data-preview",
+    },
+  ],
   "observability": {
     "enabled": true,
     "logs": {
@@ -17,4 +41,29 @@
     },
   },
   "upload_source_maps": true,
+  "env": {
+    "preview": {
+      "name": "rundown-preview",
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "rundown-app-preview",
+          "database_id": "e75e6c03-a9cf-404a-8d10-14d20f393697",
+          "migrations_dir": "drizzle",
+        },
+      ],
+      "kv_namespaces": [
+        {
+          "binding": "QUERY_CACHE",
+          "id": "47783b0d496e4257bb1fe168cfbf28f6",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "DATA",
+          "bucket_name": "rundown-data-preview",
+        },
+      ],
+    },
+  },
 }
