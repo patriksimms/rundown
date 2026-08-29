@@ -222,4 +222,76 @@ describe('widget datasource remapping', () => {
       ),
     ).toThrow('ambiguous field identifier MEDIACOST');
   });
+
+  it('does not rewrite DATE literals when a source column has the same name', () => {
+    const definition = remapWidgetDefinition(
+      {
+        type: 'scorecard',
+        title: 'Recent spend',
+        dataSourceId: 'source',
+        dateRangeFieldId: 'source_date',
+        metric: {
+          source: {
+            kind: 'expression',
+            expression: `SUM(CASE WHEN "DateStart" >= DATE '2024-01-01' THEN "MediaCost" ELSE 0 END)`,
+          },
+          dataType: 'currency',
+        },
+      },
+      {
+        ...source,
+        fields: [
+          ...source.fields,
+          { id: 'source_legacy_date', canonicalName: 'legacy_date', columnName: 'Date' },
+        ],
+      },
+      'target',
+      {
+        fields: [
+          { id: 'target_date', canonicalName: 'date', columnName: 'day' },
+          { id: 'target_spend', canonicalName: 'spend', columnName: 'cost' },
+          { id: 'target_legacy_date', canonicalName: 'legacy_date', columnName: 'legacy' },
+        ],
+        calculatedFields: [],
+      },
+    );
+    if (definition.type !== 'scorecard' || definition.metric.source.kind !== 'expression')
+      throw new Error('Expected an expression scorecard.');
+    expect(definition.metric.source.expression).toBe(
+      `SUM(CASE WHEN "day" >= DATE '2024-01-01' THEN "cost" ELSE 0 END)`,
+    );
+  });
+
+  it('does not rewrite a CAST target type when a source column has the same name', () => {
+    const definition = remapWidgetDefinition(
+      {
+        type: 'scorecard',
+        title: 'Dated rows',
+        dataSourceId: 'source',
+        dateRangeFieldId: 'source_date',
+        metric: {
+          source: { kind: 'expression', expression: 'COUNT(CAST("DateStart" AS DATE))' },
+          dataType: 'number',
+        },
+      },
+      {
+        ...source,
+        fields: [
+          ...source.fields,
+          { id: 'source_legacy_date', canonicalName: 'legacy_date', columnName: 'Date' },
+        ],
+      },
+      'target',
+      {
+        fields: [
+          { id: 'target_date', canonicalName: 'date', columnName: 'day' },
+          { id: 'target_legacy_date', canonicalName: 'legacy_date', columnName: 'legacy' },
+        ],
+        calculatedFields: [],
+      },
+    );
+    if (definition.type !== 'scorecard' || definition.metric.source.kind !== 'expression')
+      throw new Error('Expected an expression scorecard.');
+    expect(definition.metric.source.expression).toBe('COUNT(CAST("day" AS DATE))');
+  });
 });

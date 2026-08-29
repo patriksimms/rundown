@@ -123,6 +123,17 @@ interface ExpressionField {
   target?: FieldIdentity;
 }
 
+const sqlReservedWords = new Set(
+  'all analyse analyze and anti any array as asc asof asymmetric at authorization binary both by case cast check collate collation column columns concurrently constraint create cross default deferrable desc describe distinct do else end except false fetch for foreign freeze from full generated glob group having ilike in initially inner intersect into is isnull join lambda lateral leading left like limit map natural not notnull null offset on only or order outer overlaps pivot pivot_longer pivot_wider placing positional primary qualify references returning right select semi show similar some struct summarize symmetric table tablesample then to trailing true try_cast union unique unpack unpivot using variadic verbose when where window with'.split(
+    ' ',
+  ),
+);
+const sqlTypeNames = new Set(
+  'bigint bit blob bool boolean bpchar char character date decimal double enum float hugeint int integer interval json list map numeric real smallint struct text time timestamp timestamptz timetz tinyint ubigint uhugeint uint union usmallint utinyint uuid varbinary varchar varint'.split(
+    ' ',
+  ),
+);
+
 function expressionFieldMap(
   sourceFields: FieldIdentity[],
   targetByCanonicalName: ReadonlyMap<string, FieldIdentity>,
@@ -158,7 +169,9 @@ function rewriteSqlIdentifiers(expression: string, fields: ReadonlyMap<string, E
     }
     const word = expression.slice(index).match(/^[A-Za-z_][A-Za-z0-9_]*/u)?.[0];
     if (word) {
-      result += expressionField(word, fields) ?? word;
+      result += isSqlSyntaxWord(expression, index, word)
+        ? word
+        : (expressionField(word, fields) ?? word);
       index += word.length;
       continue;
     }
@@ -166,6 +179,15 @@ function rewriteSqlIdentifiers(expression: string, fields: ReadonlyMap<string, E
     index += 1;
   }
   return result;
+}
+
+function isSqlSyntaxWord(expression: string, index: number, word: string) {
+  const normalized = word.toLocaleLowerCase('en-US');
+  if (sqlReservedWords.has(normalized)) return true;
+  const following = expression.slice(index + word.length).match(/^\s*(.)/u)?.[1];
+  if (following === '(' || following === "'") return true;
+  const preceding = expression.slice(0, index).match(/([A-Za-z_][A-Za-z0-9_]*)\s*$/u)?.[1];
+  return preceding?.toLocaleLowerCase('en-US') === 'as' && sqlTypeNames.has(normalized);
 }
 
 function expressionField(identifier: string, fields: ReadonlyMap<string, ExpressionField[]>) {
