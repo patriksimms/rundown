@@ -1,6 +1,8 @@
 # Rundown: discovery brief and plan
 
-Status: discovery outcome, agreed on 2026-08-29. Nothing here is implemented yet. `docs/datastructure/` predates this brief; section 10 lists what changes there.
+Status: discovery outcome agreed on 2026-08-29 and implemented in the feature branch linked from
+issue #1. Deployment credentials, remote migrations, and the live release remain external rollout
+steps.
 
 ## 1. Problem and users
 
@@ -39,8 +41,11 @@ From the spec ([webmachinelearning.github.io/webmcp](https://webmachinelearning.
 ## 3. Decisions
 
 1. Stack: TanStack Start + React, shadcn/ui including shadcn charts, Tailwind. Playwright for e2e. Bun for tooling.
-2. Hosting: Cloudflare Workers, paid plan (already upgraded). One deploy for app, API, and query engine.
-3. Query engine: DuckDB inside the Worker via `@ducklings/workers`, reading parquet and CSV from R2 over httpfs. No DuckDB in the browser, anywhere.
+2. Hosting: Cloudflare Workers, paid plan (already upgraded). One build produces an app Worker and a
+   private query Worker connected through a Service Binding.
+3. Query engine: Ducklings and DuckDB/WASM in the private query Worker, reading parquet and CSV from
+   R2 over httpfs. Splitting the query engine gives each Worker its own compressed-size allowance. No
+   DuckDB runs in the browser.
 4. Application data: Cloudflare D1 with Drizzle.
 5. Auth: Clerk. Workspaces map to Clerk Organizations.
 6. Security model: viewers can only trigger queries the dashboard already defines. Column secrecy is explicitly not a goal, because a derived metric next to its denominator makes the numerator derivable anyway (CPM and impressions give spend).
@@ -58,20 +63,23 @@ From the spec ([webmachinelearning.github.io/webmcp](https://webmachinelearning.
 
 ## 4. Architecture
 
-Components, all in one Worker deployment:
+Components, built together and deployed as two Workers:
 
 - TanStack Start app. SSR routes, client-side dashboard editor and viewer, WebMCP tool registration in the client.
 - Server functions / API routes. Auth via Clerk, authorization against D1, query compilation, cache lookup, DuckDB execution.
 - D1. Workspaces, memberships, datasources, field metadata, calculated fields, library metrics, dashboards, dashboard grants, share links, query cache index.
 - R2. One bucket. Data files under `ws/<workspaceId>/...`. Optionally cached query results as objects if KV turns out too small.
 - KV. Query result cache keyed by hash. Global, eventually consistent, fine for dashboard results.
-- DuckDB (ducklings). Instantiated per isolate, in-memory, single-threaded. Reads R2 through an R2 secret configured at startup.
+- Private DuckDB query Worker. It creates an in-memory database per request and reads R2 with secrets
+  held only by that Worker. It has no route and is reachable through a Service Binding.
 
 Request flow for a viewer opening a dashboard:
 
 1. Route loader resolves the dashboard by id or share token, checks the grant, returns the dashboard document and default control state.
 2. Client renders widgets and calls `queryWidget` for each, with the current control state.
-3. Server validates control state against the dashboard's controls, computes the cache key, returns the cached result or compiles and runs the query, stores the result, returns rows.
+3. Server validates control state against the dashboard's controls, computes the cache key, and
+   returns a cached result or sends the authorized source and compiled query to the private query
+   Worker through the Service Binding.
 4. Client registers view-mode WebMCP tools once the dashboard has loaded.
 
 Request flow for an editor adding a widget through ChatGPT:
@@ -130,7 +138,10 @@ Validation, in this order:
 
 1. Structural. The expression is embedded in a server-side template as one statement. Semicolons and multiple statements are rejected.
 2. Compile. The compiled query runs with `EXPLAIN` against the datasource. Syntax and unknown columns fail here and the error text goes back to the editor or agent.
-3. Isolation. The plan output is inspected. Any file scan outside the workspace prefix, or any table function other than the datasource's own read, rejects the expression. This closes the cross-tenant read through a subquery inside an expression. Must be verified in the ducklings spike that `EXPLAIN` in that build prints file paths. Fallback if it does not: load the datasource into a temp table, then `SET enable_external_access = false` before running user expressions, at the cost of loading the whole file per request.
+3. Isolation. The app Worker generates the only external scan from a datasource already authorized
+   to the workspace. The query Worker materializes it into `rundown_source`, then runs
+   `SET enable_external_access = false` before compiling or executing user expressions. A regression
+   test proves a user expression cannot read a local file.
 
 Later option, not now: a small expression grammar with a function allowlist, which would also power a no-SQL formula editor.
 
@@ -150,7 +161,9 @@ Editing a widget changes its hash, so old cache entries become unreachable and e
 
 `explainWidget` returns the compiled SQL plus the metric and calculated field definitions and descriptions, so a viewer or agent can see what a number means.
 
-Ducklings constraints to respect: single-threaded, in-memory, 128 MB, no JSON extension by default, 64-bit integers need care. Spike first (section 13).
+Query-Worker constraints to respect: datasource materialization is in-memory, Workers have 128 MB of
+memory, and 64-bit integers are serialized losslessly. Ducklings uses Asyncify for remote reads, so
+requests are serialized within an isolate while Cloudflare remains free to create more isolates.
 
 ## 9. Dashboards, widgets, controls
 
@@ -229,10 +242,14 @@ Input schemas are JSON Schema `type: object` documents generated from the same z
 
 ## 13. Risks and spikes, in order
 
-1. Ducklings in a Worker reading `r2://` parquet with a `CASE WHEN ... GROUP BY` query, and `EXPLAIN` printing file paths. If either fails, the fallback is a Bun container with native DuckDB (Cloudflare Containers or Render), and section 7 step 3 switches to the temp-table approach.
+1. Resolved: moving Ducklings into a second private Worker produces a 10,198.75 KiB compressed query
+   Worker and a 437.92 KiB app Worker after `oxc` minification. Both fit their independent 10 MiB
+   limits. Temporary-table isolation prevents user expressions from performing external reads.
 2. ChatGPT desktop browser discovering tools on a Clerk-authenticated TanStack Start page, including after client-side navigation. Register tools after hydration, re-register on route change.
-3. Memory. A 200-column, 30k-row export is a few MB and fine. Establish the row count at which the 128 MB Worker limit bites and document it as a product limit.
-4. Cold start. The wasm module is 9.7 MB gzipped; Cloudflare caches compiled modules per isolate but the first request per isolate will be slow. Measure.
+3. Memory. Workers have a 128 MB isolate limit, and source materialization means memory grows with the
+   decoded datasource. Test the representative R2 export in preview before production rollout.
+4. Cold start. Measure Ducklings initialization and first-query latency in preview. Cloudflare owns
+   isolate creation and eviction, so there is no container sleep window to tune.
 5. Tool selection quality with roughly 20 tools. If ChatGPT picks wrong tools, merge (`upsertCalculatedField` and `upsertLibraryMetric` into one) or sharpen descriptions before adding more.
 
 ## 14. Deferred

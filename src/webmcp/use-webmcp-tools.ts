@@ -1,0 +1,269 @@
+import { useEffect } from 'react';
+import { z } from 'zod';
+import { callApi } from '#/api/client';
+import { apiRequestSchema, type ApiRequest } from '#/api/contracts';
+
+interface ToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  annotations?: { readOnlyHint?: boolean };
+  execute: (input: Record<string, unknown>, options?: { signal: AbortSignal }) => Promise<unknown>;
+}
+
+interface ModelContext {
+  registerTool(tool: ToolDefinition, options?: { signal: AbortSignal }): Promise<void>;
+}
+
+declare global {
+  interface Document {
+    modelContext?: ModelContext;
+  }
+}
+
+interface WebMcpOptions {
+  dashboardId?: string;
+  shareToken?: string;
+  canCreate?: boolean;
+  canEdit?: boolean;
+  isAdmin?: boolean;
+  onMutation?: () => void | Promise<void>;
+}
+
+interface ToolSpec {
+  action: ApiRequest['action'];
+  description: string;
+  readOnly: boolean;
+  fixed?: Record<string, unknown>;
+}
+
+export function useWebMcpTools(options: WebMcpOptions) {
+  useEffect(() => {
+    if (typeof document.modelContext?.registerTool !== 'function') return;
+    const controller = new AbortController();
+    const fixed = options.dashboardId
+      ? {
+          dashboardId: options.dashboardId,
+          ...(options.shareToken ? { shareToken: options.shareToken } : {}),
+        }
+      : {};
+    const viewTools: ToolSpec[] = [
+      ...(!options.shareToken
+        ? ([
+            {
+              action: 'listDashboards',
+              description:
+                'List dashboards the signed-in user can see. Returns ids, names, widget counts, and update times.',
+              readOnly: true,
+            },
+          ] satisfies ToolSpec[])
+        : []),
+      ...(options.dashboardId
+        ? ([
+            {
+              action: 'getDashboard',
+              description:
+                'Read the open dashboard, including widget definitions, controls, current layout, timezone, and datasource names.',
+              readOnly: true,
+              fixed,
+            },
+            {
+              action: 'queryWidget',
+              description:
+                'Run a stored widget from the open dashboard with optional dashboard control state. Viewers cannot submit SQL or field names. Returns rows and applied control state.',
+              readOnly: true,
+              fixed,
+            },
+            {
+              action: 'explainWidget',
+              description:
+                'Explain a stored widget from the open dashboard. Returns compiled SQL and the formula definitions used by its metrics.',
+              readOnly: true,
+              fixed,
+            },
+            {
+              action: 'getControlOptions',
+              description:
+                'Get up to 100 selectable values for one control on the open dashboard, optionally narrowed by search.',
+              readOnly: true,
+              fixed,
+            },
+            {
+              action: 'describeDatasource',
+              description:
+                'Describe a datasource used by the open dashboard. Returns visible fields, semantics, samples, calculated fields, and applicable library metrics.',
+              readOnly: true,
+              fixed,
+            },
+          ] satisfies ToolSpec[])
+        : []),
+      ...(options.isAdmin
+        ? ([
+            {
+              action: 'listDataSources',
+              description: 'List datasources registered in the active workspace.',
+              readOnly: true,
+            },
+          ] satisfies ToolSpec[])
+        : []),
+    ];
+    const editTools: ToolSpec[] =
+      options.canEdit && options.dashboardId
+        ? [
+            {
+              action: 'updateDashboard',
+              description: 'Update the open dashboard name, timezone, or default date range.',
+              readOnly: false,
+              fixed,
+            },
+            {
+              action: 'addWidget',
+              description:
+                'Validate and append a widget to the open dashboard. Provide its full definition and size. Rundown computes its coordinates.',
+              readOnly: false,
+              fixed,
+            },
+            {
+              action: 'updateWidget',
+              description:
+                'Replace a widget definition on the open dashboard after reading it with getDashboard.',
+              readOnly: false,
+              fixed,
+            },
+            {
+              action: 'removeWidget',
+              description: 'Permanently remove a widget from the open dashboard.',
+              readOnly: false,
+              fixed,
+            },
+            {
+              action: 'moveWidget',
+              description:
+                'Move or resize a widget on the open dashboard. The placement must stay inside the grid and cannot overlap.',
+              readOnly: false,
+              fixed,
+            },
+            {
+              action: 'copyWidget',
+              description:
+                'Copy a widget from another visible dashboard into the open dashboard. Optionally select a target datasource; referenced fields are remapped by canonical name.',
+              readOnly: false,
+              fixed,
+            },
+            {
+              action: 'previewWidget',
+              description: 'Compile and run an unsaved widget definition without storing it.',
+              readOnly: true,
+              fixed,
+            },
+            {
+              action: 'upsertCalculatedField',
+              description:
+                'Create or update a row-level DuckDB calculated field after compile and tenant-isolation validation.',
+              readOnly: false,
+              fixed,
+            },
+            {
+              action: 'upsertLibraryMetric',
+              description:
+                'Create or update a workspace aggregate metric written against canonical field names.',
+              readOnly: false,
+              fixed,
+            },
+            {
+              action: 'shareDashboard',
+              description:
+                'Create or revoke an unlisted link, or grant or revoke a user role on the open dashboard. This changes access.',
+              readOnly: false,
+              fixed,
+            },
+          ]
+        : [];
+    const createTools: ToolSpec[] = options.canCreate
+      ? [
+          {
+            action: 'createDashboard',
+            description:
+              'Create a dashboard in the active workspace. This stores a new dashboard and grants the creator editor access.',
+            readOnly: false,
+          },
+        ]
+      : [];
+    const adminTools: ToolSpec[] = options.isAdmin
+      ? [
+          {
+            action: 'listR2Objects',
+            description: 'List R2 objects only under the active workspace prefix.',
+            readOnly: true,
+          },
+          {
+            action: 'registerDatasource',
+            description:
+              'Register an existing R2 CSV or parquet object or prefix. This runs DESCRIBE and seeds field metadata.',
+            readOnly: false,
+          },
+          {
+            action: 'updateFieldMetadata',
+            description:
+              'Update field semantics, label, canonical name, visibility, description, or cast override.',
+            readOnly: false,
+          },
+          ...(!options.dashboardId
+            ? ([
+                {
+                  action: 'upsertLibraryMetric',
+                  description:
+                    'Create or update a workspace aggregate metric written against canonical field names.',
+                  readOnly: false,
+                },
+              ] satisfies ToolSpec[])
+            : []),
+        ]
+      : [];
+    for (const spec of [...viewTools, ...createTools, ...editTools, ...adminTools]) {
+      const registration = document.modelContext.registerTool(
+        {
+          name: spec.action,
+          description: spec.description,
+          inputSchema: inputSchemaFor(spec.action, spec.fixed),
+          annotations: { readOnlyHint: spec.readOnly },
+          execute: async (input) => {
+            const request = apiRequestSchema.parse({
+              action: spec.action,
+              ...spec.fixed,
+              ...input,
+            });
+            const result = await callApi(request);
+            if (!spec.readOnly) await options.onMutation?.();
+            return result;
+          },
+        },
+        { signal: controller.signal },
+      );
+      void registration.catch((error: unknown) =>
+        console.warn('WebMCP tool registration failed', spec.action, error),
+      );
+    }
+    return () => controller.abort();
+  }, [
+    options.dashboardId,
+    options.shareToken,
+    options.canCreate,
+    options.canEdit,
+    options.isAdmin,
+    options.onMutation,
+  ]);
+}
+
+export function inputSchemaFor(action: ApiRequest['action'], fixed?: Record<string, unknown>) {
+  const option = apiRequestSchema.options.find((schema) => schema.shape.action.value === action);
+  if (!option) throw new Error(`No API schema exists for ${action}.`);
+  const json = z.toJSONSchema(option, {
+    target: 'draft-07',
+    unrepresentable: 'any',
+  });
+  const removed = new Set(['action', ...Object.keys(fixed ?? {})]);
+  if (json.properties) for (const key of removed) delete json.properties[key];
+  if (json.required) json.required = json.required.filter((key) => !removed.has(key));
+  return json as Record<string, unknown>;
+}

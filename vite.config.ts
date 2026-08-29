@@ -5,11 +5,17 @@ import viteReact from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  build: {
+    minify: 'oxc',
+  },
   resolve: {
     tsconfigPaths: true,
   },
   plugins: [
-    cloudflare({ viteEnvironment: { name: 'ssr' } }),
+    cloudflare({
+      viteEnvironment: { name: 'ssr' },
+      auxiliaryWorkers: [{ configPath: './query-worker/wrangler.jsonc' }],
+    }),
     tailwindcss(),
     tanstackStart(),
     viteReact(),

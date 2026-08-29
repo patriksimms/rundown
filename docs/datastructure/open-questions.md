@@ -6,7 +6,8 @@ Items from the whiteboard that discovery settled are recorded inline in the othe
 
 - Nested filter groups. Deferred; one connector per filter for now. Revisit when a real dashboard needs `(a OR b) AND c`.
 - Compatible types for control matching by canonical name. Proposal: same `semanticType`, or both `text`. Confirm once the first cross-datasource dashboard exists.
-- `countDistinct` on large datasets may time out in DuckDB wasm. Decide whether to expose `approxCountDistinct` as an aggregation.
+- `countDistinct` on large datasets may be expensive in the query Worker. Decide whether to
+  expose `approxCountDistinct` after observing real dashboards.
 
 ## Datasource
 
@@ -21,5 +22,5 @@ Items from the whiteboard that discovery settled are recorded inline in the othe
 
 ## Verification pending
 
-- ducklings `EXPLAIN` output prints file paths (needed for expression isolation, see [datasource.md](./datasource.md)).
 - Clerk Organizations are available on the current Clerk plan.
+- First-query latency and decoded datasource memory use within the 128 MB Worker isolate limit.

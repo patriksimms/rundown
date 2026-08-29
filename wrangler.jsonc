@@ -2,9 +2,16 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "rundown",
   "account_id": "17c619232f5d84567cd69896e892f326",
-  "main": "@tanstack/react-start/server-entry",
+  "main": "src/server.ts",
   "compatibility_date": "2026-08-29",
   "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "CLOUDFLARE_ACCOUNT_ID": "17c619232f5d84567cd69896e892f326",
+    "R2_BUCKET_NAME": "rundown-data",
+  },
+  "secrets": {
+    "required": ["CLERK_SECRET_KEY"],
+  },
   "d1_databases": [
     {
       "binding": "DB",
@@ -26,6 +33,12 @@
       "binding": "DATA",
       "bucket_name": "rundown-data",
       "preview_bucket_name": "rundown-data-preview",
+    },
+  ],
+  "services": [
+    {
+      "binding": "QUERY_ENGINE",
+      "service": "rundown-query",
     },
   ],
   "observability": {
@@ -50,6 +63,14 @@
   "env": {
     "preview": {
       "name": "rundown-preview",
+      "routes": [],
+      "vars": {
+        "CLOUDFLARE_ACCOUNT_ID": "17c619232f5d84567cd69896e892f326",
+        "R2_BUCKET_NAME": "rundown-data-preview",
+      },
+      "secrets": {
+        "required": ["CLERK_SECRET_KEY"],
+      },
       "d1_databases": [
         {
           "binding": "DB",
@@ -68,6 +89,12 @@
         {
           "binding": "DATA",
           "bucket_name": "rundown-data-preview",
+        },
+      ],
+      "services": [
+        {
+          "binding": "QUERY_ENGINE",
+          "service": "rundown-query-preview",
         },
       ],
     },

@@ -59,7 +59,8 @@ The server derives the workspace from `dashboardId`. Revoking sets `revokedAt`; 
 
 | Action | admin | editor grant | viewer grant | share link |
 |---|---|---|---|---|
-| Register datasource, edit lookup table, library metrics | yes | no | no | no |
+| Register datasource, edit lookup table | yes | no | no | no |
+| Create or edit library metrics | yes | yes | no | no |
 | Create dashboard | yes | yes (any member) | no | no |
 | Edit widgets, calculated fields used by the dashboard | yes | yes | no | no |
 | Manage grants and share links | yes | yes | no | no |
