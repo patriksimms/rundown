@@ -10,14 +10,23 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as DatasourcesRouteImport } from './routes/datasources'
 import { Route as HealthRouteImport } from './routes/health'
 import { Route as ReadyRouteImport } from './routes/ready'
+import { Route as ApiRundownRouteImport } from './routes/api.rundown'
+import { Route as DashboardsDashboardIdRouteImport } from './routes/dashboards.$dashboardId'
+import { Route as ShareTokenRouteImport } from './routes/share.$token'
 import { Route as SignInSplatRouteImport } from './routes/sign-in.$'
 import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DatasourcesRoute = DatasourcesRouteImport.update({
+  id: '/datasources',
+  path: '/datasources',
   getParentRoute: () => rootRouteImport,
 } as any)
 const HealthRoute = HealthRouteImport.update({
@@ -28,6 +37,21 @@ const HealthRoute = HealthRouteImport.update({
 const ReadyRoute = ReadyRouteImport.update({
   id: '/ready',
   path: '/ready',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiRundownRoute = ApiRundownRouteImport.update({
+  id: '/api/rundown',
+  path: '/api/rundown',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DashboardsDashboardIdRoute = DashboardsDashboardIdRouteImport.update({
+  id: '/dashboards/$dashboardId',
+  path: '/dashboards/$dashboardId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ShareTokenRoute = ShareTokenRouteImport.update({
+  id: '/share/$token',
+  path: '/share/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SignInSplatRoute = SignInSplatRouteImport.update({
@@ -43,38 +67,82 @@ const SignUpSplatRoute = SignUpSplatRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/datasources': typeof DatasourcesRoute
   '/health': typeof HealthRoute
   '/ready': typeof ReadyRoute
+  '/api/rundown': typeof ApiRundownRoute
+  '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
+  '/share/$token': typeof ShareTokenRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/datasources': typeof DatasourcesRoute
   '/health': typeof HealthRoute
   '/ready': typeof ReadyRoute
+  '/api/rundown': typeof ApiRundownRoute
+  '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
+  '/share/$token': typeof ShareTokenRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/datasources': typeof DatasourcesRoute
   '/health': typeof HealthRoute
   '/ready': typeof ReadyRoute
+  '/api/rundown': typeof ApiRundownRoute
+  '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
+  '/share/$token': typeof ShareTokenRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/health' | '/ready' | '/sign-in/$' | '/sign-up/$'
+  fullPaths:
+    | '/'
+    | '/datasources'
+    | '/health'
+    | '/ready'
+    | '/api/rundown'
+    | '/dashboards/$dashboardId'
+    | '/share/$token'
+    | '/sign-in/$'
+    | '/sign-up/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/health' | '/ready' | '/sign-in/$' | '/sign-up/$'
-  id: '__root__' | '/' | '/health' | '/ready' | '/sign-in/$' | '/sign-up/$'
+  to:
+    | '/'
+    | '/datasources'
+    | '/health'
+    | '/ready'
+    | '/api/rundown'
+    | '/dashboards/$dashboardId'
+    | '/share/$token'
+    | '/sign-in/$'
+    | '/sign-up/$'
+  id:
+    | '__root__'
+    | '/'
+    | '/datasources'
+    | '/health'
+    | '/ready'
+    | '/api/rundown'
+    | '/dashboards/$dashboardId'
+    | '/share/$token'
+    | '/sign-in/$'
+    | '/sign-up/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  DatasourcesRoute: typeof DatasourcesRoute
   HealthRoute: typeof HealthRoute
   ReadyRoute: typeof ReadyRoute
+  ApiRundownRoute: typeof ApiRundownRoute
+  DashboardsDashboardIdRoute: typeof DashboardsDashboardIdRoute
+  ShareTokenRoute: typeof ShareTokenRoute
   SignInSplatRoute: typeof SignInSplatRoute
   SignUpSplatRoute: typeof SignUpSplatRoute
 }
@@ -86,6 +154,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/datasources': {
+      id: '/datasources'
+      path: '/datasources'
+      fullPath: '/datasources'
+      preLoaderRoute: typeof DatasourcesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/health': {
@@ -100,6 +175,27 @@ declare module '@tanstack/react-router' {
       path: '/ready'
       fullPath: '/ready'
       preLoaderRoute: typeof ReadyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/rundown': {
+      id: '/api/rundown'
+      path: '/api/rundown'
+      fullPath: '/api/rundown'
+      preLoaderRoute: typeof ApiRundownRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/dashboards/$dashboardId': {
+      id: '/dashboards/$dashboardId'
+      path: '/dashboards/$dashboardId'
+      fullPath: '/dashboards/$dashboardId'
+      preLoaderRoute: typeof DashboardsDashboardIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/share/$token': {
+      id: '/share/$token'
+      path: '/share/$token'
+      fullPath: '/share/$token'
+      preLoaderRoute: typeof ShareTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/sign-in/$': {
@@ -121,8 +217,12 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  DatasourcesRoute: DatasourcesRoute,
   HealthRoute: HealthRoute,
   ReadyRoute: ReadyRoute,
+  ApiRundownRoute: ApiRundownRoute,
+  DashboardsDashboardIdRoute: DashboardsDashboardIdRoute,
+  ShareTokenRoute: ShareTokenRoute,
   SignInSplatRoute: SignInSplatRoute,
   SignUpSplatRoute: SignUpSplatRoute,
 }

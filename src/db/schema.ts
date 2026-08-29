@@ -1,4 +1,11 @@
-import { sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import {
+  index,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core';
 
 export const workspaces = sqliteTable(
   'workspaces',
@@ -13,4 +20,129 @@ export const workspaces = sqliteTable(
     uniqueIndex('workspaces_clerk_organization_id_unique').on(table.clerkOrganizationId),
     uniqueIndex('workspaces_r2_prefix_unique').on(table.r2Prefix),
   ],
+);
+
+export const dataSources = sqliteTable(
+  'data_sources',
+  {
+    id: text().primaryKey(),
+    workspaceId: text('workspace_id').notNull(),
+    name: text().notNull(),
+    location: text({ mode: 'json' }).notNull(),
+    version: text().notNull(),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    index('data_sources_workspace_id_idx').on(table.workspaceId),
+    uniqueIndex('data_sources_workspace_name_unique').on(table.workspaceId, table.name),
+  ],
+);
+
+export const fields = sqliteTable(
+  'fields',
+  {
+    id: text().primaryKey(),
+    workspaceId: text('workspace_id').notNull(),
+    dataSourceId: text('data_source_id').notNull(),
+    columnName: text('column_name').notNull(),
+    canonicalName: text('canonical_name').notNull(),
+    label: text().notNull(),
+    role: text().notNull(),
+    semanticType: text('semantic_type').notNull(),
+    description: text(),
+    hidden: integer({ mode: 'boolean' }).notNull().default(false),
+    castTo: text('cast_to'),
+    sampleValues: text('sample_values', { mode: 'json' }),
+    cardinality: integer(),
+  },
+  (table) => [
+    index('fields_data_source_id_idx').on(table.dataSourceId),
+    uniqueIndex('fields_data_source_column_unique').on(table.dataSourceId, table.columnName),
+    uniqueIndex('fields_data_source_canonical_unique').on(table.dataSourceId, table.canonicalName),
+  ],
+);
+
+export const calculatedFields = sqliteTable(
+  'calculated_fields',
+  {
+    id: text().primaryKey(),
+    workspaceId: text('workspace_id').notNull(),
+    dataSourceId: text('data_source_id').notNull(),
+    canonicalName: text('canonical_name').notNull(),
+    label: text().notNull(),
+    expression: text().notNull(),
+    role: text().notNull(),
+    semanticType: text('semantic_type').notNull(),
+    description: text(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    index('calculated_fields_data_source_id_idx').on(table.dataSourceId),
+    uniqueIndex('calculated_fields_data_source_canonical_unique').on(
+      table.dataSourceId,
+      table.canonicalName,
+    ),
+  ],
+);
+
+export const libraryMetrics = sqliteTable(
+  'library_metrics',
+  {
+    id: text().primaryKey(),
+    workspaceId: text('workspace_id').notNull(),
+    name: text().notNull(),
+    canonicalName: text('canonical_name').notNull(),
+    expression: text().notNull(),
+    semanticType: text('semantic_type').notNull(),
+    description: text(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('library_metrics_workspace_canonical_unique').on(
+      table.workspaceId,
+      table.canonicalName,
+    ),
+  ],
+);
+
+export const dashboards = sqliteTable(
+  'dashboards',
+  {
+    id: text().primaryKey(),
+    workspaceId: text('workspace_id').notNull(),
+    name: text().notNull(),
+    document: text({ mode: 'json' }).notNull(),
+    createdBy: text('created_by').notNull(),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [index('dashboards_workspace_id_idx').on(table.workspaceId)],
+);
+
+export const dashboardGrants = sqliteTable(
+  'dashboard_grants',
+  {
+    dashboardId: text('dashboard_id').notNull(),
+    clerkUserId: text('clerk_user_id').notNull(),
+    role: text().notNull(),
+    grantedBy: text('granted_by').notNull(),
+    grantedAt: text('granted_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.dashboardId, table.clerkUserId] }),
+    index('dashboard_grants_user_id_idx').on(table.clerkUserId),
+  ],
+);
+
+export const shareLinks = sqliteTable(
+  'share_links',
+  {
+    token: text().primaryKey(),
+    dashboardId: text('dashboard_id').notNull(),
+    createdBy: text('created_by').notNull(),
+    createdAt: text('created_at').notNull(),
+    revokedAt: text('revoked_at'),
+  },
+  (table) => [index('share_links_dashboard_id_idx').on(table.dashboardId)],
 );

@@ -2,9 +2,16 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "rundown",
   "account_id": "17c619232f5d84567cd69896e892f326",
-  "main": "@tanstack/react-start/server-entry",
+  "main": "src/server.ts",
   "compatibility_date": "2026-08-29",
   "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "CLOUDFLARE_ACCOUNT_ID": "17c619232f5d84567cd69896e892f326",
+    "R2_BUCKET_NAME": "rundown-data",
+  },
+  "secrets": {
+    "required": ["CLERK_SECRET_KEY", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"],
+  },
   "d1_databases": [
     {
       "binding": "DB",
@@ -26,6 +33,28 @@
       "binding": "DATA",
       "bucket_name": "rundown-data",
       "preview_bucket_name": "rundown-data-preview",
+    },
+  ],
+  "containers": [
+    {
+      "class_name": "QueryEngineContainer",
+      "image": "./Dockerfile",
+      "max_instances": 5,
+      "instance_type": "basic",
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "QUERY_ENGINE",
+        "class_name": "QueryEngineContainer",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["QueryEngineContainer"],
     },
   ],
   "observability": {
@@ -50,6 +79,13 @@
   "env": {
     "preview": {
       "name": "rundown-preview",
+      "vars": {
+        "CLOUDFLARE_ACCOUNT_ID": "17c619232f5d84567cd69896e892f326",
+        "R2_BUCKET_NAME": "rundown-data-preview",
+      },
+      "secrets": {
+        "required": ["CLERK_SECRET_KEY", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"],
+      },
       "d1_databases": [
         {
           "binding": "DB",
@@ -70,6 +106,22 @@
           "bucket_name": "rundown-data-preview",
         },
       ],
+      "containers": [
+        {
+          "class_name": "QueryEngineContainer",
+          "image": "./Dockerfile",
+          "max_instances": 2,
+          "instance_type": "basic",
+        },
+      ],
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "QUERY_ENGINE",
+            "class_name": "QueryEngineContainer",
+          },
+        ],
+      },
     },
   },
 }

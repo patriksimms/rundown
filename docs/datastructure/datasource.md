@@ -138,6 +138,7 @@ The server validates every calculated field and metric expression before storing
 
 1. One expression, no statement separators.
 2. The compiled query passes `EXPLAIN` against the datasource.
-3. The plan scans only the datasource's own files under the workspace prefix.
+3. The authorized datasource is materialized into a temporary table, then external access is
+   disabled before the expression is compiled or run.
 
 Failures return the DuckDB error text to the editor or agent.

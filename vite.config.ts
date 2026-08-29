@@ -9,7 +9,15 @@ export default defineConfig({
     tsconfigPaths: true,
   },
   plugins: [
-    cloudflare({ viteEnvironment: { name: 'ssr' } }),
+    cloudflare({
+      viteEnvironment: { name: 'ssr' },
+      config: (config) => ({
+        dev: {
+          ...config.dev,
+          enable_containers: process.env.RUNDOWN_DISABLE_CONTAINERS !== '1',
+        },
+      }),
+    }),
     tailwindcss(),
     tanstackStart(),
     viteReact(),
