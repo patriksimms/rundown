@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { executeQueryEngineRequest } from './query-engine';
+import { readFile } from 'node:fs/promises';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { createQueryEngine } from './engine';
 
 const environment = {
   CLOUDFLARE_ACCOUNT_ID: 'test',
@@ -7,11 +8,17 @@ const environment = {
   R2_SECRET_ACCESS_KEY: 'test',
 };
 const sourceSql = '(VALUES (1, 10), (2, 20)) AS source(day, spend)';
+let execute: ReturnType<typeof createQueryEngine>;
 
-describe('native query engine', () => {
-  it('materializes an authorized source and binds query parameters', async () => {
+beforeAll(async () => {
+  const bytes = await readFile('node_modules/@ducklings/workers/dist/wasm/duckdb-workers.wasm');
+  execute = createQueryEngine(await WebAssembly.compile(bytes));
+});
+
+describe('Ducklings query engine', () => {
+  it('materializes the authorized source and binds parameters', async () => {
     await expect(
-      executeQueryEngineRequest(
+      execute(
         {
           operation: 'isolatedQuery',
           sourceSql,
@@ -20,12 +27,12 @@ describe('native query engine', () => {
         },
         environment,
       ),
-    ).resolves.toEqual([{ total: '20' }]);
+    ).resolves.toEqual([{ total: 20 }]);
   });
 
-  it('disables external access before compiling user expressions', async () => {
+  it('disables external access before user SQL runs', async () => {
     await expect(
-      executeQueryEngineRequest(
+      execute(
         {
           operation: 'isolatedQuery',
           sourceSql,
@@ -37,12 +44,10 @@ describe('native query engine', () => {
     ).rejects.toThrow(/operations are disabled by configuration/iu);
   });
 
-  it('describes and samples a trusted source', async () => {
-    const result = await executeQueryEngineRequest(
-      { operation: 'describeSource', sourceSql },
-      environment,
-    );
-    expect(result).toMatchObject({
+  it('describes and samples the materialized source', async () => {
+    await expect(
+      execute({ operation: 'describeSource', sourceSql }, environment),
+    ).resolves.toMatchObject({
       description: [
         { column_name: 'day', column_type: 'INTEGER' },
         { column_name: 'spend', column_type: 'INTEGER' },

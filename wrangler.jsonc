@@ -10,7 +10,7 @@
     "R2_BUCKET_NAME": "rundown-data",
   },
   "secrets": {
-    "required": ["CLERK_SECRET_KEY", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"],
+    "required": ["CLERK_SECRET_KEY"],
   },
   "d1_databases": [
     {
@@ -35,26 +35,10 @@
       "preview_bucket_name": "rundown-data-preview",
     },
   ],
-  "containers": [
+  "services": [
     {
-      "class_name": "QueryEngineContainer",
-      "image": "./Dockerfile",
-      "max_instances": 5,
-      "instance_type": "basic",
-    },
-  ],
-  "durable_objects": {
-    "bindings": [
-      {
-        "name": "QUERY_ENGINE",
-        "class_name": "QueryEngineContainer",
-      },
-    ],
-  },
-  "migrations": [
-    {
-      "tag": "v1",
-      "new_sqlite_classes": ["QueryEngineContainer"],
+      "binding": "QUERY_ENGINE",
+      "service": "rundown-query",
     },
   ],
   "observability": {
@@ -79,12 +63,13 @@
   "env": {
     "preview": {
       "name": "rundown-preview",
+      "routes": [],
       "vars": {
         "CLOUDFLARE_ACCOUNT_ID": "17c619232f5d84567cd69896e892f326",
         "R2_BUCKET_NAME": "rundown-data-preview",
       },
       "secrets": {
-        "required": ["CLERK_SECRET_KEY", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"],
+        "required": ["CLERK_SECRET_KEY"],
       },
       "d1_databases": [
         {
@@ -106,22 +91,12 @@
           "bucket_name": "rundown-data-preview",
         },
       ],
-      "containers": [
+      "services": [
         {
-          "class_name": "QueryEngineContainer",
-          "image": "./Dockerfile",
-          "max_instances": 2,
-          "instance_type": "basic",
+          "binding": "QUERY_ENGINE",
+          "service": "rundown-query-preview",
         },
       ],
-      "durable_objects": {
-        "bindings": [
-          {
-            "name": "QUERY_ENGINE",
-            "class_name": "QueryEngineContainer",
-          },
-        ],
-      },
     },
   },
 }

@@ -11,12 +11,7 @@ export default defineConfig({
   plugins: [
     cloudflare({
       viteEnvironment: { name: 'ssr' },
-      config: (config) => ({
-        dev: {
-          ...config.dev,
-          enable_containers: process.env.RUNDOWN_DISABLE_CONTAINERS !== '1',
-        },
-      }),
+      auxiliaryWorkers: [{ configPath: './query-worker/wrangler.jsonc' }],
     }),
     tailwindcss(),
     tanstackStart(),

@@ -1,9 +1,7 @@
-import { getContainer } from '@cloudflare/containers';
 import { env } from 'cloudflare:workers';
 import { compileSourceSql } from './compiler';
+import type { QueryEngineRequest, QueryEngineResponse } from './engine-contract';
 import type { DataSourceRecord } from './types';
-
-type QueryEngineResponse<T> = { ok: true; data: T } | { ok: false; error: string };
 
 export async function runIsolatedPreparedQuery<T extends Record<string, unknown>>(
   dataSource: DataSourceRecord,
@@ -11,7 +9,7 @@ export async function runIsolatedPreparedQuery<T extends Record<string, unknown>
   compile: (sourceTableName: string) => { sql: string; parameters: unknown[] },
 ) {
   const query = compile('rundown_source');
-  return queryEngineRequest<T[]>(dataSource.workspaceId, {
+  return queryEngineRequest<T[]>({
     operation: 'isolatedQuery',
     sourceSql: compileSourceSql(dataSource, bucketName),
     sql: query.sql,
@@ -25,7 +23,7 @@ export async function explainIsolatedQuery(
   sql: string,
   parameters: unknown[] = [],
 ) {
-  return queryEngineRequest<Record<string, unknown>[]>(dataSource.workspaceId, {
+  return queryEngineRequest<Record<string, unknown>[]>({
     operation: 'isolatedQuery',
     sourceSql: compileSourceSql(dataSource, bucketName),
     sql: `EXPLAIN ${sql}`,
@@ -37,14 +35,14 @@ export async function describeDataSource(dataSource: DataSourceRecord, bucketNam
   return queryEngineRequest<{
     description: Array<{ column_name: string; column_type: string }>;
     samples: Record<string, unknown>[];
-  }>(dataSource.workspaceId, {
+  }>({
     operation: 'describeSource',
     sourceSql: compileSourceSql(dataSource, bucketName),
   });
 }
 
-async function queryEngineRequest<T>(workspaceId: string, body: Record<string, unknown>) {
-  const response = await getContainer(env.QUERY_ENGINE, workspaceId).fetch(
+async function queryEngineRequest<T>(body: QueryEngineRequest) {
+  const response = await env.QUERY_ENGINE.fetch(
     new Request('http://query-engine/query', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
