@@ -294,4 +294,37 @@ describe('widget datasource remapping', () => {
       throw new Error('Expected an expression scorecard.');
     expect(definition.metric.source.expression).toBe('COUNT(CAST("day" AS DATE))');
   });
+
+  it('does not rewrite a postfix cast type when a source column has the same name', () => {
+    const definition = remapWidgetDefinition(
+      {
+        type: 'scorecard',
+        title: 'Dated rows',
+        dataSourceId: 'source',
+        dateRangeFieldId: 'source_date',
+        metric: {
+          source: { kind: 'expression', expression: 'COUNT("DateStart"::DATE)' },
+          dataType: 'number',
+        },
+      },
+      {
+        ...source,
+        fields: [
+          ...source.fields,
+          { id: 'source_legacy_date', canonicalName: 'legacy_date', columnName: 'Date' },
+        ],
+      },
+      'target',
+      {
+        fields: [
+          { id: 'target_date', canonicalName: 'date', columnName: 'day' },
+          { id: 'target_legacy_date', canonicalName: 'legacy_date', columnName: 'legacy' },
+        ],
+        calculatedFields: [],
+      },
+    );
+    if (definition.type !== 'scorecard' || definition.metric.source.kind !== 'expression')
+      throw new Error('Expected an expression scorecard.');
+    expect(definition.metric.source.expression).toBe('COUNT("day"::DATE)');
+  });
 });

@@ -133,6 +133,7 @@ const sqlTypeNames = new Set(
     ' ',
   ),
 );
+const sqlTypeModifiers = new Set(['precision', 'varying', 'with', 'without', 'time', 'zone']);
 
 function expressionFieldMap(
   sourceFields: FieldIdentity[],
@@ -187,7 +188,9 @@ function isSqlSyntaxWord(expression: string, index: number, word: string) {
   const following = expression.slice(index + word.length).match(/^\s*(.)/u)?.[1];
   if (following === '(' || following === "'") return true;
   const preceding = expression.slice(0, index).match(/([A-Za-z_][A-Za-z0-9_]*)\s*$/u)?.[1];
-  return preceding?.toLocaleLowerCase('en-US') === 'as' && sqlTypeNames.has(normalized);
+  if (preceding?.toLocaleLowerCase('en-US') === 'as' && sqlTypeNames.has(normalized)) return true;
+  const postfixCast = expression.slice(0, index).match(/::\s*([A-Za-z_][A-Za-z0-9_]*\s*)*$/u);
+  return Boolean(postfixCast && (sqlTypeNames.has(normalized) || sqlTypeModifiers.has(normalized)));
 }
 
 function expressionField(identifier: string, fields: ReadonlyMap<string, ExpressionField[]>) {
