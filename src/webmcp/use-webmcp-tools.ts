@@ -24,6 +24,7 @@ declare global {
 interface WebMcpOptions {
   dashboardId?: string;
   shareToken?: string;
+  canCreate?: boolean;
   canEdit?: boolean;
   isAdmin?: boolean;
   onMutation?: () => void | Promise<void>;
@@ -110,12 +111,6 @@ export function useWebMcpTools(options: WebMcpOptions) {
       options.canEdit && options.dashboardId
         ? [
             {
-              action: 'createDashboard',
-              description:
-                'Create a dashboard in the active workspace. This stores a new dashboard and grants the creator editor access.',
-              readOnly: false,
-            },
-            {
               action: 'updateDashboard',
               description: 'Update the open dashboard name, timezone, or default date range.',
               readOnly: false,
@@ -150,7 +145,8 @@ export function useWebMcpTools(options: WebMcpOptions) {
             },
             {
               action: 'copyWidget',
-              description: 'Copy a widget from another visible dashboard into the open dashboard.',
+              description:
+                'Copy a widget from another visible dashboard into the open dashboard. Optionally select a target datasource; referenced fields are remapped by canonical name.',
               readOnly: false,
               fixed,
             },
@@ -183,6 +179,16 @@ export function useWebMcpTools(options: WebMcpOptions) {
             },
           ]
         : [];
+    const createTools: ToolSpec[] = options.canCreate
+      ? [
+          {
+            action: 'createDashboard',
+            description:
+              'Create a dashboard in the active workspace. This stores a new dashboard and grants the creator editor access.',
+            readOnly: false,
+          },
+        ]
+      : [];
     const adminTools: ToolSpec[] = options.isAdmin
       ? [
           {
@@ -214,7 +220,7 @@ export function useWebMcpTools(options: WebMcpOptions) {
             : []),
         ]
       : [];
-    for (const spec of [...viewTools, ...editTools, ...adminTools]) {
+    for (const spec of [...viewTools, ...createTools, ...editTools, ...adminTools]) {
       const registration = document.modelContext.registerTool(
         {
           name: spec.action,
@@ -242,6 +248,7 @@ export function useWebMcpTools(options: WebMcpOptions) {
   }, [
     options.dashboardId,
     options.shareToken,
+    options.canCreate,
     options.canEdit,
     options.isAdmin,
     options.onMutation,

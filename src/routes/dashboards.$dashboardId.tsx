@@ -22,6 +22,11 @@ interface DashboardPayload {
   dashboard: DashboardDocument;
   role: 'admin' | 'editor' | 'viewer';
   dataSources: Array<{ id: string; name: string }>;
+  sharing?: SharingState;
+}
+interface SharingState {
+  links: Array<{ token: string; url: string; createdAt: string }>;
+  grants: Array<{ clerkUserId: string; role: string; grantedAt: string }>;
 }
 interface DescribedSource {
   id: string;
@@ -52,7 +57,13 @@ function DashboardPage() {
   }, [dashboardId]);
   useEffect(() => void refresh(), [refresh]);
   const canEdit = payload?.role === 'admin' || payload?.role === 'editor';
-  useWebMcpTools({ dashboardId, canEdit, isAdmin: payload?.role === 'admin', onMutation: refresh });
+  useWebMcpTools({
+    dashboardId,
+    canCreate: Boolean(payload),
+    canEdit,
+    isAdmin: payload?.role === 'admin',
+    onMutation: refresh,
+  });
 
   return (
     <AppShell>
@@ -90,7 +101,11 @@ function DashboardPage() {
                   <DashboardFormulas payload={payload} />
                 </TabsContent>
                 <TabsContent value="share" className="pt-4">
-                  <Sharing dashboardId={dashboardId} />
+                  <Sharing
+                    dashboardId={dashboardId}
+                    sharing={payload.sharing ?? { links: [], grants: [] }}
+                    refresh={refresh}
+                  />
                 </TabsContent>
               </Tabs>
             ) : (
@@ -566,18 +581,25 @@ function makeDefinition(input: {
   return { ...base, type: input.type, dimension: { fieldId: input.dimension }, metric, limit: 20 };
 }
 
-function Sharing({ dashboardId }: { dashboardId: string }) {
+function Sharing({
+  dashboardId,
+  sharing,
+  refresh,
+}: {
+  dashboardId: string;
+  sharing: SharingState;
+  refresh: () => Promise<void>;
+}) {
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<'viewer' | 'editor'>('viewer');
-  const [link, setLink] = useState<string>();
   const [message, setMessage] = useState<string>();
   async function createLink() {
-    const result = await callApi<{ url: string }>({
+    await callApi({
       action: 'shareDashboard',
       dashboardId,
       operation: { kind: 'createLink' },
     });
-    setLink(result.url);
+    await refresh();
   }
   async function grant(event: FormEvent) {
     event.preventDefault();
@@ -587,6 +609,24 @@ function Sharing({ dashboardId }: { dashboardId: string }) {
       operation: { kind: 'grant', userEmail: email, role },
     });
     setMessage(`Granted ${role} access to ${email}.`);
+    setEmail('');
+    await refresh();
+  }
+  async function revokeLink(token: string) {
+    await callApi({
+      action: 'shareDashboard',
+      dashboardId,
+      operation: { kind: 'revokeLink', token },
+    });
+    await refresh();
+  }
+  async function revokeGrant(userId: string) {
+    await callApi({
+      action: 'shareDashboard',
+      dashboardId,
+      operation: { kind: 'revoke', userId },
+    });
+    await refresh();
   }
   return (
     <div className="max-w-2xl">
@@ -594,15 +634,23 @@ function Sharing({ dashboardId }: { dashboardId: string }) {
       <p className="mt-1 text-sm text-muted-foreground">
         Links are read-only. User grants require a Clerk account.
       </p>
-      <div className="my-6">
+      <div className="my-6 space-y-4">
         <Button onClick={createLink}>Create unlisted link</Button>
-        {link ? (
-          <p className="mt-3 break-all text-sm">
-            <a className="underline" href={link}>
-              {link}
+        {sharing.links.map((link) => (
+          <div className="flex items-center gap-3" key={link.token}>
+            <a className="min-w-0 flex-1 break-all text-sm underline" href={link.url}>
+              {link.url}
             </a>
-          </p>
-        ) : null}
+            <Button
+              aria-label="Revoke unlisted link"
+              size="icon-sm"
+              variant="ghost"
+              onClick={() => revokeLink(link.token)}
+            >
+              <Trash2Icon />
+            </Button>
+          </div>
+        ))}
       </div>
       <Separator />
       <form className="mt-6" onSubmit={grant}>
@@ -631,6 +679,25 @@ function Sharing({ dashboardId }: { dashboardId: string }) {
           {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
         </FieldGroup>
       </form>
+      {sharing.grants.length ? (
+        <div className="mt-8 space-y-3">
+          <h3 className="text-sm font-medium">People with access</h3>
+          {sharing.grants.map((grant) => (
+            <div className="flex items-center gap-3 text-sm" key={grant.clerkUserId}>
+              <span className="min-w-0 flex-1 truncate font-mono">{grant.clerkUserId}</span>
+              <span className="text-muted-foreground">{grant.role}</span>
+              <Button
+                aria-label={`Revoke ${grant.clerkUserId}`}
+                size="icon-sm"
+                variant="ghost"
+                onClick={() => revokeGrant(grant.clerkUserId)}
+              >
+                <Trash2Icon />
+              </Button>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

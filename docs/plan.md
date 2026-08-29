@@ -243,7 +243,7 @@ Input schemas are JSON Schema `type: object` documents generated from the same z
 
 1. Resolved: Ducklings ran the representative query, but `EXPLAIN` did not expose source paths and
    the final Worker was 10.93 MiB compressed. The implementation uses the planned Bun container and
-   temporary-table isolation fallback. The deployable Worker bundle is 734 KiB compressed.
+   temporary-table isolation fallback. The deployable Worker bundle is 736 KiB compressed.
 2. ChatGPT desktop browser discovering tools on a Clerk-authenticated TanStack Start page, including after client-side navigation. Register tools after hydration, re-register on route change.
 3. Memory. A 200-column, 30k-row export is a few MB and fits the 1 GiB `basic` query container. Source
    materialization still means memory grows with the decoded datasource; observe production queries

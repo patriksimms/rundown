@@ -79,7 +79,7 @@ function DashboardIndex() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
-  useWebMcpTools({ isAdmin: data?.isAdmin, onMutation: refresh });
+  useWebMcpTools({ canCreate: Boolean(data), isAdmin: data?.isAdmin, onMutation: refresh });
   async function create(event: FormEvent) {
     event.preventDefault();
     if (!name.trim()) return;

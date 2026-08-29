@@ -59,6 +59,7 @@ export const apiRequestSchema = z.discriminatedUnion('action', [
     dashboardId: z.string().min(1),
     fromDashboardId: z.string().min(1),
     widgetId: z.string().min(1),
+    targetDataSourceId: z.string().min(1).optional(),
   }),
   z.object({
     action: z.literal('previewWidget'),
@@ -139,7 +140,11 @@ export const apiRequestSchema = z.discriminatedUnion('action', [
         userEmail: z.email(),
         role: z.enum(['editor', 'viewer']),
       }),
-      z.object({ kind: z.literal('revoke'), userEmail: z.email() }),
+      z.object({
+        kind: z.literal('revoke'),
+        userEmail: z.email().optional(),
+        userId: z.string().min(1).optional(),
+      }),
     ]),
   }),
 ]);

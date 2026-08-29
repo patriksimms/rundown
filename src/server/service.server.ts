@@ -24,6 +24,9 @@ import {
 import { appendPlacement, placementFits } from '#/domain/layout';
 import { hashJson } from '#/domain/hash';
 import { comparisonDateRange } from '#/domain/dates';
+import { widgetDependencyState } from '#/domain/cache';
+import { remapWidgetDefinition } from '#/domain/remap';
+import { mergeControlState } from '#/domain/control-state';
 import { isWorkspaceR2Key, scopedR2Prefix } from '#/domain/tenancy';
 import {
   assertSingleExpression,
@@ -43,6 +46,29 @@ import { loadDashboard, loadDataSource, loadQueryMetadata } from './records.serv
 const database = () => createDatabase(env.DB);
 
 export async function executeRequest(request: ApiRequest): Promise<unknown> {
+  const startedAt = Date.now();
+  try {
+    const result = await dispatchRequest(request);
+    console.info('rundown.request', {
+      action: request.action,
+      result: 'success',
+      durationMs: Date.now() - startedAt,
+      ...safeRequestIdentifiers(request),
+    });
+    return result;
+  } catch (error) {
+    console.warn('rundown.request', {
+      action: request.action,
+      result: 'error',
+      durationMs: Date.now() - startedAt,
+      errorCode: error instanceof ApiError ? error.code : 'unexpected_error',
+      ...safeRequestIdentifiers(request),
+    });
+    throw error;
+  }
+}
+
+async function dispatchRequest(request: ApiRequest): Promise<unknown> {
   switch (request.action) {
     case 'bootstrap':
       return bootstrap();
@@ -152,6 +178,9 @@ async function getDashboard(id: string, shareToken?: string) {
     role: access.role,
     dataSources: sources,
     controlState: defaultControlState(access.document),
+    ...(access.role === 'admin' || access.role === 'editor'
+      ? { sharing: await sharingState(access.document.id) }
+      : {}),
   };
 }
 
@@ -317,12 +346,41 @@ async function copyWidget(request: Extract<ApiRequest, { action: 'copyWidget' }>
   const target = await authorizeDashboard(request.dashboardId, 'editor');
   const source = await authorizeDashboard(request.fromDashboardId, 'viewer');
   const original = widgetById(source.document, request.widgetId);
-  if ('dataSourceId' in original.definition)
-    await loadDataSource(original.definition.dataSourceId, target.document.workspaceId);
+  let definition = original.definition;
+  if ('dataSourceId' in original.definition) {
+    const sourceDataSource = await loadDataSource(
+      original.definition.dataSourceId,
+      source.document.workspaceId,
+    );
+    const targetDataSource = await loadDataSource(
+      request.targetDataSourceId ?? original.definition.dataSourceId,
+      target.document.workspaceId,
+    );
+    if (sourceDataSource.id !== targetDataSource.id) {
+      const [sourceMetadata, targetMetadata] = await Promise.all([
+        loadQueryMetadata(sourceDataSource.id, source.document.workspaceId),
+        loadQueryMetadata(targetDataSource.id, target.document.workspaceId),
+      ]);
+      try {
+        definition = remapWidgetDefinition(
+          original.definition,
+          sourceMetadata,
+          targetDataSource.id,
+          targetMetadata,
+        );
+      } catch (error) {
+        throw new ApiError(
+          400,
+          'canonical_field_missing',
+          error instanceof Error ? error.message : 'The target datasource is not compatible.',
+        );
+      }
+    }
+  }
   return addWidget({
     action: 'addWidget',
     dashboardId: target.document.id,
-    definition: original.definition,
+    definition,
     width: original.layout.width,
     height: original.layout.height,
   });
@@ -342,7 +400,8 @@ async function queryWidget(
 ) {
   const access = await authorizeDashboard(dashboardId, 'viewer', shareToken);
   const widget = widgetById(access.document, widgetId);
-  const controlState = validateControlState(access.document, state ?? {});
+  const defaults = defaultControlState(access.document);
+  const controlState = validateControlState(access.document, mergeControlState(defaults, state));
   if (!('dataSourceId' in widget.definition)) return { rows: [], controlState };
   const dataSource = await loadDataSource(
     widget.definition.dataSourceId,
@@ -355,13 +414,18 @@ async function queryWidget(
     [...metadata.fields, ...metadata.calculatedFields],
     controlState,
   );
+  const currentDefinitionHash = await hashJson(widgetDependencyState(widget.definition, metadata));
   const cacheKey = await hashJson({
-    definitionHash: widget.definitionHash,
+    definitionHash: currentDefinitionHash,
     controlState: normalize({ dateRange: controlState.dateRange, values: resolvedControls }),
     dataSourceVersion: dataSource.version,
   });
   const cached = await env.QUERY_CACHE.get(cacheKey, 'json');
-  if (cached) return { ...(cached as object), cache: 'hit' };
+  if (cached) {
+    console.info('rundown.query_cache', { dashboardId, widgetId, outcome: 'hit' });
+    return { ...(cached as object), cache: 'hit' };
+  }
+  console.info('rundown.query_cache', { dashboardId, widgetId, outcome: 'miss' });
   const run = (queryControlState: ControlState) =>
     runIsolatedPreparedQuery<Record<string, unknown>>(
       dataSource,
@@ -622,11 +686,7 @@ async function upsertCalculatedField(
     env.R2_BUCKET_NAME,
     `SELECT ${request.expression} FROM ${quoteIdentifier('rundown_source')} LIMIT 1`,
   );
-  const id = request.id ?? `calc_${crypto.randomUUID()}`;
-  const values = {
-    id,
-    workspaceId: session.workspace.id,
-    dataSourceId: dataSource.id,
+  const mutableValues = {
     canonicalName: request.canonicalName ?? slug(request.name),
     label: request.name,
     expression: request.expression,
@@ -635,11 +695,31 @@ async function upsertCalculatedField(
     description: request.description ?? null,
     updatedAt: new Date().toISOString(),
   };
-  await database()
-    .insert(calculatedFields)
-    .values(values)
-    .onConflictDoUpdate({ target: calculatedFields.id, set: values });
-  return values;
+  const db = database();
+  if (request.id) {
+    const [updated] = await db
+      .update(calculatedFields)
+      .set(mutableValues)
+      .where(
+        and(
+          eq(calculatedFields.id, request.id),
+          eq(calculatedFields.workspaceId, session.workspace.id),
+          eq(calculatedFields.dataSourceId, dataSource.id),
+        ),
+      )
+      .returning();
+    if (!updated)
+      throw new ApiError(404, 'calculated_field_not_found', 'Calculated field not found.');
+    return updated;
+  }
+  const values = {
+    id: `calc_${crypto.randomUUID()}`,
+    workspaceId: session.workspace.id,
+    dataSourceId: dataSource.id,
+    ...mutableValues,
+  };
+  const [created] = await db.insert(calculatedFields).values(values).returning();
+  return created;
 }
 
 async function upsertLibraryMetric(
@@ -683,10 +763,7 @@ async function upsertLibraryMetric(
       'metric_not_applicable',
       'No datasource contains every canonical field referenced by this metric.',
     );
-  const id = request.id ?? `metric_${crypto.randomUUID()}`;
-  const values = {
-    id,
-    workspaceId: session.workspace.id,
+  const mutableValues = {
     name: request.name,
     canonicalName: request.canonicalName ?? slug(request.name),
     expression: request.expression,
@@ -694,11 +771,28 @@ async function upsertLibraryMetric(
     description: request.description ?? null,
     updatedAt: new Date().toISOString(),
   };
-  await database()
-    .insert(libraryMetrics)
-    .values(values)
-    .onConflictDoUpdate({ target: libraryMetrics.id, set: values });
-  return values;
+  const db = database();
+  if (request.id) {
+    const [updated] = await db
+      .update(libraryMetrics)
+      .set(mutableValues)
+      .where(
+        and(
+          eq(libraryMetrics.id, request.id),
+          eq(libraryMetrics.workspaceId, session.workspace.id),
+        ),
+      )
+      .returning();
+    if (!updated) throw new ApiError(404, 'library_metric_not_found', 'Library metric not found.');
+    return updated;
+  }
+  const values = {
+    id: `metric_${crypto.randomUUID()}`,
+    workspaceId: session.workspace.id,
+    ...mutableValues,
+  };
+  const [created] = await db.insert(libraryMetrics).values(values).returning();
+  return created;
 }
 
 async function shareDashboard(request: Extract<ApiRequest, { action: 'shareDashboard' }>) {
@@ -728,13 +822,13 @@ async function shareDashboard(request: Extract<ApiRequest, { action: 'shareDashb
         ),
       );
   } else {
-    const users = await clerkClient().users.getUserList({
-      emailAddress: [request.operation.userEmail],
-      limit: 2,
-    });
-    const user = users.data[0];
-    if (!user) throw new ApiError(404, 'user_not_found', 'No Clerk user has that email address.');
     if (request.operation.kind === 'grant') {
+      const users = await clerkClient().users.getUserList({
+        emailAddress: [request.operation.userEmail],
+        limit: 2,
+      });
+      const user = users.data[0];
+      if (!user) throw new ApiError(404, 'user_not_found', 'No Clerk user has that email address.');
       const values = {
         dashboardId: request.dashboardId,
         clerkUserId: user.id,
@@ -750,12 +844,22 @@ async function shareDashboard(request: Extract<ApiRequest, { action: 'shareDashb
           set: values,
         });
     } else {
+      let userId = request.operation.userId;
+      if (!userId && request.operation.userEmail) {
+        const users = await clerkClient().users.getUserList({
+          emailAddress: [request.operation.userEmail],
+          limit: 2,
+        });
+        userId = users.data[0]?.id;
+      }
+      if (!userId)
+        throw new ApiError(400, 'user_reference_required', 'Provide a user id or email to revoke.');
       await db
         .delete(dashboardGrants)
         .where(
           and(
             eq(dashboardGrants.dashboardId, request.dashboardId),
-            eq(dashboardGrants.clerkUserId, user.id),
+            eq(dashboardGrants.clerkUserId, userId),
           ),
         );
     }
@@ -947,13 +1051,7 @@ async function compiledSql(dashboard: DashboardDocument, widget: DashboardWidget
 async function definitionHash(definition: WidgetDefinition, workspaceId: string) {
   if (!('dataSourceId' in definition)) return hashJson(definition);
   const metadata = await loadQueryMetadata(definition.dataSourceId, workspaceId);
-  const ids = new Set(definitionFieldIds(definition));
-  const libraryIds = new Set(widgetLibraryMetricIds(definition));
-  return hashJson({
-    definition,
-    calculatedFields: metadata.calculatedFields.filter((field) => ids.has(field.id)),
-    libraryMetrics: metadata.libraryMetrics.filter((metric) => libraryIds.has(metric.id)),
-  });
+  return hashJson(widgetDependencyState(definition, metadata));
 }
 
 function validateControlState(dashboard: DashboardDocument, input: ControlState) {
@@ -1036,18 +1134,6 @@ function definitionFieldIds(definition: WidgetDefinition) {
   return ids;
 }
 
-function widgetLibraryMetricIds(definition: WidgetDefinition) {
-  const metrics =
-    'metric' in definition
-      ? [definition.metric]
-      : 'metrics' in definition
-        ? definition.metrics
-        : [];
-  return metrics.flatMap((metric) =>
-    metric.source.kind === 'library' ? [metric.source.libraryMetricId] : [],
-  );
-}
-
 function seedField(
   dataSourceId: string,
   column: { column_name: string; column_type: string },
@@ -1091,6 +1177,14 @@ async function sharingState(dashboardId: string) {
     database().select().from(dashboardGrants).where(eq(dashboardGrants.dashboardId, dashboardId)),
   ]);
   return { links: links.map((link) => ({ ...link, url: `/share/${link.token}` })), grants };
+}
+
+function safeRequestIdentifiers(request: ApiRequest) {
+  return {
+    ...('dashboardId' in request ? { dashboardId: request.dashboardId } : {}),
+    ...('widgetId' in request ? { widgetId: request.widgetId } : {}),
+    ...('dataSourceId' in request ? { dataSourceId: request.dataSourceId } : {}),
+  };
 }
 
 function randomToken() {
