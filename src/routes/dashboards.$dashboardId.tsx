@@ -26,7 +26,13 @@ interface DashboardPayload {
 }
 interface SharingState {
   links: Array<{ token: string; url: string; createdAt: string }>;
-  grants: Array<{ clerkUserId: string; role: string; grantedAt: string }>;
+  grants: Array<{
+    clerkUserId: string;
+    userEmail?: string;
+    displayName?: string;
+    role: string;
+    grantedAt: string;
+  }>;
 }
 interface DescribedSource {
   id: string;
@@ -684,7 +690,10 @@ function Sharing({
           <h3 className="text-sm font-medium">People with access</h3>
           {sharing.grants.map((grant) => (
             <div className="flex items-center gap-3 text-sm" key={grant.clerkUserId}>
-              <span className="min-w-0 flex-1 truncate font-mono">{grant.clerkUserId}</span>
+              <span className="min-w-0 flex-1 truncate">
+                {grant.displayName ? `${grant.displayName} · ` : ''}
+                {grant.userEmail ?? grant.clerkUserId}
+              </span>
               <span className="text-muted-foreground">{grant.role}</span>
               <Button
                 aria-label={`Revoke ${grant.clerkUserId}`}

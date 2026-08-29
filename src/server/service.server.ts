@@ -1176,7 +1176,29 @@ async function sharingState(dashboardId: string) {
       .where(and(eq(shareLinks.dashboardId, dashboardId), isNull(shareLinks.revokedAt))),
     database().select().from(dashboardGrants).where(eq(dashboardGrants.dashboardId, dashboardId)),
   ]);
-  return { links: links.map((link) => ({ ...link, url: `/share/${link.token}` })), grants };
+  const userPages = await Promise.all(
+    chunk(grants, 100).map((page) =>
+      clerkClient().users.getUserList({
+        userId: page.map((grant) => grant.clerkUserId),
+        limit: page.length,
+      }),
+    ),
+  );
+  const userById = new Map(userPages.flatMap((page) => page.data).map((user) => [user.id, user]));
+  return {
+    links: links.map((link) => ({ ...link, url: `/share/${link.token}` })),
+    grants: grants.map((grant) => {
+      const user = userById.get(grant.clerkUserId);
+      return {
+        ...grant,
+        userEmail: user?.primaryEmailAddress?.emailAddress ?? user?.emailAddresses[0]?.emailAddress,
+        displayName:
+          [user?.firstName, user?.lastName].filter(Boolean).join(' ') ||
+          user?.username ||
+          undefined,
+      };
+    }),
+  };
 }
 
 function safeRequestIdentifiers(request: ApiRequest) {
@@ -1185,6 +1207,12 @@ function safeRequestIdentifiers(request: ApiRequest) {
     ...('widgetId' in request ? { widgetId: request.widgetId } : {}),
     ...('dataSourceId' in request ? { dataSourceId: request.dataSourceId } : {}),
   };
+}
+
+function chunk<T>(values: T[], size: number) {
+  return Array.from({ length: Math.ceil(values.length / size) }, (_, index) =>
+    values.slice(index * size, (index + 1) * size),
+  );
 }
 
 function randomToken() {

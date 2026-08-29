@@ -58,7 +58,7 @@ bun run db:migrate:production
 
 ## Cloudflare deployment
 
-The app is available at [rundown.rundown.workers.dev](https://rundown.rundown.workers.dev). Cloudflare deploys every push to `main`; pushes to other branches create preview versions.
+The app is available at [rundown.rundown.workers.dev](https://rundown.rundown.workers.dev). Cloudflare deploys every push to `main`. Container Workers use Durable Objects, so non-production branches run a deploy dry run instead of creating preview versions.
 
 The GitHub repository is connected with these Workers Builds settings:
 
@@ -66,11 +66,12 @@ The GitHub repository is connected with these Workers Builds settings:
 Production branch: main
 Build command: bun run check && bun run build
 Deploy command: bun run deploy:built
+Non-production deploy command: npx wrangler deploy --dry-run
 ```
 
-Set the `BUN_VERSION` build variable to `1.3.10`. Enable non-production branch builds to create preview versions for pull requests.
+Set the `BUN_VERSION` build variable to `1.3.10`. Enable non-production branch builds to validate pull requests without uploading a Worker version.
 
-Set `CLOUDFLARE_ENV=preview` for non-production branch builds. Cloudflare does not select separate bindings for branch previews automatically. The named preview environment binds the preview D1 database, KV namespace, and R2 bucket.
+The named preview environment remains available for deliberate preview deployments with `bun run deploy:preview`, but is not used by pull-request checks. Cloudflare cannot create preview URLs for Workers that implement Durable Objects or Containers.
 
 Each environment needs these secrets:
 

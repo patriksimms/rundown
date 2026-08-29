@@ -3,12 +3,18 @@ import { widgetDefinitionSchema, type WidgetDefinition } from './schema';
 interface FieldIdentity {
   id: string;
   canonicalName: string;
+  columnName?: string;
 }
 
 interface RemapMetadata {
   fields: FieldIdentity[];
   calculatedFields: FieldIdentity[];
 }
+
+type Metric = Extract<WidgetDefinition, { type: 'scorecard' }>['metric'];
+type Dimension = Extract<WidgetDefinition, { type: 'line' }>['dimension'];
+type Filter = NonNullable<Extract<WidgetDefinition, { type: 'scorecard' }>['filter']>;
+type Sort = NonNullable<Extract<WidgetDefinition, { type: 'table' }>['sort']>;
 
 export function remapWidgetDefinition(
   definition: WidgetDefinition,
@@ -17,29 +23,153 @@ export function remapWidgetDefinition(
   target: RemapMetadata,
 ) {
   if (!('dataSourceId' in definition)) return definition;
-  const sourceFields = [...source.fields, ...source.calculatedFields];
-  const targetByCanonicalName = new Map(
-    [...target.fields, ...target.calculatedFields].map((field) => [field.canonicalName, field.id]),
-  );
+  const targetByCanonicalName = uniqueCanonicalFields(target);
   const fieldIdMap = new Map(
-    sourceFields.map((field) => [field.id, targetByCanonicalName.get(field.canonicalName)]),
+    [...source.fields, ...source.calculatedFields].map((field) => [
+      field.id,
+      targetByCanonicalName.get(field.canonicalName)?.id,
+    ]),
   );
-
-  function replace(value: unknown): unknown {
-    if (typeof value === 'string' && fieldIdMap.has(value)) {
-      const replacement = fieldIdMap.get(value);
-      if (!replacement) throw new Error(`Target datasource has no canonical field for ${value}.`);
-      return replacement;
-    }
-    if (Array.isArray(value)) return value.map(replace);
-    if (value && typeof value === 'object')
-      return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, replace(child)]));
-    return value;
-  }
-
-  const remapped = widgetDefinitionSchema.parse(replace(definition));
-  return widgetDefinitionSchema.parse({
-    ...remapped,
-    dataSourceId: targetDataSourceId,
+  const columnNameMap = new Map(
+    source.fields.flatMap((field) => {
+      const targetField = targetByCanonicalName.get(field.canonicalName);
+      return field.columnName && targetField?.columnName
+        ? [[field.columnName, targetField.columnName] as const]
+        : [];
+    }),
+  );
+  const fieldId = (id: string) => {
+    const replacement = fieldIdMap.get(id);
+    if (!replacement) throw new Error(`Target datasource has no canonical field for ${id}.`);
+    return replacement;
+  };
+  const filter = (value: Filter | undefined) =>
+    value
+      ? {
+          ...value,
+          conditions: value.conditions.map((condition) => ({
+            ...condition,
+            fieldId: fieldId(condition.fieldId),
+          })),
+        }
+      : undefined;
+  const metric = (value: Metric): Metric => ({
+    ...value,
+    source:
+      value.source.kind === 'field'
+        ? { ...value.source, fieldId: fieldId(value.source.fieldId) }
+        : value.source.kind === 'expression'
+          ? {
+              ...value.source,
+              expression: rewriteSqlIdentifiers(value.source.expression, columnNameMap),
+            }
+          : value.source,
   });
+  const dimension = (value: Dimension): Dimension => ({
+    ...value,
+    fieldId: fieldId(value.fieldId),
+  });
+  const sort = (value: Sort | undefined): Sort | undefined =>
+    value?.map((item) => ({
+      ...item,
+      target:
+        item.target.kind === 'dimension'
+          ? { ...item.target, fieldId: fieldId(item.target.fieldId) }
+          : item.target,
+    }));
+  const common = {
+    ...definition,
+    dataSourceId: targetDataSourceId,
+    ...('dateRangeFieldId' in definition
+      ? { dateRangeFieldId: fieldId(definition.dateRangeFieldId) }
+      : {}),
+    filter: filter(definition.filter),
+  };
+
+  if (definition.type === 'control')
+    return widgetDefinitionSchema.parse({ ...common, fieldId: fieldId(definition.fieldId) });
+  if (definition.type === 'scorecard' || definition.type === 'gauge')
+    return widgetDefinitionSchema.parse({ ...common, metric: metric(definition.metric) });
+  if (definition.type === 'line')
+    return widgetDefinitionSchema.parse({
+      ...common,
+      dimension: dimension(definition.dimension),
+      metrics: definition.metrics.map(metric),
+    });
+  if (definition.type === 'bar' || definition.type === 'pie')
+    return widgetDefinitionSchema.parse({
+      ...common,
+      metric: metric(definition.metric),
+      dimension: dimension(definition.dimension),
+      breakdownDimension: definition.breakdownDimension
+        ? dimension(definition.breakdownDimension)
+        : undefined,
+      sort: sort(definition.sort),
+    });
+  return widgetDefinitionSchema.parse({
+    ...common,
+    dimensions: definition.dimensions.map(dimension),
+    metrics: definition.metrics.map(metric),
+    sort: sort(definition.sort),
+  });
+}
+
+function uniqueCanonicalFields(metadata: RemapMetadata) {
+  const fields = new Map<string, FieldIdentity>();
+  for (const field of [...metadata.fields, ...metadata.calculatedFields]) {
+    if (fields.has(field.canonicalName))
+      throw new Error(`Target datasource has ambiguous canonical field ${field.canonicalName}.`);
+    fields.set(field.canonicalName, field);
+  }
+  return fields;
+}
+
+function rewriteSqlIdentifiers(expression: string, replacements: ReadonlyMap<string, string>) {
+  let result = '';
+  for (let index = 0; index < expression.length;) {
+    const character = expression[index];
+    if (character === "'") {
+      const end = quotedEnd(expression, index, "'");
+      result += expression.slice(index, end);
+      index = end;
+      continue;
+    }
+    if (character === '"') {
+      const end = quotedEnd(expression, index, '"');
+      const identifier = expression.slice(index + 1, end - 1).replaceAll('""', '"');
+      result += quoteIdentifier(replacements.get(identifier) ?? identifier);
+      index = end;
+      continue;
+    }
+    const word = expression.slice(index).match(/^[A-Za-z_][A-Za-z0-9_]*/u)?.[0];
+    if (word) {
+      const replacement = replacements.get(word);
+      result += replacement ? quoteIdentifier(replacement) : word;
+      index += word.length;
+      continue;
+    }
+    result += character;
+    index += 1;
+  }
+  return result;
+}
+
+function quotedEnd(expression: string, start: number, quote: "'" | '"') {
+  let index = start + 1;
+  while (index < expression.length) {
+    if (expression[index] !== quote) {
+      index += 1;
+      continue;
+    }
+    if (expression[index + 1] === quote) {
+      index += 2;
+      continue;
+    }
+    return index + 1;
+  }
+  return expression.length;
+}
+
+function quoteIdentifier(value: string) {
+  return `"${value.replaceAll('"', '""')}"`;
 }
