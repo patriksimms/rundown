@@ -41,6 +41,12 @@
     },
   },
   "upload_source_maps": true,
+  "routes": [
+    {
+      "pattern": "rundown-app.dev",
+      "custom_domain": true
+    }
+  ],
   "env": {
     "preview": {
       "name": "rundown-preview",
