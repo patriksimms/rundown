@@ -1,5 +1,6 @@
 {
   "$schema": "../node_modules/wrangler/config-schema.json",
+  "account_id": "17c619232f5d84567cd69896e892f326",
   "name": "rundown-query",
   "main": "index.ts",
   "compatibility_date": "2026-08-29",
