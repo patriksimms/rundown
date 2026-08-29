@@ -44,8 +44,8 @@
   "routes": [
     {
       "pattern": "rundown-app.dev",
-      "custom_domain": true
-    }
+      "custom_domain": true,
+    },
   ],
   "env": {
     "preview": {
