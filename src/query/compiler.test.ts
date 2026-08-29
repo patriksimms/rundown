@@ -126,6 +126,88 @@ describe('query compiler', () => {
     );
   });
 
+  it('prefers a raw field when a calculated field has the same canonical name', () => {
+    expect(
+      compileLibraryExpression('SUM(media_cost)', {
+        fields,
+        calculatedFields: [
+          {
+            id: 'calculated-cost',
+            dataSourceId: 'source',
+            canonicalName: 'media_cost',
+            label: 'Calculated cost',
+            expression: 'MediaCost * 2',
+            role: 'metric',
+            semanticType: 'currency',
+            description: null,
+          },
+        ],
+      }),
+    ).toBe('SUM("MediaCost")');
+  });
+
+  it('uses the raw field for a stored library metric with a colliding calculated name', () => {
+    const result = compileWidgetQuery({
+      dashboard,
+      definition: {
+        type: 'scorecard',
+        title: 'Cost',
+        dataSourceId: 'source',
+        dateRangeFieldId: 'date',
+        metric: {
+          source: { kind: 'library', libraryMetricId: 'metric' },
+          dataType: 'currency',
+        },
+      },
+      dataSource,
+      fields,
+      calculatedFields: [
+        {
+          id: 'calculated-cost',
+          dataSourceId: 'source',
+          canonicalName: 'media_cost',
+          label: 'Calculated cost',
+          expression: 'MediaCost * 2',
+          role: 'metric',
+          semanticType: 'currency',
+          description: null,
+        },
+      ],
+      libraryMetrics: [
+        {
+          id: 'metric',
+          name: 'Cost',
+          canonicalName: 'cost',
+          expression: 'SUM(media_cost)',
+          semanticType: 'currency',
+          description: null,
+        },
+      ],
+      controlState: {},
+      bucketName: 'bucket',
+      sourceTableName: 'rundown_source',
+    });
+    expect(result.sql).toContain('SELECT SUM("MediaCost") AS "metric_1"');
+  });
+
+  it('rejects a top-level alias while allowing aliases inside string literals', () => {
+    expect(() =>
+      compileLibraryExpression('SUM(media_cost) AS total', { fields, calculatedFields: [] }),
+    ).toThrow(/one SQL expression/u);
+    expect(() =>
+      compileLibraryExpression(`SUM(CASE WHEN campaign = 'AS' THEN media_cost ELSE 0 END)`, {
+        fields,
+        calculatedFields: [],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      compileLibraryExpression('SUM(CAST(media_cost AS DOUBLE))', {
+        fields,
+        calculatedFields: [],
+      }),
+    ).not.toThrow();
+  });
+
   it('rejects statement separators and SQL comments in expressions', () => {
     expect(() => assertSingleExpression('SUM(cost); SELECT 1')).toThrow(/one SQL expression/u);
     expect(() => assertSingleExpression('SUM(cost) -- ignore')).toThrow(/one SQL expression/u);

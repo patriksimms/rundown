@@ -748,6 +748,12 @@ async function upsertLibraryMetric(
 ) {
   const session = await requireSession();
   if (!session.isAdmin) {
+    if (request.id)
+      throw new ApiError(
+        403,
+        'library_metric_admin_required',
+        'Only workspace admins can update library metrics.',
+      );
     if (!request.dashboardId)
       throw new ApiError(
         403,
@@ -766,7 +772,9 @@ async function upsertLibraryMetric(
     const dataSource = await loadDataSource(row.id, session.workspace.id);
     const metadata = await loadQueryMetadata(row.id, session.workspace.id);
     const names = new Set(
-      [...metadata.fields, ...metadata.calculatedFields].map((field) => field.canonicalName),
+      [...metadata.fields, ...metadata.calculatedFields].map((field) =>
+        field.canonicalName.toLocaleLowerCase('en-US'),
+      ),
     );
     if (!referencedSqlIdentifiers(request.expression).every((name) => names.has(name))) continue;
     const expression = compileLibraryExpression(request.expression, metadata);

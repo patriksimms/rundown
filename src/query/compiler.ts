@@ -28,7 +28,7 @@ export interface CompiledQuery {
 }
 
 export function assertSingleExpression(expression: string) {
-  if (expression.includes(';') || /--|\/\*/u.test(expression))
+  if (expression.includes(';') || /--|\/\*/u.test(expression) || hasTopLevelAlias(expression))
     throw new Error('Expressions must contain one SQL expression without comments.');
 }
 
@@ -177,7 +177,7 @@ function fieldById(fieldId: string, context: QueryContext) {
 
 function rewriteCanonicalNames(expression: string, context: QueryContext) {
   const fieldsByCanonicalName = new Map(
-    [...context.fields, ...context.calculatedFields].map((field) => [
+    [...context.calculatedFields, ...context.fields].map((field) => [
       field.canonicalName.toLocaleLowerCase('en-US'),
       field,
     ]),
@@ -194,7 +194,7 @@ export function compileLibraryExpression(
 ) {
   assertSingleExpression(expression);
   const replacements = new Map(
-    [...context.fields, ...context.calculatedFields].map((field) => [
+    [...context.calculatedFields, ...context.fields].map((field) => [
       field.canonicalName.toLocaleLowerCase('en-US'),
       'columnName' in field ? quoteIdentifier(field.columnName) : `(${field.expression})`,
     ]),
@@ -278,4 +278,57 @@ function safeCast(value: string) {
   if (!/^[A-Z][A-Z0-9_]*(?:\([0-9, ]+\))?$/iu.test(value))
     throw new Error(`Invalid cast type ${value}.`);
   return value;
+}
+
+function hasTopLevelAlias(expression: string) {
+  let depth = 0;
+  for (let index = 0; index < expression.length;) {
+    const character = expression[index];
+    if (character === "'" || character === '"') {
+      index = quotedEnd(expression, index, character);
+      continue;
+    }
+    if (character === '$') {
+      const end = dollarQuotedEnd(expression, index);
+      if (end !== undefined) {
+        index = end;
+        continue;
+      }
+    }
+    if (character === '(') depth += 1;
+    else if (character === ')') depth = Math.max(0, depth - 1);
+    else if (depth === 0) {
+      const word = expression.slice(index).match(/^[A-Za-z_][A-Za-z0-9_]*/u)?.[0];
+      if (word) {
+        if (word.toLocaleLowerCase('en-US') === 'as') return true;
+        index += word.length;
+        continue;
+      }
+    }
+    index += 1;
+  }
+  return false;
+}
+
+function dollarQuotedEnd(expression: string, start: number) {
+  const tag = expression.slice(start).match(/^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/u)?.[0];
+  if (!tag) return undefined;
+  const closing = expression.indexOf(tag, start + tag.length);
+  return closing === -1 ? expression.length : closing + tag.length;
+}
+
+function quotedEnd(expression: string, start: number, quote: "'" | '"') {
+  let index = start + 1;
+  while (index < expression.length) {
+    if (expression[index] !== quote) {
+      index += 1;
+      continue;
+    }
+    if (expression[index + 1] === quote) {
+      index += 2;
+      continue;
+    }
+    return index + 1;
+  }
+  return expression.length;
 }
