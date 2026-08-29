@@ -43,6 +43,7 @@ WidgetDefinition:
 - Widget IDs stay stable across moves and resizes.
 - `addWidget` accepts only `width` and `height` and appends at the bottom of the grid. `moveWidget` sets `x` and `y`. Agents never compute coordinates.
 - `definitionHash` is recomputed on every write and is the first component of the query cache key.
+- The grid describes the desktop layout only. On narrow screens the viewer stacks widgets in a single column in grid order; nothing mobile-specific is stored.
 
 ## Minimal example
 

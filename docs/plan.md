@@ -54,6 +54,7 @@ From the spec ([webmachinelearning.github.io/webmcp](https://webmachinelearning.
 14. Controls across datasources behave like Looker Studio: a control applies to every widget whose datasource has a matching field, matched on canonical name from the lookup table.
 15. Every builder action and every consumption question is a WebMCP tool, and the GUI exposes the same actions. Login is not a tool.
 16. No AI agent inside the app. Intent inference is done by the external agent (ChatGPT, Chrome) using what `describeDatasource` returns.
+17. The whole app is usable on mobile. Desktop is the main target, but every screen (viewer, editor, datasource admin, sharing) works on a phone. CSS is written mobile-first in the Tailwind way: base styles target the smallest screen, `sm:`/`md:`/`lg:` add layout for larger ones. No screen is desktop-only.
 
 ## 4. Architecture
 
@@ -160,6 +161,8 @@ Widget types kept: scorecard, gauge, line, bar, pie, table, control, date contro
 Layout: fixed column grid, no overlap, compact flow. `addWidget` accepts only `width` and `height` and appends at the bottom. `moveWidget` sets x/y. Agents do not compute coordinates.
 
 Controls publish values into dashboard control state. A filter control on a field applies across datasources by canonical name (decision 14). The date control applies to every widget.
+
+Responsive behavior. The stored grid describes the large-screen layout. On small screens widgets stack in a single column in grid order (row by row, left to right) and controls move into a sticky bar or sheet at the top; tables scroll horizontally inside their card. Nothing mobile-specific is stored. The editor follows the same rule: drag and resize are pointer features that appear at `md:` and up, while every edit action (title, metrics, filters, formulas, layout size) is also reachable through forms and menus that work with touch. Datasource admin, the lookup table, and sharing are plain forms and lists and get the same mobile-first treatment.
 
 ## 10. Changes to `docs/datastructure`
 
