@@ -1,0 +1,44 @@
+{
+  "name": "rundown",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev --port 3000",
+    "build": "vite build",
+    "preview": "vite preview",
+    "deploy": "bun run build && wrangler deploy",
+    "deploy:built": "wrangler deploy",
+    "generate-routes": "tsr generate",
+    "cf-typegen": "wrangler types",
+    "types:check": "wrangler types --check",
+    "typecheck": "bun run generate-routes && tsc --noEmit",
+    "test": "vitest --run",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
+    "check": "bun run fmt:check && bun run lint && bun run typecheck && bun run types:check && bun run test"
+  },
+  "dependencies": {
+    "@tanstack/react-router": "1.170.32",
+    "@tanstack/react-start": "1.168.49",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.54.2",
+    "@tailwindcss/vite": "4.3.3",
+    "@tanstack/router-cli": "1.167.33",
+    "@types/node": "26.4.0",
+    "@types/react": "19.2.0",
+    "@types/react-dom": "19.2.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "oxfmt": "0.65.0",
+    "oxlint": "1.80.0",
+    "tailwindcss": "4.3.3",
+    "typescript": "6.0.2",
+    "vite": "8.2.2",
+    "vitest": "4.1.11",
+    "wrangler": "4.127.1"
+  }
+}

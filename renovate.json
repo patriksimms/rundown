@@ -1,0 +1,33 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "assignees": ["patriksimms"],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "automerge": true,
+    "schedule": ["before 4pm on monday"]
+  },
+  "packageRules": [
+    {
+      "description": "Group React and TanStack packages",
+      "matchPackageNames": [
+        "react",
+        "react-dom",
+        "@types/react",
+        "@types/react-dom",
+        "/^@tanstack\\/.*$/"
+      ],
+      "groupName": "React and TanStack"
+    },
+    {
+      "description": "Group Cloudflare packages",
+      "matchPackageNames": ["wrangler", "/^@cloudflare\\/.*$/"],
+      "groupName": "Cloudflare"
+    },
+    {
+      "description": "Automerge patch updates",
+      "matchUpdateTypes": ["patch"],
+      "automerge": true
+    }
+  ]
+}
