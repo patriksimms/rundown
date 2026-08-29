@@ -1,4 +1,5 @@
 import { widgetDefinitionSchema, type WidgetDefinition } from './schema';
+import { rewriteSqlIdentifiers } from '#/query/sql-identifiers';
 
 interface FieldIdentity {
   id: string;
@@ -55,7 +56,9 @@ export function remapWidgetDefinition(
         : value.source.kind === 'expression'
           ? {
               ...value.source,
-              expression: rewriteSqlIdentifiers(value.source.expression, expressionFields),
+              expression: rewriteSqlIdentifiers(value.source.expression, (identifier) =>
+                expressionField(identifier, expressionFields),
+              ),
             }
           : value.source,
   });
@@ -123,18 +126,6 @@ interface ExpressionField {
   target?: FieldIdentity;
 }
 
-const sqlReservedWords = new Set(
-  'all analyse analyze and anti any array as asc asof asymmetric at authorization binary both by case cast check collate collation column columns concurrently constraint create cross default deferrable desc describe distinct do else end except false fetch for foreign freeze from full generated glob group having ilike in initially inner intersect into is isnull join lambda lateral leading left like limit map natural not notnull null offset on only or order outer overlaps pivot pivot_longer pivot_wider placing positional primary qualify references returning right select semi show similar some struct summarize symmetric table tablesample then to trailing true try_cast union unique unpack unpivot using variadic verbose when where window with'.split(
-    ' ',
-  ),
-);
-const sqlTypeNames = new Set(
-  'bigint bit blob bool boolean bpchar char character date decimal double enum float hugeint int integer interval json list map numeric real smallint struct text time timestamp timestamptz timetz tinyint ubigint uhugeint uint union usmallint utinyint uuid varbinary varchar varint'.split(
-    ' ',
-  ),
-);
-const sqlTypeModifiers = new Set(['precision', 'varying', 'with', 'without', 'time', 'zone']);
-
 function expressionFieldMap(
   sourceFields: FieldIdentity[],
   targetByCanonicalName: ReadonlyMap<string, FieldIdentity>,
@@ -149,48 +140,6 @@ function expressionFieldMap(
     ]);
   }
   return fields;
-}
-
-function rewriteSqlIdentifiers(expression: string, fields: ReadonlyMap<string, ExpressionField[]>) {
-  let result = '';
-  for (let index = 0; index < expression.length;) {
-    const character = expression[index];
-    if (character === "'") {
-      const end = quotedEnd(expression, index, "'");
-      result += expression.slice(index, end);
-      index = end;
-      continue;
-    }
-    if (character === '"') {
-      const end = quotedEnd(expression, index, '"');
-      const identifier = expression.slice(index + 1, end - 1).replaceAll('""', '"');
-      result += expressionField(identifier, fields) ?? expression.slice(index, end);
-      index = end;
-      continue;
-    }
-    const word = expression.slice(index).match(/^[A-Za-z_][A-Za-z0-9_]*/u)?.[0];
-    if (word) {
-      result += isSqlSyntaxWord(expression, index, word)
-        ? word
-        : (expressionField(word, fields) ?? word);
-      index += word.length;
-      continue;
-    }
-    result += character;
-    index += 1;
-  }
-  return result;
-}
-
-function isSqlSyntaxWord(expression: string, index: number, word: string) {
-  const normalized = word.toLocaleLowerCase('en-US');
-  if (sqlReservedWords.has(normalized)) return true;
-  const following = expression.slice(index + word.length).match(/^\s*(.)/u)?.[1];
-  if (following === '(' || following === "'") return true;
-  const preceding = expression.slice(0, index).match(/([A-Za-z_][A-Za-z0-9_]*)\s*$/u)?.[1];
-  if (preceding?.toLocaleLowerCase('en-US') === 'as' && sqlTypeNames.has(normalized)) return true;
-  const postfixCast = expression.slice(0, index).match(/::\s*([A-Za-z_][A-Za-z0-9_]*\s*)*$/u);
-  return Boolean(postfixCast && (sqlTypeNames.has(normalized) || sqlTypeModifiers.has(normalized)));
 }
 
 function expressionField(identifier: string, fields: ReadonlyMap<string, ExpressionField[]>) {
@@ -208,22 +157,6 @@ function expressionField(identifier: string, fields: ReadonlyMap<string, Express
   throw new Error(
     `Target canonical field ${source.canonicalName} cannot be used in an expression.`,
   );
-}
-
-function quotedEnd(expression: string, start: number, quote: "'" | '"') {
-  let index = start + 1;
-  while (index < expression.length) {
-    if (expression[index] !== quote) {
-      index += 1;
-      continue;
-    }
-    if (expression[index + 1] === quote) {
-      index += 2;
-      continue;
-    }
-    return index + 1;
-  }
-  return expression.length;
 }
 
 function quoteIdentifier(value: string) {

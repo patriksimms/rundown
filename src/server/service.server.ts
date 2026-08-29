@@ -23,8 +23,8 @@ import {
 } from '#/domain/schema';
 import { appendPlacement, placementFits } from '#/domain/layout';
 import { hashJson } from '#/domain/hash';
-import { comparisonDateRange } from '#/domain/dates';
-import { widgetDependencyState } from '#/domain/cache';
+import { comparisonDateRange, resolveDateRange } from '#/domain/dates';
+import { queryCacheState, widgetDependencyState } from '#/domain/cache';
 import { remapWidgetDefinition } from '#/domain/remap';
 import { mergeControlState } from '#/domain/control-state';
 import { isWorkspaceR2Key, scopedR2Prefix } from '#/domain/tenancy';
@@ -33,6 +33,7 @@ import {
   compileLibraryExpression,
   compileWidgetQuery,
 } from '#/query/compiler';
+import { referencedSqlIdentifiers } from '#/query/sql-identifiers';
 import {
   describeDataSource,
   explainIsolatedQuery,
@@ -414,12 +415,26 @@ async function queryWidget(
     [...metadata.fields, ...metadata.calculatedFields],
     controlState,
   );
+  const dateRange = controlState.dateRange ?? access.document.defaultDateRange;
+  const resolvedDateRange = resolveDateRange(dateRange, access.document.timezone);
+  const resolvedControlState: ControlState = {
+    ...controlState,
+    dateRange: {
+      startDate: { fixed: resolvedDateRange.start },
+      endDate: { fixed: resolvedDateRange.end },
+    },
+  };
   const currentDefinitionHash = await hashJson(widgetDependencyState(widget.definition, metadata));
-  const cacheKey = await hashJson({
-    definitionHash: currentDefinitionHash,
-    controlState: normalize({ dateRange: controlState.dateRange, values: resolvedControls }),
-    dataSourceVersion: dataSource.version,
-  });
+  const cacheKey = await hashJson(
+    queryCacheState({
+      definitionHash: currentDefinitionHash,
+      requestedDateRange: dateRange,
+      resolvedDateRange,
+      resolvedControls: normalize(resolvedControls),
+      dataSourceVersion: dataSource.version,
+      timezone: access.document.timezone,
+    }),
+  );
   const cached = await env.QUERY_CACHE.get(cacheKey, 'json');
   if (cached) {
     console.info('rundown.query_cache', { dashboardId, widgetId, outcome: 'hit' });
@@ -446,12 +461,12 @@ async function queryWidget(
     );
   const comparison = widgetComparison(widget.definition);
   const [rows, comparisonRows] = await Promise.all([
-    run(controlState),
+    run(resolvedControlState),
     comparison
       ? run({
-          ...controlState,
+          ...resolvedControlState,
           dateRange: comparisonDateRange(
-            controlState.dateRange ?? access.document.defaultDateRange,
+            resolvedControlState.dateRange!,
             comparison,
             access.document.timezone,
           ),
@@ -554,7 +569,7 @@ async function describeDatasource(dataSourceId: string, dashboardId?: string, sh
     [...metadata.fields, ...metadata.calculatedFields].map((field) => field.canonicalName),
   );
   const applicableMetrics = metadata.libraryMetrics.filter((metric) =>
-    referencedIdentifiers(metric.expression).every((name) => canonicalNames.has(name)),
+    referencedSqlIdentifiers(metric.expression).every((name) => canonicalNames.has(name)),
   );
   return {
     ...dataSource,
@@ -677,7 +692,13 @@ async function upsertCalculatedField(
         'dashboard_editor_required',
         'Calculated fields require editor access to a dashboard.',
       );
-    await authorizeDashboard(request.dashboardId, 'editor');
+    const access = await authorizeDashboard(request.dashboardId, 'editor');
+    if (!dashboardUsesDataSource(access.document, request.dataSourceId))
+      throw new ApiError(
+        403,
+        'dashboard_datasource_required',
+        'The authorized dashboard does not use this datasource.',
+      );
   }
   const dataSource = await loadDataSource(request.dataSourceId, session.workspace.id);
   assertSingleExpression(request.expression);
@@ -747,7 +768,7 @@ async function upsertLibraryMetric(
     const names = new Set(
       [...metadata.fields, ...metadata.calculatedFields].map((field) => field.canonicalName),
     );
-    if (!referencedIdentifiers(request.expression).every((name) => names.has(name))) continue;
+    if (!referencedSqlIdentifiers(request.expression).every((name) => names.has(name))) continue;
     const expression = compileLibraryExpression(request.expression, metadata);
     await explainIsolatedQuery(
       dataSource,
@@ -1134,6 +1155,13 @@ function definitionFieldIds(definition: WidgetDefinition) {
   return ids;
 }
 
+function dashboardUsesDataSource(dashboard: DashboardDocument, dataSourceId: string) {
+  return dashboard.widgets.some(
+    (widget) =>
+      'dataSourceId' in widget.definition && widget.definition.dataSourceId === dataSourceId,
+  );
+}
+
 function seedField(
   dataSourceId: string,
   column: { column_name: string; column_type: string },
@@ -1221,37 +1249,6 @@ function randomToken() {
     .replaceAll('+', '-')
     .replaceAll('/', '_')
     .replaceAll('=', '');
-}
-
-function referencedIdentifiers(expression: string) {
-  const withoutStrings = expression.replace(/'[^']*'/gu, '');
-  const ignored = new Set([
-    'sum',
-    'avg',
-    'count',
-    'distinct',
-    'min',
-    'max',
-    'median',
-    'stddev_samp',
-    'var_samp',
-    'case',
-    'when',
-    'then',
-    'else',
-    'end',
-    'null',
-    'true',
-    'false',
-  ]);
-  return [
-    ...new Set(
-      withoutStrings
-        .match(/[A-Za-z_][A-Za-z0-9_]*/gu)
-        ?.map((value) => value.toLowerCase())
-        .filter((value) => !ignored.has(value)) ?? [],
-    ),
-  ];
 }
 
 function slug(value: string) {

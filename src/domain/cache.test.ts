@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { hashJson } from './hash';
-import { widgetDependencyState } from './cache';
+import { queryCacheState, widgetDependencyState } from './cache';
 
 const definition = {
   type: 'scorecard' as const,
@@ -16,8 +16,23 @@ const definition = {
 describe('widget dependency cache state', () => {
   it('changes when a calculated field used by a library metric changes', async () => {
     const metadata = {
-      calculatedFields: [{ id: 'calc_cost', expression: 'cost * 1.2', updatedAt: 'one' }],
-      libraryMetrics: [{ id: 'metric_spend', expression: 'SUM(cost)', updatedAt: 'one' }],
+      fields: [baseField],
+      calculatedFields: [
+        {
+          id: 'calc_cost',
+          canonicalName: 'cost_with_tax',
+          label: 'Cost with tax',
+          expression: 'cost * 1.2',
+        },
+      ],
+      libraryMetrics: [
+        {
+          id: 'metric_spend',
+          canonicalName: 'spend',
+          name: 'Spend',
+          expression: 'SUM(cost)',
+        },
+      ],
     };
     const before = await hashJson(widgetDependencyState(definition, metadata));
     const after = await hashJson(
@@ -31,10 +46,16 @@ describe('widget dependency cache state', () => {
 
   it('changes for referenced metrics but ignores unrelated metric edits', async () => {
     const metadata = {
+      fields: [baseField],
       calculatedFields: [],
       libraryMetrics: [
-        { id: 'metric_spend', expression: 'SUM(cost)', updatedAt: 'one' },
-        { id: 'metric_clicks', expression: 'SUM(clicks)', updatedAt: 'one' },
+        { id: 'metric_spend', canonicalName: 'spend', name: 'Spend', expression: 'SUM(cost)' },
+        {
+          id: 'metric_clicks',
+          canonicalName: 'clicks',
+          name: 'Clicks',
+          expression: 'SUM(clicks)',
+        },
       ],
     };
     const before = await hashJson(widgetDependencyState(definition, metadata));
@@ -59,4 +80,56 @@ describe('widget dependency cache state', () => {
     expect(relevant).not.toBe(before);
     expect(unrelated).toBe(before);
   });
+
+  it('changes when query-relevant base field metadata changes', async () => {
+    const metadata = {
+      fields: [baseField],
+      calculatedFields: [],
+      libraryMetrics: [
+        { id: 'metric_spend', canonicalName: 'spend', name: 'Spend', expression: 'SUM(cost)' },
+      ],
+    };
+    const before = await hashJson(widgetDependencyState(definition, metadata));
+    const after = await hashJson(
+      widgetDependencyState(definition, {
+        ...metadata,
+        fields: [{ ...baseField, castTo: 'DOUBLE' }],
+      }),
+    );
+    expect(after).not.toBe(before);
+  });
+
+  it('separates resolved date boundaries and dashboard timezones', async () => {
+    const state = {
+      definitionHash: 'definition',
+      requestedDateRange: {
+        startDate: { relative: { amount: 28, unit: 'day' } },
+        endDate: { relative: { amount: 0, unit: 'day' } },
+      },
+      resolvedDateRange: { start: '2026-08-01', end: '2026-08-29' },
+      resolvedControls: [],
+      dataSourceVersion: 'version',
+      timezone: 'Europe/Berlin',
+    };
+    const before = await hashJson(queryCacheState(state));
+    const nextDay = await hashJson(
+      queryCacheState({
+        ...state,
+        resolvedDateRange: { start: '2026-08-02', end: '2026-08-30' },
+      }),
+    );
+    const otherTimezone = await hashJson(
+      queryCacheState({ ...state, timezone: 'America/New_York' }),
+    );
+    expect(nextDay).not.toBe(before);
+    expect(otherTimezone).not.toBe(before);
+  });
 });
+
+const baseField = {
+  id: 'cost',
+  columnName: 'MediaCost',
+  canonicalName: 'cost',
+  label: 'Cost',
+  castTo: null,
+};

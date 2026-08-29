@@ -327,4 +327,87 @@ describe('widget datasource remapping', () => {
       throw new Error('Expected an expression scorecard.');
     expect(definition.metric.source.expression).toBe('COUNT("day"::DATE)');
   });
+
+  it('preserves dollar-quoted literals and DuckDB special date values', () => {
+    const definition = remapWidgetDefinition(
+      {
+        type: 'scorecard',
+        title: 'Recent spend',
+        dataSourceId: 'source',
+        dateRangeFieldId: 'source_date',
+        metric: {
+          source: {
+            kind: 'expression',
+            expression: `SUM(CASE WHEN "DateStart" <= CURRENT_DATE AND $$MediaCost$$ = $$MediaCost$$ THEN "MediaCost" ELSE 0 END)`,
+          },
+          dataType: 'currency',
+        },
+      },
+      {
+        ...source,
+        fields: [
+          ...source.fields,
+          { id: 'source_current_date', canonicalName: 'today', columnName: 'CURRENT_DATE' },
+        ],
+      },
+      'target',
+      {
+        fields: [
+          { id: 'target_date', canonicalName: 'date', columnName: 'day' },
+          { id: 'target_spend', canonicalName: 'spend', columnName: 'cost' },
+          { id: 'target_current_date', canonicalName: 'today', columnName: 'today_value' },
+        ],
+        calculatedFields: [],
+      },
+    );
+    if (definition.type !== 'scorecard' || definition.metric.source.kind !== 'expression')
+      throw new Error('Expected an expression scorecard.');
+    expect(definition.metric.source.expression).toBe(
+      `SUM(CASE WHEN "day" <= CURRENT_DATE AND $$MediaCost$$ = $$MediaCost$$ THEN "cost" ELSE 0 END)`,
+    );
+  });
+
+  it('preserves interval units and complete cast type names', () => {
+    const definition = remapWidgetDefinition(
+      {
+        type: 'scorecard',
+        title: 'Typed spend',
+        dataSourceId: 'source',
+        dateRangeFieldId: 'source_date',
+        metric: {
+          source: {
+            kind: 'expression',
+            expression:
+              'SUM("MediaCost"::INT4) + COUNT(CAST("DateStart" AS TIMESTAMP WITH TIME ZONE)) + COUNT("DateStart" + INTERVAL 1 DAY)',
+          },
+          dataType: 'number',
+        },
+      },
+      {
+        ...source,
+        fields: [
+          ...source.fields,
+          { id: 'source_int4', canonicalName: 'int4_value', columnName: 'INT4' },
+          { id: 'source_time', canonicalName: 'time_value', columnName: 'TIME' },
+          { id: 'source_day', canonicalName: 'day_value', columnName: 'DAY' },
+        ],
+      },
+      'target',
+      {
+        fields: [
+          { id: 'target_date', canonicalName: 'date', columnName: 'day' },
+          { id: 'target_spend', canonicalName: 'spend', columnName: 'cost' },
+          { id: 'target_int4', canonicalName: 'int4_value', columnName: 'int4_column' },
+          { id: 'target_time', canonicalName: 'time_value', columnName: 'time_column' },
+          { id: 'target_day', canonicalName: 'day_value', columnName: 'day_column' },
+        ],
+        calculatedFields: [],
+      },
+    );
+    if (definition.type !== 'scorecard' || definition.metric.source.kind !== 'expression')
+      throw new Error('Expected an expression scorecard.');
+    expect(definition.metric.source.expression).toBe(
+      'SUM("cost"::INT4) + COUNT(CAST("day" AS TIMESTAMP WITH TIME ZONE)) + COUNT("day" + INTERVAL 1 DAY)',
+    );
+  });
 });

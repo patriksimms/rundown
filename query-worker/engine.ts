@@ -9,6 +9,8 @@ export interface QueryWorkerEnv {
 
 export function createQueryEngine(wasmModule: WebAssembly.Module) {
   const initialized = init({ wasmModule });
+  // Ducklings uses one Asyncify-enabled WASM runtime per isolate. Keep calls serialized so
+  // overlapping remote reads cannot resume the shared runtime out of order.
   let pending = Promise.resolve();
 
   return (request: QueryEngineRequest, environment: QueryWorkerEnv) => {

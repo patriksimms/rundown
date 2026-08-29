@@ -105,6 +105,27 @@ describe('query compiler', () => {
     );
   });
 
+  it('does not rewrite canonical names inside SQL string literals', () => {
+    const paid = {
+      ...fields[0],
+      id: 'paid',
+      canonicalName: 'paid',
+      columnName: 'Paid',
+    };
+    expect(
+      compileLibraryExpression(`SUM(CASE WHEN campaign = 'paid' THEN media_cost ELSE 0 END)`, {
+        fields: [...fields, paid],
+        calculatedFields: [],
+      }),
+    ).toBe(`SUM(CASE WHEN "Campaign" = 'paid' THEN "MediaCost" ELSE 0 END)`);
+  });
+
+  it('rewrites quoted canonical identifiers without double quoting them', () => {
+    expect(compileLibraryExpression('SUM("media_cost")', { fields, calculatedFields: [] })).toBe(
+      'SUM("MediaCost")',
+    );
+  });
+
   it('rejects statement separators and SQL comments in expressions', () => {
     expect(() => assertSingleExpression('SUM(cost); SELECT 1')).toThrow(/one SQL expression/u);
     expect(() => assertSingleExpression('SUM(cost) -- ignore')).toThrow(/one SQL expression/u);

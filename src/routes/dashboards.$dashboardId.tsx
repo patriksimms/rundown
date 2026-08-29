@@ -600,40 +600,68 @@ function Sharing({
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<'viewer' | 'editor'>('viewer');
   const [message, setMessage] = useState<string>();
+  async function mutate(action: () => Promise<void>, success: string) {
+    setMessage(undefined);
+    try {
+      await action();
+    } catch (caught) {
+      setMessage(caught instanceof Error ? caught.message : String(caught));
+      return false;
+    }
+    try {
+      await refresh();
+      setMessage(success);
+    } catch (caught) {
+      const error = caught instanceof Error ? caught.message : String(caught);
+      setMessage(`${success} Refresh failed: ${error}`);
+    }
+    return true;
+  }
   async function createLink() {
-    await callApi({
-      action: 'shareDashboard',
-      dashboardId,
-      operation: { kind: 'createLink' },
-    });
-    await refresh();
+    await mutate(
+      () =>
+        callApi({
+          action: 'shareDashboard',
+          dashboardId,
+          operation: { kind: 'createLink' },
+        }),
+      'Created an unlisted link.',
+    );
   }
   async function grant(event: FormEvent) {
     event.preventDefault();
-    await callApi({
-      action: 'shareDashboard',
-      dashboardId,
-      operation: { kind: 'grant', userEmail: email, role },
-    });
-    setMessage(`Granted ${role} access to ${email}.`);
-    setEmail('');
-    await refresh();
+    const granted = await mutate(
+      () =>
+        callApi({
+          action: 'shareDashboard',
+          dashboardId,
+          operation: { kind: 'grant', userEmail: email, role },
+        }),
+      `Granted ${role} access to ${email}.`,
+    );
+    if (granted) setEmail('');
   }
   async function revokeLink(token: string) {
-    await callApi({
-      action: 'shareDashboard',
-      dashboardId,
-      operation: { kind: 'revokeLink', token },
-    });
-    await refresh();
+    await mutate(
+      () =>
+        callApi({
+          action: 'shareDashboard',
+          dashboardId,
+          operation: { kind: 'revokeLink', token },
+        }),
+      'Revoked the unlisted link.',
+    );
   }
   async function revokeGrant(userId: string) {
-    await callApi({
-      action: 'shareDashboard',
-      dashboardId,
-      operation: { kind: 'revoke', userId },
-    });
-    await refresh();
+    await mutate(
+      () =>
+        callApi({
+          action: 'shareDashboard',
+          dashboardId,
+          operation: { kind: 'revoke', userId },
+        }),
+      'Revoked user access.',
+    );
   }
   return (
     <div className="max-w-2xl">
@@ -683,9 +711,9 @@ function Sharing({
             </NativeSelect>
           </Field>
           <Button type="submit">Grant access</Button>
-          {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
         </FieldGroup>
       </form>
+      {message ? <p className="mt-3 text-sm text-muted-foreground">{message}</p> : null}
       {sharing.grants.length ? (
         <div className="mt-8 space-y-3">
           <h3 className="text-sm font-medium">People with access</h3>

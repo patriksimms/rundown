@@ -6,6 +6,7 @@ import type {
   FieldRecord,
   LibraryMetricRecord,
 } from './types';
+import { rewriteSqlIdentifiers } from './sql-identifiers';
 
 export interface QueryContext {
   dashboard: DashboardDocument;
@@ -175,17 +176,16 @@ function fieldById(fieldId: string, context: QueryContext) {
 }
 
 function rewriteCanonicalNames(expression: string, context: QueryContext) {
-  const candidates = [...context.fields, ...context.calculatedFields].sort(
-    (left, right) => right.canonicalName.length - left.canonicalName.length,
+  const fieldsByCanonicalName = new Map(
+    [...context.fields, ...context.calculatedFields].map((field) => [
+      field.canonicalName.toLocaleLowerCase('en-US'),
+      field,
+    ]),
   );
-  return candidates.reduce(
-    (current, field) =>
-      current.replace(
-        new RegExp(`\\b${escapeRegExp(field.canonicalName)}\\b`, 'gu'),
-        fieldExpression(field.id, context),
-      ),
-    expression,
-  );
+  return rewriteSqlIdentifiers(expression, (identifier) => {
+    const field = fieldsByCanonicalName.get(identifier.toLocaleLowerCase('en-US'));
+    return field ? fieldExpression(field.id, context) : undefined;
+  });
 }
 
 export function compileLibraryExpression(
@@ -193,17 +193,15 @@ export function compileLibraryExpression(
   context: Pick<QueryContext, 'fields' | 'calculatedFields'>,
 ) {
   assertSingleExpression(expression);
-  const candidates = [...context.fields, ...context.calculatedFields].sort(
-    (left, right) => right.canonicalName.length - left.canonicalName.length,
+  const replacements = new Map(
+    [...context.fields, ...context.calculatedFields].map((field) => [
+      field.canonicalName.toLocaleLowerCase('en-US'),
+      'columnName' in field ? quoteIdentifier(field.columnName) : `(${field.expression})`,
+    ]),
   );
-  return candidates.reduce((current, field) => {
-    const replacement =
-      'columnName' in field ? quoteIdentifier(field.columnName) : `(${field.expression})`;
-    return current.replace(
-      new RegExp(`\\b${escapeRegExp(field.canonicalName)}\\b`, 'gu'),
-      replacement,
-    );
-  }, expression);
+  return rewriteSqlIdentifiers(expression, (identifier) =>
+    replacements.get(identifier.toLocaleLowerCase('en-US')),
+  );
 }
 
 function compileFilter(
@@ -275,9 +273,6 @@ function quoteIdentifier(identifier: string) {
 }
 function sqlString(value: string) {
   return `'${value.replaceAll("'", "''")}'`;
-}
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
 }
 function safeCast(value: string) {
   if (!/^[A-Z][A-Z0-9_]*(?:\([0-9, ]+\))?$/iu.test(value))

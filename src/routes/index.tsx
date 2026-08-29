@@ -67,6 +67,7 @@ function SignedOut() {
 function DashboardIndex() {
   const [data, setData] = useState<Bootstrap>();
   const [error, setError] = useState<string>();
+  const [createError, setCreateError] = useState<string>();
   const [name, setName] = useState('');
   const refresh = useCallback(async () => {
     try {
@@ -83,13 +84,18 @@ function DashboardIndex() {
   async function create(event: FormEvent) {
     event.preventDefault();
     if (!name.trim()) return;
-    const dashboard = await callApi<{ id: string }>({
-      action: 'createDashboard',
-      name,
-      dataSourceIds: [],
-      timezone: 'Europe/Berlin',
-    });
-    window.location.assign(`/dashboards/${dashboard.id}`);
+    setCreateError(undefined);
+    try {
+      const dashboard = await callApi<{ id: string }>({
+        action: 'createDashboard',
+        name,
+        dataSourceIds: [],
+        timezone: 'Europe/Berlin',
+      });
+      window.location.assign(`/dashboards/${dashboard.id}`);
+    } catch (caught) {
+      setCreateError(caught instanceof Error ? caught.message : String(caught));
+    }
   }
   return (
     <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6">
@@ -120,6 +126,7 @@ function DashboardIndex() {
               Create
             </Button>
           </form>
+          {createError ? <p className="text-sm text-destructive">{createError}</p> : null}
           {data.dashboards.length ? (
             <div className="overflow-x-auto">
               <Table>
