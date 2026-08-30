@@ -9,7 +9,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import type { ControlState, DashboardDocument, DashboardWidget } from '#/domain/schema';
 import { callApi } from '#/api/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '#/components/ui/card';
@@ -41,14 +41,17 @@ export function DashboardView({
     (left, right) => left.layout.y - right.layout.y || left.layout.x - right.layout.x,
   );
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
+    <div className="grid grid-cols-1 gap-4 md:auto-rows-[4rem] md:grid-cols-12">
       {ordered.map((widget) => (
         <div
           key={widget.id}
-          className="min-w-0"
-          style={{
-            gridColumn: `span ${Math.min(widget.layout.width, 12)} / span ${Math.min(widget.layout.width, 12)}`,
-          }}
+          className="min-w-0 md:[grid-column:var(--grid-column)] md:[grid-row:var(--grid-row)] [&>[data-slot=card]]:h-full"
+          style={
+            {
+              '--grid-column': `${widget.layout.x + 1} / span ${Math.min(widget.layout.width, 12)}`,
+              '--grid-row': `${widget.layout.y + 1} / span ${widget.layout.height}`,
+            } as CSSProperties
+          }
         >
           <Widget
             widget={widget}
@@ -103,6 +106,27 @@ function Widget({
       dashboardId={dashboardId}
       shareToken={shareToken}
       controlState={controlState}
+    />
+  );
+}
+
+export function DashboardWidgetView({
+  dashboard,
+  widget,
+  controlState,
+  setControlState,
+}: {
+  dashboard: DashboardDocument;
+  widget: DashboardWidget;
+  controlState: ControlState;
+  setControlState: (state: ControlState) => void;
+}) {
+  return (
+    <Widget
+      widget={widget}
+      dashboardId={dashboard.id}
+      controlState={controlState}
+      setControlState={setControlState}
     />
   );
 }
@@ -387,7 +411,7 @@ function Result({
   );
 }
 
-function initialControlState(dashboard: DashboardDocument): ControlState {
+export function initialControlState(dashboard: DashboardDocument): ControlState {
   const dateControl = dashboard.widgets.find((widget) => widget.definition.type === 'dateControl');
   const values = Object.fromEntries(
     dashboard.widgets.flatMap((widget) =>

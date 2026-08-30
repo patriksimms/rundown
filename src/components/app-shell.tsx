@@ -19,6 +19,9 @@ export function AppShell({ children }: { children: ReactNode }) {
               <Link className="text-muted-foreground hover:text-foreground" to="/datasources">
                 Datasources
               </Link>
+              <Link className="text-muted-foreground hover:text-foreground" to="/metrics">
+                Metrics
+              </Link>
             </Show>
           </nav>
           <Show when="signed-out">

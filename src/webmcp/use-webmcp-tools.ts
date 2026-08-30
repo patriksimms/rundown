@@ -56,6 +56,11 @@ export function useWebMcpTools(options: WebMcpOptions) {
                 'List dashboards the signed-in user can see. Returns ids, names, widget counts, and update times.',
               readOnly: true,
             },
+            {
+              action: 'listLibraryMetrics',
+              description: 'List aggregate metrics in the active workspace library.',
+              readOnly: true,
+            },
           ] satisfies ToolSpec[])
         : []),
       ...(options.dashboardId
@@ -144,6 +149,13 @@ export function useWebMcpTools(options: WebMcpOptions) {
               fixed,
             },
             {
+              action: 'updateLayout',
+              description:
+                'Replace every widget placement on the open dashboard in one validated write. Placements may leave empty rows but cannot overlap or leave the 12-column grid.',
+              readOnly: false,
+              fixed,
+            },
+            {
               action: 'copyWidget',
               description:
                 'Copy a widget from another visible dashboard into the open dashboard. Optionally select a target datasource; referenced fields are remapped by canonical name.',
@@ -160,6 +172,13 @@ export function useWebMcpTools(options: WebMcpOptions) {
               action: 'upsertCalculatedField',
               description:
                 'Create or update a row-level DuckDB calculated field after compile and tenant-isolation validation.',
+              readOnly: false,
+              fixed,
+            },
+            {
+              action: 'updateFieldMetadata',
+              description:
+                'Update visible field metadata for a datasource used by the open dashboard. Hiding, casting, and canonical names remain admin-only.',
               readOnly: false,
               fixed,
             },
@@ -202,14 +221,14 @@ export function useWebMcpTools(options: WebMcpOptions) {
               'Register an existing R2 CSV or parquet object or prefix. This runs DESCRIBE and seeds field metadata.',
             readOnly: false,
           },
-          {
-            action: 'updateFieldMetadata',
-            description:
-              'Update field semantics, label, canonical name, visibility, description, or cast override.',
-            readOnly: false,
-          },
           ...(!options.dashboardId
             ? ([
+                {
+                  action: 'updateFieldMetadata',
+                  description:
+                    'Update field semantics, label, canonical name, visibility, description, default aggregation, or cast override.',
+                  readOnly: false,
+                },
                 {
                   action: 'upsertLibraryMetric',
                   description:

@@ -1,5 +1,10 @@
 import type { DashboardWidget } from './schema';
 
+export interface LayoutUpdate {
+  widgetId: string;
+  placement: DashboardWidget['layout'];
+}
+
 export function appendPlacement(
   widgets: DashboardWidget[],
   width: number,
@@ -31,4 +36,22 @@ export function placementFits(
       existing.y + existing.height <= candidate.y
     );
   });
+}
+
+export function validateLayoutUpdate(
+  widgets: DashboardWidget[],
+  updates: LayoutUpdate[],
+  columns = 12,
+) {
+  const expectedIds = new Set(widgets.map((widget) => widget.id));
+  const receivedIds = new Set(updates.map((update) => update.widgetId));
+  if (receivedIds.size !== updates.length) return false;
+  if (receivedIds.size !== expectedIds.size) return false;
+  if ([...receivedIds].some((id) => !expectedIds.has(id))) return false;
+
+  const placed = updates.map((update) => ({
+    ...widgets.find((widget) => widget.id === update.widgetId)!,
+    layout: update.placement,
+  }));
+  return placed.every((widget) => placementFits(placed, widget.layout, columns, widget.id));
 }

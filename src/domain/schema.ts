@@ -2,6 +2,17 @@ import { z } from 'zod';
 
 export const fieldRoleSchema = z.enum(['dimension', 'metric', 'date', 'id']);
 export const semanticTypeSchema = z.enum(['currency', 'count', 'ratio', 'text', 'date', 'id']);
+export const aggregationSchema = z.enum([
+  'sum',
+  'average',
+  'count',
+  'countDistinct',
+  'min',
+  'max',
+  'median',
+  'standardDeviation',
+  'variance',
+]);
 
 const relativeDateSchema = z.object({
   amount: z.number().int().nonnegative(),
@@ -58,17 +69,7 @@ const metricSchema = z.object({
     z.object({
       kind: z.literal('field'),
       fieldId: z.string().min(1),
-      aggregation: z.enum([
-        'sum',
-        'average',
-        'count',
-        'countDistinct',
-        'min',
-        'max',
-        'median',
-        'standardDeviation',
-        'variance',
-      ]),
+      aggregation: aggregationSchema,
     }),
     z.object({ kind: z.literal('library'), libraryMetricId: z.string().min(1) }),
     z.object({ kind: z.literal('expression'), expression: z.string().min(1) }),
@@ -229,6 +230,7 @@ export type ControlState = z.infer<typeof controlStateSchema>;
 export type DateRange = z.infer<typeof dateRangeSchema>;
 export type FieldRole = z.infer<typeof fieldRoleSchema>;
 export type SemanticType = z.infer<typeof semanticTypeSchema>;
+export type Aggregation = z.infer<typeof aggregationSchema>;
 export type DataSourceLocation = z.infer<typeof dataSourceLocationSchema>;
 
 export const defaultDateRange: DateRange = {

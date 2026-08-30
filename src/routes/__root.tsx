@@ -1,6 +1,7 @@
 import { ClerkProvider } from '@clerk/tanstack-react-start';
 import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
+import { TooltipProvider } from '#/components/ui/tooltip';
 
 import appCss from '../styles.css?url';
 
@@ -28,8 +29,10 @@ function RootDocument({ children }: { children: ReactNode }) {
       </head>
       <body>
         <ClerkProvider>
-          {children}
-          <Scripts />
+          <TooltipProvider>
+            {children}
+            <Scripts />
+          </TooltipProvider>
         </ClerkProvider>
       </body>
     </html>

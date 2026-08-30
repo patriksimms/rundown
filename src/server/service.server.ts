@@ -22,7 +22,8 @@ import {
   type DashboardWidget,
   type WidgetDefinition,
 } from '#/domain/schema';
-import { appendPlacement, placementFits } from '#/domain/layout';
+import { appendPlacement, placementFits, validateLayoutUpdate } from '#/domain/layout';
+import { canUpdateFieldMetadata } from '#/domain/field-metadata';
 import { hashJson } from '#/domain/hash';
 import { comparisonDateRange, resolveDateRange } from '#/domain/dates';
 import { queryCacheState, widgetDependencyState } from '#/domain/cache';
@@ -92,6 +93,8 @@ async function dispatchRequest(request: ApiRequest): Promise<unknown> {
       return removeWidget(request);
     case 'moveWidget':
       return moveWidget(request);
+    case 'updateLayout':
+      return updateLayout(request);
     case 'copyWidget':
       return copyWidget(request);
     case 'previewWidget':
@@ -114,6 +117,8 @@ async function dispatchRequest(request: ApiRequest): Promise<unknown> {
       );
     case 'listDataSources':
       return listDataSources();
+    case 'listLibraryMetrics':
+      return listLibraryMetrics();
     case 'describeDatasource':
       return describeDatasource(request.dataSourceId, request.dashboardId, request.shareToken);
     case 'listR2Objects':
@@ -344,6 +349,29 @@ async function moveWidget(request: Extract<ApiRequest, { action: 'moveWidget' }>
   return updatedWidget;
 }
 
+async function updateLayout(request: Extract<ApiRequest, { action: 'updateLayout' }>) {
+  const access = await authorizeDashboard(request.dashboardId, 'editor');
+  if (!validateLayoutUpdate(access.document.widgets, request.placements, access.document.columns))
+    throw new ApiError(
+      400,
+      'invalid_layout',
+      'The layout must include every widget exactly once, stay inside the grid, and not overlap.',
+    );
+  const placements = new Map(
+    request.placements.map((update) => [update.widgetId, update.placement]),
+  );
+  const updated = {
+    ...access.document,
+    widgets: access.document.widgets.map((widget) => ({
+      ...widget,
+      layout: placements.get(widget.id)!,
+    })),
+    updatedAt: new Date().toISOString(),
+  };
+  await persistDashboard(updated);
+  return updated.widgets;
+}
+
 async function copyWidget(request: Extract<ApiRequest, { action: 'copyWidget' }>) {
   const target = await authorizeDashboard(request.dashboardId, 'editor');
   const source = await authorizeDashboard(request.fromDashboardId, 'viewer');
@@ -555,6 +583,14 @@ async function listDataSources() {
     .where(eq(dataSources.workspaceId, session.workspace.id));
 }
 
+async function listLibraryMetrics() {
+  const session = await requireSession();
+  return database()
+    .select()
+    .from(libraryMetrics)
+    .where(eq(libraryMetrics.workspaceId, session.workspace.id));
+}
+
 async function describeDatasource(dataSourceId: string, dashboardId?: string, shareToken?: string) {
   const workspaceId = shareToken
     ? await sharedDatasourceWorkspace(dataSourceId, dashboardId, shareToken)
@@ -654,8 +690,20 @@ async function updateFieldMetadata(
   request: Extract<ApiRequest, { action: 'updateFieldMetadata' }>,
 ) {
   const session = await requireSession();
-  requireAdmin(session);
   await loadDataSource(request.dataSourceId, session.workspace.id);
+  let hasEditorAccess = false;
+  let usesSource = false;
+  if (request.dashboardId) {
+    const access = await authorizeDashboard(request.dashboardId, 'editor');
+    hasEditorAccess = access.role === 'admin' || access.role === 'editor';
+    usesSource = dashboardUsesDataSource(access.document, request.dataSourceId);
+  }
+  if (!canUpdateFieldMetadata(session.isAdmin, hasEditorAccess, usesSource, request.patch))
+    throw new ApiError(
+      403,
+      'field_metadata_access_denied',
+      'Editors may update visible field metadata only for datasources used by their dashboard.',
+    );
   const row = await database().query.fields.findFirst({
     where: and(
       eq(fields.dataSourceId, request.dataSourceId),
@@ -698,6 +746,7 @@ async function upsertCalculatedField(
     expression: request.expression,
     role: request.role,
     semanticType: request.semanticType,
+    defaultAggregation: request.defaultAggregation ?? null,
     description: request.description ?? null,
     updatedAt: new Date().toISOString(),
   };
@@ -1179,6 +1228,7 @@ function seedField(
     label: humanize(column.column_name),
     role: idLike ? 'id' : dateLike ? 'date' : numeric ? 'metric' : 'dimension',
     semanticType: idLike ? 'id' : dateLike ? 'date' : numeric ? 'count' : 'text',
+    defaultAggregation: numeric ? 'sum' : null,
     description: null,
     hidden: false,
     castTo: idLike ? 'VARCHAR' : null,

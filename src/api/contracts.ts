@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  aggregationSchema,
   controlStateSchema,
   dataSourceLocationSchema,
   dateRangeSchema,
@@ -55,6 +56,18 @@ export const apiRequestSchema = z.discriminatedUnion('action', [
     placement: gridPlacementSchema,
   }),
   z.object({
+    action: z.literal('updateLayout'),
+    dashboardId: z.string().min(1),
+    placements: z
+      .array(
+        z.object({
+          widgetId: z.string().min(1),
+          placement: gridPlacementSchema,
+        }),
+      )
+      .min(1),
+  }),
+  z.object({
     action: z.literal('copyWidget'),
     dashboardId: z.string().min(1),
     fromDashboardId: z.string().min(1),
@@ -81,6 +94,7 @@ export const apiRequestSchema = z.discriminatedUnion('action', [
     search: z.string().optional(),
   }),
   z.object({ action: z.literal('listDataSources') }),
+  z.object({ action: z.literal('listLibraryMetrics') }),
   z.object({
     action: z.literal('describeDatasource'),
     dataSourceId: z.string().min(1),
@@ -96,12 +110,14 @@ export const apiRequestSchema = z.discriminatedUnion('action', [
   z.object({
     action: z.literal('updateFieldMetadata'),
     dataSourceId: z.string().min(1),
+    dashboardId: z.string().min(1).optional(),
     columnName: z.string().min(1),
     patch: z.object({
       canonicalName: z.string().min(1).optional(),
       label: z.string().min(1).optional(),
       role: fieldRoleSchema.optional(),
       semanticType: semanticTypeSchema.optional(),
+      defaultAggregation: aggregationSchema.nullable().optional(),
       description: z.string().nullable().optional(),
       hidden: z.boolean().optional(),
       castTo: z.string().nullable().optional(),
@@ -117,6 +133,7 @@ export const apiRequestSchema = z.discriminatedUnion('action', [
     expression: z.string().min(1),
     role: fieldRoleSchema,
     semanticType: semanticTypeSchema,
+    defaultAggregation: aggregationSchema.nullable().optional(),
     description: z.string().optional(),
   }),
   z.object({
