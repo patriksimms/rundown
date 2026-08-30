@@ -258,14 +258,30 @@ function widgetLimit(definition: WidgetDefinition) {
 }
 
 export function compileSourceSql(dataSource: DataSourceRecord, bucketName: string) {
+  return compileSourceSqlFromBaseUrl(dataSource, `r2://${bucketName}`);
+}
+
+export function compileSourceSqlFromBaseUrl(
+  dataSource: DataSourceRecord,
+  baseUrl: string,
+  objectKeys?: string[],
+) {
   const key =
     dataSource.location.kind === 'prefix'
       ? `${dataSource.location.key}*.${dataSource.location.format}`
       : dataSource.location.key;
-  const uri = sqlString(`r2://${bucketName}/${key}`);
+  const keys = objectKeys ?? [key];
+  const uris = keys.map((objectKey) => sqlString(sourceUrl(baseUrl, objectKey)));
+  const source = uris.length === 1 ? uris[0] : `[${uris.join(', ')}]`;
   return dataSource.location.format === 'csv'
-    ? `read_csv_auto(${uri}, header = true)`
-    : `read_parquet(${uri})`;
+    ? `read_csv_auto(${source}, header = true)`
+    : `read_parquet(${source})`;
+}
+
+function sourceUrl(baseUrl: string, key: string) {
+  const base = baseUrl.replace(/\/$/u, '');
+  if (base.startsWith('r2://')) return `${base}/${key}`;
+  return `${base}/${key.split('/').map(encodeURIComponent).join('/')}`;
 }
 
 function quoteIdentifier(identifier: string) {

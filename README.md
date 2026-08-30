@@ -14,12 +14,24 @@ compiling user expressions.
 
 ```sh
 bun install
+bun run db:migrate:local
 bun run dev
 ```
 
 The development server starts both Workers and wires the local Service Binding. The build copies the
 WASM module from the installed Ducklings package into an ignored local file before Vite starts.
-Export `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` before querying local data.
+Place CSV and parquet files in `dev-data/`. Local workspaces see those files under their tenant-scoped
+`ws/<workspaceId>/` prefix. Vite serves the files with range request support so DuckDB can query them
+without R2 credentials or a separate object-storage service.
+
+For example:
+
+```sh
+cp reporting_example.csv dev-data/
+```
+
+Local D1 and KV data persist in `.wrangler/`. The application still uses R2 bindings and direct
+DuckDB R2 reads in built and deployed Workers.
 
 The app runs at `http://localhost:3000`. `GET /health` verifies the Worker can serve requests.
 

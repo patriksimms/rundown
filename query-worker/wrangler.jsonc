@@ -10,9 +10,6 @@
   "vars": {
     "CLOUDFLARE_ACCOUNT_ID": "17c619232f5d84567cd69896e892f326",
   },
-  "secrets": {
-    "required": ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"],
-  },
   "observability": {
     "enabled": true,
     "logs": {
@@ -31,9 +28,6 @@
       "name": "rundown-query-preview",
       "vars": {
         "CLOUDFLARE_ACCOUNT_ID": "17c619232f5d84567cd69896e892f326",
-      },
-      "secrets": {
-        "required": ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"],
       },
     },
   },

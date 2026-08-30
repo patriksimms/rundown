@@ -22,10 +22,19 @@ export default {
 } satisfies ExportedHandler<QueryWorkerEnv>;
 
 function parseRequest(input: unknown): QueryEngineRequest {
-  if (!isObject(input) || typeof input.sourceSql !== 'string' || !input.sourceSql)
+  if (
+    !isObject(input) ||
+    typeof input.sourceSql !== 'string' ||
+    !input.sourceSql ||
+    typeof input.requiresR2Credentials !== 'boolean'
+  )
     throw new Error('Invalid query engine request.');
   if (input.operation === 'describeSource')
-    return { operation: input.operation, sourceSql: input.sourceSql };
+    return {
+      operation: input.operation,
+      sourceSql: input.sourceSql,
+      requiresR2Credentials: input.requiresR2Credentials,
+    };
   if (
     input.operation === 'isolatedQuery' &&
     typeof input.sql === 'string' &&
@@ -35,6 +44,7 @@ function parseRequest(input: unknown): QueryEngineRequest {
     return {
       operation: input.operation,
       sourceSql: input.sourceSql,
+      requiresR2Credentials: input.requiresR2Credentials,
       sql: input.sql,
       parameters: input.parameters,
     };

@@ -14,7 +14,7 @@ export default defineConfig({
     { name: 'mobile', use: { ...devices['Pixel 7'] } },
   ],
   webServer: {
-    command: 'R2_ACCESS_KEY_ID=test R2_SECRET_ACCESS_KEY=test bun run dev',
+    command: 'bun run dev',
     url: 'http://localhost:3000/health',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

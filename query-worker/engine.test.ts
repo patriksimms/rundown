@@ -3,9 +3,9 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { createQueryEngine } from './engine';
 
 const environment = {
-  CLOUDFLARE_ACCOUNT_ID: 'test',
-  R2_ACCESS_KEY_ID: 'test',
-  R2_SECRET_ACCESS_KEY: 'test',
+  CLOUDFLARE_ACCOUNT_ID: '',
+  R2_ACCESS_KEY_ID: '',
+  R2_SECRET_ACCESS_KEY: '',
 };
 const sourceSql = '(VALUES (1, 10), (2, 20)) AS source(day, spend)';
 let execute: ReturnType<typeof createQueryEngine>;
@@ -16,12 +16,26 @@ beforeAll(async () => {
 });
 
 describe('Ducklings query engine', () => {
+  it('requires credentials only for R2 sources', async () => {
+    await expect(
+      execute(
+        {
+          operation: 'describeSource',
+          sourceSql,
+          requiresR2Credentials: true,
+        },
+        environment,
+      ),
+    ).rejects.toThrow('Query engine R2 credentials are not configured.');
+  });
+
   it('materializes the authorized source and binds parameters', async () => {
     await expect(
       execute(
         {
           operation: 'isolatedQuery',
           sourceSql,
+          requiresR2Credentials: false,
           sql: 'SELECT SUM(spend) AS total FROM rundown_source WHERE day >= ?',
           parameters: [2],
         },
@@ -36,6 +50,7 @@ describe('Ducklings query engine', () => {
         {
           operation: 'isolatedQuery',
           sourceSql,
+          requiresR2Credentials: false,
           sql: "SELECT * FROM read_csv_auto('/etc/passwd')",
           parameters: [],
         },
@@ -46,7 +61,10 @@ describe('Ducklings query engine', () => {
 
   it('describes and samples the materialized source', async () => {
     await expect(
-      execute({ operation: 'describeSource', sourceSql }, environment),
+      execute(
+        { operation: 'describeSource', sourceSql, requiresR2Credentials: false },
+        environment,
+      ),
     ).resolves.toMatchObject({
       description: [
         { column_name: 'day', column_type: 'INTEGER' },

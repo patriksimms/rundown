@@ -1,17 +1,18 @@
 import { env } from 'cloudflare:workers';
-import { compileSourceSql } from './compiler';
+import { resolveDataSource } from '#/data/source.server';
 import type { QueryEngineRequest, QueryEngineResponse } from './engine-contract';
 import type { DataSourceRecord } from './types';
 
 export async function runIsolatedPreparedQuery<T extends Record<string, unknown>>(
   dataSource: DataSourceRecord,
-  bucketName: string,
   compile: (sourceTableName: string) => { sql: string; parameters: unknown[] },
 ) {
   const query = compile('rundown_source');
+  const source = await resolveDataSource(dataSource);
   return queryEngineRequest<T[]>({
     operation: 'isolatedQuery',
-    sourceSql: compileSourceSql(dataSource, bucketName),
+    sourceSql: source.sql,
+    requiresR2Credentials: source.requiresR2Credentials,
     sql: query.sql,
     parameters: query.parameters,
   });
@@ -19,25 +20,28 @@ export async function runIsolatedPreparedQuery<T extends Record<string, unknown>
 
 export async function explainIsolatedQuery(
   dataSource: DataSourceRecord,
-  bucketName: string,
   sql: string,
   parameters: unknown[] = [],
 ) {
+  const source = await resolveDataSource(dataSource);
   return queryEngineRequest<Record<string, unknown>[]>({
     operation: 'isolatedQuery',
-    sourceSql: compileSourceSql(dataSource, bucketName),
+    sourceSql: source.sql,
+    requiresR2Credentials: source.requiresR2Credentials,
     sql: `EXPLAIN ${sql}`,
     parameters,
   });
 }
 
-export async function describeDataSource(dataSource: DataSourceRecord, bucketName: string) {
+export async function describeDataSource(dataSource: DataSourceRecord) {
+  const source = await resolveDataSource(dataSource);
   return queryEngineRequest<{
     description: Array<{ column_name: string; column_type: string }>;
     samples: Record<string, unknown>[];
   }>({
     operation: 'describeSource',
-    sourceSql: compileSourceSql(dataSource, bucketName),
+    sourceSql: source.sql,
+    requiresR2Credentials: source.requiresR2Credentials,
   });
 }
 

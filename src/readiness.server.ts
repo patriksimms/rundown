@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { checkSourceStorage } from '#/data/source.server';
 
 import {
   checkReadiness,
@@ -15,7 +16,7 @@ const checks: ReadinessChecks = {
     await env.QUERY_CACHE.get('__readiness__');
   },
   r2: async () => {
-    await env.DATA.list({ limit: 1, prefix: '__readiness__/' });
+    await checkSourceStorage();
   },
 };
 

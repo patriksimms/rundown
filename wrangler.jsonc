@@ -8,6 +8,7 @@
   "vars": {
     "CLOUDFLARE_ACCOUNT_ID": "17c619232f5d84567cd69896e892f326",
     "R2_BUCKET_NAME": "rundown-data",
+    "DATA_SOURCE_BASE_URL": "r2://rundown-data",
   },
   "secrets": {
     "required": ["CLERK_SECRET_KEY"],
@@ -67,6 +68,7 @@
       "vars": {
         "CLOUDFLARE_ACCOUNT_ID": "17c619232f5d84567cd69896e892f326",
         "R2_BUCKET_NAME": "rundown-data-preview",
+        "DATA_SOURCE_BASE_URL": "r2://rundown-data-preview",
       },
       "secrets": {
         "required": ["CLERK_SECRET_KEY"],

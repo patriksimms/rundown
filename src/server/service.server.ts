@@ -3,6 +3,7 @@ import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 import type { ApiRequest } from '#/api/contracts';
 import { createDatabase } from '#/db/client';
+import { headSourceObject, listSourceObjects } from '#/data/source.server';
 import {
   calculatedFields,
   dashboardGrants,
@@ -442,23 +443,19 @@ async function queryWidget(
   }
   console.info('rundown.query_cache', { dashboardId, widgetId, outcome: 'miss' });
   const run = (queryControlState: ControlState) =>
-    runIsolatedPreparedQuery<Record<string, unknown>>(
-      dataSource,
-      env.R2_BUCKET_NAME,
-      (sourceTableName) => {
-        const compiled = compileWidgetQuery({
-          dashboard: access.document,
-          definition: widget.definition,
-          dataSource,
-          ...metadata,
-          controlState: queryControlState,
-          bucketName: env.R2_BUCKET_NAME,
-          sourceTableName,
-          resolvedControls,
-        });
-        return { sql: compiled.sql, parameters: compiled.parameters };
-      },
-    );
+    runIsolatedPreparedQuery<Record<string, unknown>>(dataSource, (sourceTableName) => {
+      const compiled = compileWidgetQuery({
+        dashboard: access.document,
+        definition: widget.definition,
+        dataSource,
+        ...metadata,
+        controlState: queryControlState,
+        bucketName: env.R2_BUCKET_NAME,
+        sourceTableName,
+        resolvedControls,
+      });
+      return { sql: compiled.sql, parameters: compiled.parameters };
+    });
   const comparison = widgetComparison(widget.definition);
   const [rows, comparisonRows] = await Promise.all([
     run(resolvedControlState),
@@ -542,7 +539,6 @@ async function getControlOptions(
   const direction = controlDefinition.optionsSortDirection?.toUpperCase() ?? 'ASC';
   const rows = await runIsolatedPreparedQuery<{ value: unknown }>(
     dataSource,
-    env.R2_BUCKET_NAME,
     (sourceTableName) => ({
       sql: `SELECT ${expression} AS value FROM ${quoteIdentifier(sourceTableName)}${where} GROUP BY 1 ORDER BY 1 ${direction} LIMIT 100`,
       parameters,
@@ -606,17 +602,7 @@ async function listR2Objects(prefix?: string) {
   const safePrefix = scopedR2Prefix(session.workspace.r2Prefix, prefix);
   if (!safePrefix)
     throw new ApiError(400, 'invalid_r2_prefix', 'R2 prefixes cannot contain traversal segments.');
-  const listing = await env.DATA.list({ prefix: safePrefix, limit: 1000 });
-  return {
-    objects: listing.objects.map((object) => ({
-      key: object.key,
-      size: object.size,
-      etag: object.etag,
-      uploaded: object.uploaded,
-    })),
-    truncated: listing.truncated,
-    cursor: listing.truncated ? listing.cursor : undefined,
-  };
+  return listSourceObjects(safePrefix);
 }
 
 async function registerDatasource(request: Extract<ApiRequest, { action: 'registerDatasource' }>) {
@@ -630,8 +616,8 @@ async function registerDatasource(request: Extract<ApiRequest, { action: 'regist
     );
   const objects =
     request.location.kind === 'object'
-      ? [await env.DATA.head(request.location.key)].filter((item) => item !== null)
-      : (await env.DATA.list({ prefix: request.location.key, limit: 1000 })).objects;
+      ? [await headSourceObject(request.location.key)].filter((item) => item !== null)
+      : (await listSourceObjects(request.location.key)).objects;
   if (!objects.length)
     throw new ApiError(404, 'r2_object_not_found', 'No matching R2 objects were found.');
   const dataSource: DataSourceRecord = {
@@ -641,7 +627,7 @@ async function registerDatasource(request: Extract<ApiRequest, { action: 'regist
     location: request.location,
     version: await hashJson(objects.map((object) => [object.key, object.etag])),
   };
-  const inspection = await describeDataSource(dataSource, env.R2_BUCKET_NAME);
+  const inspection = await describeDataSource(dataSource);
   const discovered = inspection.description.map((column) =>
     seedField(dataSource.id, column, inspection.samples),
   );
@@ -704,7 +690,6 @@ async function upsertCalculatedField(
   assertSingleExpression(request.expression);
   await explainIsolatedQuery(
     dataSource,
-    env.R2_BUCKET_NAME,
     `SELECT ${request.expression} FROM ${quoteIdentifier('rundown_source')} LIMIT 1`,
   );
   const mutableValues = {
@@ -780,7 +765,6 @@ async function upsertLibraryMetric(
     const expression = compileLibraryExpression(request.expression, metadata);
     await explainIsolatedQuery(
       dataSource,
-      env.R2_BUCKET_NAME,
       `SELECT ${expression} FROM ${quoteIdentifier('rundown_source')}`,
     );
     validated = true;
@@ -1032,7 +1016,7 @@ async function validateDefinition(dashboard: DashboardDocument, definition: Widg
     bucketName: env.R2_BUCKET_NAME,
     sourceTableName: 'rundown_source',
   });
-  await explainIsolatedQuery(dataSource, env.R2_BUCKET_NAME, compiled.sql, compiled.parameters);
+  await explainIsolatedQuery(dataSource, compiled.sql, compiled.parameters);
 }
 
 async function runDefinition(
@@ -1045,7 +1029,6 @@ async function runDefinition(
   const metadata = await loadQueryMetadata(dataSource.id, dashboard.workspaceId);
   const rows = await runIsolatedPreparedQuery<Record<string, unknown>>(
     dataSource,
-    env.R2_BUCKET_NAME,
     (sourceTableName) => {
       const compiled = compileWidgetQuery({
         dashboard,

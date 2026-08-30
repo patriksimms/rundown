@@ -31,14 +31,16 @@ async function execute(
   environment: QueryWorkerEnv,
   initialized: Promise<void>,
 ) {
-  assertEnvironment(environment);
   await initialized;
   const database = new DuckDB({ lockConfiguration: false });
   const connection = database.connect();
   try {
-    await connection.execute(
-      `CREATE SECRET rundown_r2 (TYPE R2, KEY_ID ${sqlString(environment.R2_ACCESS_KEY_ID)}, SECRET ${sqlString(environment.R2_SECRET_ACCESS_KEY)}, ACCOUNT_ID ${sqlString(environment.CLOUDFLARE_ACCOUNT_ID)})`,
-    );
+    if (request.requiresR2Credentials) {
+      assertR2Environment(environment);
+      await connection.execute(
+        `CREATE SECRET rundown_r2 (TYPE R2, KEY_ID ${sqlString(environment.R2_ACCESS_KEY_ID)}, SECRET ${sqlString(environment.R2_SECRET_ACCESS_KEY)}, ACCOUNT_ID ${sqlString(environment.CLOUDFLARE_ACCOUNT_ID)})`,
+      );
+    }
     await connection.execute(
       `CREATE TEMP TABLE rundown_source AS SELECT * FROM ${request.sourceSql}`,
     );
@@ -64,7 +66,7 @@ async function execute(
   }
 }
 
-function assertEnvironment(environment: QueryWorkerEnv) {
+function assertR2Environment(environment: QueryWorkerEnv) {
   if (
     !environment.CLOUDFLARE_ACCOUNT_ID ||
     !environment.R2_ACCESS_KEY_ID ||

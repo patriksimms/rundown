@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { defaultDateRange, type DashboardDocument } from '#/domain/schema';
-import { assertSingleExpression, compileLibraryExpression, compileWidgetQuery } from './compiler';
+import {
+  assertSingleExpression,
+  compileLibraryExpression,
+  compileSourceSqlFromBaseUrl,
+  compileWidgetQuery,
+} from './compiler';
 import type { DataSourceRecord, FieldRecord } from './types';
 
 const dataSource: DataSourceRecord = {
@@ -69,6 +74,17 @@ const dashboard: DashboardDocument = {
 };
 
 describe('query compiler', () => {
+  it('compiles explicit local files into an HTTP source', () => {
+    expect(
+      compileSourceSqlFromBaseUrl(dataSource, 'http://localhost:3000/__dev-data', [
+        'ws/workspace/report one.csv',
+        'ws/workspace/report two.csv',
+      ]),
+    ).toBe(
+      "read_csv_auto(['http://localhost:3000/__dev-data/ws/workspace/report%20one.csv', 'http://localhost:3000/__dev-data/ws/workspace/report%20two.csv'], header = true)",
+    );
+  });
+
   it('compiles stored fields, controls, aggregation, ordering, and limits against the isolated table', () => {
     const result = compileWidgetQuery({
       dashboard,
