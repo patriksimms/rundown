@@ -5,6 +5,7 @@ import { callApi } from '#/api/client';
 import { AppShell } from '#/components/app-shell';
 import { DashboardView } from '#/components/dashboard-view';
 import { ErrorState, LoadingState } from '#/components/request-state';
+import { Alert, AlertDescription } from '#/components/ui/alert';
 import { Badge } from '#/components/ui/badge';
 import { Button } from '#/components/ui/button';
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '#/components/ui/field';
@@ -354,43 +355,66 @@ function AddWidget({
   const [dimension, setDimension] = useState('');
   const [metric, setMetric] = useState('');
   const [expression, setExpression] = useState('');
+  const [error, setError] = useState<string>();
+  const [isAdding, setIsAdding] = useState(false);
 
   useEffect(() => {
     if (!sourceId) return;
-    void callApi<DescribedSource>({ action: 'describeDatasource', dataSourceId: sourceId }).then(
-      (result) => {
+    setSource(undefined);
+    setError(undefined);
+    void callApi<DescribedSource>({ action: 'describeDatasource', dataSourceId: sourceId })
+      .then((result) => {
         setSource(result);
         const all = [...result.fields, ...result.calculatedFields];
         setDateField(all.find((field) => field.role === 'date')?.id ?? '');
         setDimension(all.find((field) => field.role === 'dimension')?.id ?? '');
         setMetric(all.find((field) => field.role === 'metric')?.id ?? '');
-      },
-    );
+      })
+      .catch((caught: unknown) => {
+        setError(caught instanceof Error ? caught.message : String(caught));
+      });
   }, [sourceId]);
 
   async function add(event: FormEvent) {
     event.preventDefault();
-    const definition = makeDefinition({
-      type,
-      title,
-      sourceId,
-      dateField,
-      dimension,
-      metric,
-      expression,
-    });
-    await callApi({
-      action: 'addWidget',
-      dashboardId: dashboard.id,
-      definition,
-      width: ['scorecard', 'control', 'dateControl'].includes(type) ? 4 : 8,
-      height: 3,
-    });
-    await refresh();
+    setError(undefined);
+    setIsAdding(true);
+    try {
+      const definition = makeDefinition({
+        type,
+        title,
+        sourceId,
+        dateField,
+        dimension,
+        metric,
+        expression,
+      });
+      await callApi({
+        action: 'addWidget',
+        dashboardId: dashboard.id,
+        definition,
+        width: ['scorecard', 'control', 'dateControl'].includes(type) ? 4 : 8,
+        height: 3,
+      });
+      await refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setIsAdding(false);
+    }
   }
 
   const allFields = [...(source?.fields ?? []), ...(source?.calculatedFields ?? [])];
   const needsSource = type !== 'dateControl' && type !== 'text';
+  const needsDimension = !['scorecard', 'dateControl', 'text'].includes(type);
+  const needsMetric = !['control', 'dateControl', 'text'].includes(type);
+  const canAdd =
+    !isAdding &&
+    Boolean(title.trim()) &&
+    (!needsSource || Boolean(source && sourceId)) &&
+    (!needsSource || type === 'control' || Boolean(dateField)) &&
+    (!needsDimension || Boolean(dimension)) &&
+    (!needsMetric || Boolean(metric || expression.trim()));
   return (
     <aside>
       <h2 className="mb-4 text-lg font-semibold">Add widget</h2>
@@ -503,9 +527,14 @@ function AddWidget({
               />
             </Field>
           ) : null}
-          <Button type="submit">
+          {error ? (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          ) : null}
+          <Button type="submit" disabled={!canAdd}>
             <PlusIcon data-icon="inline-start" />
-            Add widget
+            {isAdding ? 'Adding widget...' : 'Add widget'}
           </Button>
         </FieldGroup>
       </form>

@@ -14,7 +14,7 @@ export default defineConfig({
     { name: 'mobile', use: { ...devices['Pixel 7'] } },
   ],
   webServer: {
-    command: 'bun run dev',
+    command: 'RUNDOWN_DISABLE_CONTAINERS=1 bun run dev',
     url: 'http://localhost:3000/health',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

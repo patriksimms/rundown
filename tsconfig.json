@@ -2,7 +2,7 @@
   "include": [
     "src/**/*.ts",
     "src/**/*.tsx",
-    "query-worker/**/*.ts",
+    "container/**/*.ts",
     "vite.config.ts",
     "vitest.config.ts"
   ],

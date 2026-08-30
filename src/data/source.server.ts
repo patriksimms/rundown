@@ -64,7 +64,7 @@ export async function headSourceObject(key: string): Promise<SourceObject | null
 export async function resolveDataSource(dataSource: DataSourceRecord) {
   if (usesR2()) {
     return {
-      sql: compileSourceSqlFromBaseUrl(dataSource, env.DATA_SOURCE_BASE_URL),
+      sql: compileSourceSqlFromBaseUrl(dataSource, env.QUERY_DATA_SOURCE_BASE_URL),
       requiresR2Credentials: true,
     };
   }
@@ -77,7 +77,7 @@ export async function resolveDataSource(dataSource: DataSourceRecord) {
           .filter((key) => key.endsWith(`.${dataSource.location.format}`));
   if (!keys.length) throw new Error('No matching local data files were found.');
   return {
-    sql: compileSourceSqlFromBaseUrl(dataSource, env.DATA_SOURCE_BASE_URL, keys),
+    sql: compileSourceSqlFromBaseUrl(dataSource, env.QUERY_DATA_SOURCE_BASE_URL, keys),
     requiresR2Credentials: false,
   };
 }

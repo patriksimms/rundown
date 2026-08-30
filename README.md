@@ -4,10 +4,9 @@ Rundown turns reporting intent into query-backed client dashboards. Editors buil
 through WebMCP tools, viewers use stored widgets and controls, and admins register existing CSV or
 parquet files from tenant-scoped R2 prefixes.
 
-The TanStack Start app and API run in one Cloudflare Worker. Query execution runs in a second,
-private Worker using Ducklings and DuckDB/WASM. A Service Binding connects them without exposing the
-query Worker on a public route. The app Worker authorizes the datasource and compiles SQL. The query
-Worker materializes only that source into a temporary table and disables external access before
+The TanStack Start app and API run in a Cloudflare Worker. Query execution runs in a Bun Cloudflare
+Container with native DuckDB. The Worker authorizes the datasource and compiles SQL, then the
+container materializes only that source into a temporary table and disables external access before
 compiling user expressions.
 
 ## Local development
@@ -18,11 +17,10 @@ bun run db:migrate:local
 bun run dev
 ```
 
-The development server starts both Workers and wires the local Service Binding. The build copies the
-WASM module from the installed Ducklings package into an ignored local file before Vite starts.
-Place CSV and parquet files in `dev-data/`. Local workspaces see those files under their tenant-scoped
-`ws/<workspaceId>/` prefix. Vite serves the files with range request support so DuckDB can query them
-without R2 credentials or a separate object-storage service.
+Docker must be running for local query execution. Place CSV and parquet files in `dev-data/`. Local
+workspaces see those files under their tenant-scoped `ws/<workspaceId>/` prefix. Vite serves the
+files with range request support so the query container can read them without R2 credentials or a
+separate object-storage service.
 
 For example:
 
@@ -31,7 +29,12 @@ cp reporting_example.csv dev-data/
 ```
 
 Local D1 and KV data persist in `.wrangler/`. The application still uses R2 bindings and direct
-DuckDB R2 reads in built and deployed Workers.
+DuckDB R2 reads in built and deployed containers. To work only on routes that do not query data,
+start the app without local containers:
+
+```sh
+RUNDOWN_DISABLE_CONTAINERS=1 bun run dev
+```
 
 The app runs at `http://localhost:3000`. `GET /health` verifies the Worker can serve requests.
 
@@ -69,8 +72,8 @@ bun run db:migrate:production
 ## Cloudflare deployment
 
 The app is available at [rundown.rundown.workers.dev](https://rundown.rundown.workers.dev).
-Cloudflare deploys every push to `main`. One Vite build produces both Workers. Deployment uploads the
-private query Worker first and the app Worker second, so the Service Binding always has a target.
+Cloudflare deploys every push to `main`. The Worker deployment also builds and uploads the query
+container image.
 
 The GitHub repository is connected with these Workers Builds settings:
 
@@ -86,15 +89,10 @@ Set the `BUN_VERSION` build variable to `1.3.10`. Enable non-production branch b
 The named preview environment remains available for deliberate preview deployments with
 `bun run deploy:preview`, but is not used by pull-request checks.
 
-The app Worker needs `CLERK_SECRET_KEY` in each environment. Cloudflare Builds needs
-`VITE_CLERK_PUBLISHABLE_KEY` as a build variable.
-
-The private query Worker needs `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` from an R2 API token that
-can read the configured bucket. Wrangler environments are separate Workers, so production secrets
-do not carry over to preview.
-
-The Worker names in Cloudflare must match the configs: `rundown` and `rundown-query` in production,
-then `rundown-preview` and `rundown-query-preview` in preview.
+Each environment needs `CLERK_SECRET_KEY`, `R2_ACCESS_KEY_ID`, and `R2_SECRET_ACCESS_KEY`. The R2
+credentials come from an API token that can read the configured bucket and are passed to the private
+query container at startup. Cloudflare Builds needs `VITE_CLERK_PUBLISHABLE_KEY` as a build variable.
+Wrangler environments are separate Workers, so production secrets do not carry over to preview.
 
 To deploy from a local authenticated shell instead:
 
@@ -109,13 +107,10 @@ The Worker expects these private resources:
 | D1       | `rundown-app`         | `rundown-app-preview`         |
 | KV       | `rundown-query-cache` | `rundown-query-cache-preview` |
 | R2       | `rundown-data`        | `rundown-data-preview`        |
-| Worker   | `rundown-query`       | `rundown-query-preview`       |
 
-The query Worker has no route and `workers_dev` is disabled. It is reachable only through the app
-Worker's `QUERY_ENGINE` Service Binding. Vite minifies production bundles with `oxc`. The query
-Worker's compressed upload is 10,198.75 KiB, about 41 KiB below Cloudflare's 10 MiB paid-Worker
-limit. Keep dependencies and generic validation libraries out of that Worker unless a dry-run proves
-the bundle still fits.
+The deployment provisions `QueryEngineContainer` as a SQLite-backed Durable Object namespace.
+Production permits five `basic` instances; preview permits two. Cloudflare Builds needs container
+builds enabled so Wrangler can build and push the checked-in `Dockerfile`.
 
 To recreate the infrastructure in another Cloudflare account, enable R2 once in the dashboard and create the private buckets with:
 
