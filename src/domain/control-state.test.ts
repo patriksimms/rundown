@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mergeControlState } from './control-state';
+import { mergeControlState, withDefaultDateRange } from './control-state';
 
 describe('dashboard control defaults', () => {
   const defaults = {
@@ -32,6 +32,23 @@ describe('dashboard control defaults', () => {
     expect(mergeControlState(defaults, { values: { region: ['APAC'] } })).toEqual({
       ...defaults,
       values: { region: ['APAC'], channel: ['search'] },
+    });
+  });
+
+  it('fills a missing date range when a date control is added', () => {
+    expect(withDefaultDateRange({}, defaults.dateRange)).toEqual({
+      dateRange: defaults.dateRange,
+    });
+  });
+
+  it('preserves a user-selected date range', () => {
+    const selected = {
+      startDate: { fixed: '2026-02-01' as const },
+      endDate: { fixed: '2026-02-28' as const },
+    };
+
+    expect(withDefaultDateRange({ dateRange: selected }, defaults.dateRange)).toEqual({
+      dateRange: selected,
     });
   });
 });

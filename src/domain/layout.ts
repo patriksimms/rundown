@@ -55,3 +55,26 @@ export function validateLayoutUpdate(
   }));
   return placed.every((widget) => placementFits(placed, widget.layout, columns, widget.id));
 }
+
+export function rollbackFailedLayout(
+  widgets: DashboardWidget[],
+  previous: ReadonlyMap<string, DashboardWidget['layout']>,
+  failed: ReadonlyMap<string, DashboardWidget['layout']>,
+) {
+  return widgets.map((widget) => {
+    const previousPlacement = previous.get(widget.id);
+    const failedPlacement = failed.get(widget.id);
+    return previousPlacement && failedPlacement && samePlacement(widget.layout, failedPlacement)
+      ? { ...widget, layout: previousPlacement }
+      : widget;
+  });
+}
+
+function samePlacement(left: DashboardWidget['layout'], right: DashboardWidget['layout']) {
+  return (
+    left.x === right.x &&
+    left.y === right.y &&
+    left.width === right.width &&
+    left.height === right.height
+  );
+}

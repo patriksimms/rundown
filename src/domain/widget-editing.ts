@@ -22,3 +22,17 @@ export function clearControlValue(state: ControlState, controlId: string): Contr
     values: { ...state.values, [controlId]: [] },
   };
 }
+
+export function filterInputValue(value: unknown, list: boolean) {
+  if (list && Array.isArray(value)) return value.map(String).join(', ');
+  return value == null ? '' : String(value);
+}
+
+export function filterValueFromInput(value: string, list: boolean) {
+  return list
+    ? value
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+    : value;
+}

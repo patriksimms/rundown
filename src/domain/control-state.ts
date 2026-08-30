@@ -7,3 +7,10 @@ export function mergeControlState(defaults: ControlState, input?: ControlState):
     values: { ...defaults.values, ...input?.values },
   };
 }
+
+export function withDefaultDateRange(
+  state: ControlState,
+  dateRange: NonNullable<ControlState['dateRange']>,
+) {
+  return state.dateRange ? state : { ...state, dateRange };
+}

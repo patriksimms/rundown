@@ -91,7 +91,13 @@ function Widget({
       </Card>
     );
   if (widget.definition.type === 'dateControl')
-    return <DateControl controlState={controlState} setControlState={setControlState} />;
+    return (
+      <DateControl
+        widgetId={widget.id}
+        controlState={controlState}
+        setControlState={setControlState}
+      />
+    );
   if (widget.definition.type === 'control')
     return (
       <FilterControl
@@ -140,9 +146,11 @@ export function DashboardWidgetView({
 }
 
 function DateControl({
+  widgetId,
   controlState,
   setControlState,
 }: {
+  widgetId: string;
   controlState: ControlState;
   setControlState: (state: ControlState) => void;
 }) {
@@ -154,9 +162,9 @@ function DateControl({
       </CardHeader>
       <CardContent className="grid grid-cols-2 gap-3">
         <Field>
-          <FieldLabel htmlFor="date-start">Start</FieldLabel>
+          <FieldLabel htmlFor={`date-start-${widgetId}`}>Start</FieldLabel>
           <Input
-            id="date-start"
+            id={`date-start-${widgetId}`}
             type="date"
             value={range && 'fixed' in range.startDate ? range.startDate.fixed : ''}
             onChange={(event) =>
@@ -171,9 +179,9 @@ function DateControl({
           />
         </Field>
         <Field>
-          <FieldLabel htmlFor="date-end">End</FieldLabel>
+          <FieldLabel htmlFor={`date-end-${widgetId}`}>End</FieldLabel>
           <Input
-            id="date-end"
+            id={`date-end-${widgetId}`}
             type="date"
             value={range && 'fixed' in range.endDate ? range.endDate.fixed : ''}
             onChange={(event) =>

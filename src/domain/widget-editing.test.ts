@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   clearControlValue,
+  filterInputValue,
+  filterValueFromInput,
   patchFilterCondition,
   type WidgetFilter,
 } from '#/domain/widget-editing';
@@ -37,5 +39,12 @@ describe('widget filter editing', () => {
     expect(mergeControlState({ values: { country: ['DE'] } }, cleared)).toEqual({
       values: { country: [] },
     });
+  });
+
+  it('round-trips list filter values through the text input', () => {
+    const input = filterInputValue(['DE', 'FR'], true);
+
+    expect(input).toBe('DE, FR');
+    expect(filterValueFromInput(input, true)).toEqual(['DE', 'FR']);
   });
 });

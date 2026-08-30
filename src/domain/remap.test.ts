@@ -410,4 +410,73 @@ describe('widget datasource remapping', () => {
       'SUM("cost"::INT4) + COUNT(CAST("day" AS TIMESTAMP WITH TIME ZONE)) + COUNT("day" + INTERVAL 1 DAY)',
     );
   });
+
+  it('preserves every metric and its display type', () => {
+    const definition = remapWidgetDefinition(
+      {
+        type: 'line',
+        title: 'Spend and target',
+        dataSourceId: 'source',
+        dateRangeFieldId: 'source_date',
+        dimension: { fieldId: 'source_campaign' },
+        metrics: [
+          {
+            source: { kind: 'field', fieldId: 'source_spend', aggregation: 'sum' },
+            dataType: 'currency',
+          },
+          {
+            source: { kind: 'library', libraryMetricId: 'target_metric' },
+            dataType: 'percent',
+          },
+        ],
+      },
+      source,
+      'target',
+      {
+        fields: [
+          { id: 'target_date', canonicalName: 'date', columnName: 'day' },
+          { id: 'target_campaign', canonicalName: 'campaign', columnName: 'campaign' },
+          { id: 'target_spend', canonicalName: 'spend', columnName: 'cost' },
+        ],
+        calculatedFields: [],
+      },
+    );
+    if (definition.type !== 'line') throw new Error('Expected a line chart.');
+    expect(definition.metrics).toHaveLength(2);
+    expect(definition.metrics[0]).toMatchObject({
+      source: { fieldId: 'target_spend' },
+      dataType: 'currency',
+    });
+    expect(definition.metrics[1]).toEqual({
+      source: { kind: 'library', libraryMetricId: 'target_metric' },
+      dataType: 'percent',
+    });
+  });
+
+  it('rejects a chart target without its dimension', () => {
+    expect(() =>
+      remapWidgetDefinition(
+        {
+          type: 'bar',
+          title: 'Spend by campaign',
+          dataSourceId: 'source',
+          dateRangeFieldId: 'source_date',
+          dimension: { fieldId: 'source_campaign' },
+          metric: {
+            source: { kind: 'field', fieldId: 'source_spend', aggregation: 'sum' },
+            dataType: 'currency',
+          },
+        },
+        source,
+        'target',
+        {
+          fields: [
+            { id: 'target_date', canonicalName: 'date', columnName: 'day' },
+            { id: 'target_spend', canonicalName: 'spend', columnName: 'cost' },
+          ],
+          calculatedFields: [],
+        },
+      ),
+    ).toThrow('source_campaign');
+  });
 });

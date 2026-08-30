@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { appendPlacement, placementFits, validateLayoutUpdate } from './layout';
+import {
+  appendPlacement,
+  placementFits,
+  rollbackFailedLayout,
+  validateLayoutUpdate,
+} from './layout';
 import type { DashboardWidget } from './schema';
 
 const widget: DashboardWidget = {
@@ -59,5 +64,26 @@ describe('dashboard layout', () => {
         { widgetId: 'two', placement: { x: 8, y: 0, width: 6, height: 2 } },
       ]),
     ).toBe(false);
+  });
+
+  it('rolls back only placements that still match the failed save', () => {
+    const failed = { x: 2, y: 2, width: 6, height: 2 };
+    const newer = { x: 4, y: 4, width: 6, height: 2 };
+    const second = { ...widget, id: 'two', layout: failed };
+
+    const rolledBack = rollbackFailedLayout(
+      [{ ...widget, layout: newer }, second],
+      new Map([
+        ['one', widget.layout],
+        ['two', { x: 6, y: 0, width: 6, height: 2 }],
+      ]),
+      new Map([
+        ['one', failed],
+        ['two', failed],
+      ]),
+    );
+
+    expect(rolledBack[0]?.layout).toEqual(newer);
+    expect(rolledBack[1]?.layout).toEqual({ x: 6, y: 0, width: 6, height: 2 });
   });
 });

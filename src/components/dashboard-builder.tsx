@@ -56,7 +56,17 @@ import {
 } from '#/components/ui/sheet';
 import { Textarea } from '#/components/ui/textarea';
 import { cn } from '#/lib/utils';
-import { clearControlValue, patchFilterCondition } from '#/domain/widget-editing';
+import {
+  clearControlValue,
+  filterInputValue,
+  filterValueFromInput,
+  patchFilterCondition,
+} from '#/domain/widget-editing';
+import { remapWidgetDefinition } from '#/domain/remap';
+import { replacePlainTextDocument, textDocument } from '#/domain/text-content';
+import { withDefaultDateRange } from '#/domain/control-state';
+import { createSerialQueue } from '#/domain/serial-queue';
+import { rollbackFailedLayout } from '#/domain/layout';
 import type {
   ControlState,
   Aggregation,
@@ -142,14 +152,56 @@ export function DashboardBuilder({
     initialControlState(initialDashboard),
   );
   const [error, setError] = useState<string>();
-  const [saving, setSaving] = useState(false);
+  const [pendingOperations, setPendingOperations] = useState(0);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [chartRevision, setChartRevision] = useState(0);
   const [pendingWidgets, setPendingWidgets] = useState<Record<string, number>>({});
+  const [desktop, setDesktop] = useState<boolean>();
+  const dashboardRef = useRef(initialDashboard);
+  const mutationQueueRef = useRef(createSerialQueue());
+  const mutationRevisionRef = useRef(0);
   const draggedType = useRef<BuilderType | undefined>(undefined);
   const { width, containerRef, mounted } = useContainerWidth({ measureBeforeMount: true });
+  const saving = pendingOperations > 0;
 
-  useEffect(() => setDashboard(initialDashboard), [initialDashboard]);
+  useEffect(() => {
+    dashboardRef.current = initialDashboard;
+    setDashboard(initialDashboard);
+  }, [initialDashboard]);
+  useEffect(() => {
+    const query = window.matchMedia('(min-width: 48rem)');
+    const update = () => setDesktop(query.matches);
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+  useEffect(() => {
+    const dateControl = dashboard.widgets.find(
+      (widget) => widget.definition.type === 'dateControl',
+    );
+    if (!dateControl || dateControl.definition.type !== 'dateControl') return;
+    const defaultDateRange = dateControl.definition.defaultDateRange ?? dashboard.defaultDateRange;
+    setControlState((current) => withDefaultDateRange(current, defaultDateRange));
+  }, [dashboard.defaultDateRange, dashboard.widgets]);
+
+  function updateDashboard(updater: (current: DashboardDocument) => DashboardDocument) {
+    const next = updater(dashboardRef.current);
+    dashboardRef.current = next;
+    setDashboard(next);
+    return next;
+  }
+
+  function enqueueMutation<T>(operation: () => Promise<T>) {
+    return mutationQueueRef.current(operation);
+  }
+
+  function startSaving() {
+    setPendingOperations((current) => current + 1);
+  }
+
+  function finishSaving() {
+    setPendingOperations((current) => Math.max(0, current - 1));
+  }
 
   const layout = useMemo<Layout>(
     () =>
@@ -167,71 +219,106 @@ export function DashboardBuilder({
   const selected = dashboard.widgets.find((widget) => widget.id === selectedId);
 
   async function saveLayout(next: Layout) {
+    const revision = ++mutationRevisionRef.current;
     const byId = new Map(next.map((item) => [item.i, item]));
-    const widgets = dashboard.widgets.map((widget) => {
-      const item = byId.get(widget.id);
-      return item
-        ? {
-            ...widget,
-            layout: { x: item.x, y: item.y, width: item.w, height: item.h },
-          }
-        : widget;
-    });
-    setDashboard({ ...dashboard, widgets });
-    setSaving(true);
+    const previousLayouts = new Map(
+      dashboardRef.current.widgets.map((widget) => [widget.id, widget.layout]),
+    );
+    const optimistic = updateDashboard((current) => ({
+      ...current,
+      widgets: current.widgets.map((widget) => {
+        const item = byId.get(widget.id);
+        return item
+          ? {
+              ...widget,
+              layout: { x: item.x, y: item.y, width: item.w, height: item.h },
+            }
+          : widget;
+      }),
+    }));
+    const optimisticLayouts = new Map(
+      optimistic.widgets.map((widget) => [widget.id, widget.layout]),
+    );
+    startSaving();
     setError(undefined);
     try {
-      await callApi({
-        action: 'updateLayout',
-        dashboardId: dashboard.id,
-        placements: widgets.map((widget) => ({ widgetId: widget.id, placement: widget.layout })),
+      await enqueueMutation(() => {
+        const current = dashboardRef.current;
+        return callApi({
+          action: 'updateLayout',
+          dashboardId: current.id,
+          placements: current.widgets.map((widget) => ({
+            widgetId: widget.id,
+            placement: widget.layout,
+          })),
+        });
       });
+      if (revision === mutationRevisionRef.current) {
+        setError(undefined);
+        await refresh();
+      }
     } catch (caught) {
-      setDashboard(dashboard);
-      setError(message(caught));
+      if (revision === mutationRevisionRef.current)
+        updateDashboard((current) => ({
+          ...current,
+          widgets: rollbackFailedLayout(current.widgets, previousLayouts, optimisticLayouts),
+        }));
+      if (revision === mutationRevisionRef.current) setError(message(caught));
     } finally {
-      setSaving(false);
+      finishSaving();
     }
   }
 
   async function addWidget(type: BuilderType, dropped?: LayoutItem) {
     const entry = catalog.find((item) => item.type === type)!;
-    setSaving(true);
+    let revision: number | undefined;
+    startSaving();
     setError(undefined);
     try {
       const definition = await defaultDefinition(type, dataSources[0]);
-      const result = await callApi<{ widget: DashboardWidget }>({
-        action: 'addWidget',
-        dashboardId: dashboard.id,
-        definition,
-        width: dropped?.w ?? entry.size.width,
-        height: dropped?.h ?? entry.size.height,
-      });
-      const widget = dropped
-        ? {
-            ...result.widget,
-            layout: { x: dropped.x, y: dropped.y, width: dropped.w, height: dropped.h },
-          }
-        : result.widget;
-      const widgets = [...dashboard.widgets, widget];
-      setDashboard({ ...dashboard, widgets });
+      revision = ++mutationRevisionRef.current;
+      const result = await enqueueMutation(() =>
+        callApi<{ widget: DashboardWidget }>({
+          action: 'addWidget',
+          dashboardId: dashboardRef.current.id,
+          definition,
+          width: dropped?.w ?? entry.size.width,
+          height: dropped?.h ?? entry.size.height,
+        }),
+      );
+      const widget = result.widget;
+      const next = updateDashboard((current) => ({
+        ...current,
+        widgets: current.widgets.some((item) => item.id === widget.id)
+          ? current.widgets
+          : [...current.widgets, widget],
+      }));
       setSelectedId(widget.id);
       setMobileOpen(true);
       if (dropped)
-        await callApi({
-          action: 'updateLayout',
-          dashboardId: dashboard.id,
-          placements: widgets.map((item) => ({ widgetId: item.id, placement: item.layout })),
-        });
-      await refresh();
+        await saveLayout(
+          next.widgets.map((item) => ({
+            i: item.id,
+            x: item.id === widget.id ? dropped.x : item.layout.x,
+            y: item.id === widget.id ? dropped.y : item.layout.y,
+            w: item.id === widget.id ? dropped.w : item.layout.width,
+            h: item.id === widget.id ? dropped.h : item.layout.height,
+          })),
+        );
+      else if (revision === mutationRevisionRef.current) {
+        setError(undefined);
+        await refresh();
+      }
     } catch (caught) {
-      setError(message(caught));
+      if (revision === undefined || revision === mutationRevisionRef.current)
+        setError(message(caught));
     } finally {
-      setSaving(false);
+      finishSaving();
     }
   }
 
   async function updateWidget(widget: DashboardWidget, definition: WidgetDefinition) {
+    const revision = ++mutationRevisionRef.current;
     const previous = widget;
     const controlFieldChanged =
       widget.definition.type === 'control' &&
@@ -240,32 +327,49 @@ export function DashboardBuilder({
         widget.definition.fieldId !== definition.fieldId);
     const previousControlValues = controlState.values?.[widget.id];
     if (controlFieldChanged) setControlState((current) => clearControlValue(current, widget.id));
-    const widgets = dashboard.widgets.map((item) =>
-      item.id === widget.id ? { ...item, definition } : item,
-    );
-    setDashboard({ ...dashboard, widgets });
+    updateDashboard((current) => ({
+      ...current,
+      widgets: current.widgets.map((item) =>
+        item.id === widget.id ? { ...item, definition } : item,
+      ),
+    }));
     setPendingWidgets((current) => ({
       ...current,
       [widget.id]: (current[widget.id] ?? 0) + 1,
     }));
-    setSaving(true);
+    startSaving();
     setError(undefined);
     try {
-      const result = await callApi<{ widget: DashboardWidget }>({
-        action: 'updateWidget',
-        dashboardId: dashboard.id,
-        widgetId: widget.id,
-        definition,
-      });
-      setDashboard((current) => ({
+      const result = await enqueueMutation(() =>
+        callApi<{ widget: DashboardWidget }>({
+          action: 'updateWidget',
+          dashboardId: dashboardRef.current.id,
+          widgetId: widget.id,
+          definition,
+        }),
+      );
+      updateDashboard((current) => ({
         ...current,
         widgets: current.widgets.map((item) =>
-          item.id === widget.id && item.definition === definition ? result.widget : item,
+          item.id === widget.id && item.definition === definition
+            ? {
+                ...item,
+                definition: result.widget.definition,
+                definitionHash: result.widget.definitionHash,
+              }
+            : item,
         ),
       }));
-      await refresh();
+      if (revision === mutationRevisionRef.current) {
+        setError(undefined);
+        await refresh();
+      }
     } catch (caught) {
-      if (controlFieldChanged)
+      if (
+        controlFieldChanged &&
+        dashboardRef.current.widgets.find((item) => item.id === widget.id)?.definition ===
+          definition
+      )
         setControlState((current) => {
           if ((current.values?.[widget.id]?.length ?? 0) > 0) return current;
           const values = { ...current.values };
@@ -273,13 +377,19 @@ export function DashboardBuilder({
           else delete values[widget.id];
           return { ...current, values: Object.keys(values).length ? values : undefined };
         });
-      setDashboard((current) => ({
+      updateDashboard((current) => ({
         ...current,
         widgets: current.widgets.map((item) =>
-          item.id === widget.id && item.definition === definition ? previous : item,
+          item.id === widget.id && item.definition === definition
+            ? {
+                ...item,
+                definition: previous.definition,
+                definitionHash: previous.definitionHash,
+              }
+            : item,
         ),
       }));
-      setError(message(caught));
+      if (revision === mutationRevisionRef.current) setError(message(caught));
     } finally {
       setPendingWidgets((current) => {
         const next = (current[widget.id] ?? 1) - 1;
@@ -287,24 +397,35 @@ export function DashboardBuilder({
         const { [widget.id]: _removed, ...rest } = current;
         return rest;
       });
-      setSaving(false);
+      finishSaving();
     }
   }
 
   async function removeWidget(widget: DashboardWidget) {
-    setSaving(true);
+    const revision = ++mutationRevisionRef.current;
+    startSaving();
+    setError(undefined);
     try {
-      await callApi({ action: 'removeWidget', dashboardId: dashboard.id, widgetId: widget.id });
-      setDashboard({
-        ...dashboard,
-        widgets: dashboard.widgets.filter((item) => item.id !== widget.id),
-      });
+      await enqueueMutation(() =>
+        callApi({
+          action: 'removeWidget',
+          dashboardId: dashboardRef.current.id,
+          widgetId: widget.id,
+        }),
+      );
+      updateDashboard((current) => ({
+        ...current,
+        widgets: current.widgets.filter((item) => item.id !== widget.id),
+      }));
       setSelectedId(undefined);
-      await refresh();
+      if (revision === mutationRevisionRef.current) {
+        setError(undefined);
+        await refresh();
+      }
     } catch (caught) {
-      setError(message(caught));
+      if (revision === mutationRevisionRef.current) setError(message(caught));
     } finally {
-      setSaving(false);
+      finishSaving();
     }
   }
 
@@ -341,6 +462,11 @@ export function DashboardBuilder({
       }}
     />
   );
+  const settingsPanel = (
+    <fieldset disabled={saving} className="min-w-0 border-0 p-0">
+      {sidebar}
+    </fieldset>
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -348,21 +474,23 @@ export function DashboardBuilder({
         <p className="text-sm text-muted-foreground">
           {saving ? 'Saving...' : 'Changes save automatically'}
         </p>
-        <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-          <SheetTrigger render={<Button className="md:hidden" variant="outline" size="sm" />}>
-            <Settings2Icon data-icon="inline-start" />
-            {selected ? 'Widget settings' : 'Add widget'}
-          </SheetTrigger>
-          <SheetContent side="right" className="w-[min(92vw,24rem)] overflow-y-auto">
-            <SheetHeader>
-              <SheetTitle>{selected ? 'Widget settings' : 'Add widget'}</SheetTitle>
-              <SheetDescription>
-                Every builder action is available without drag and resize.
-              </SheetDescription>
-            </SheetHeader>
-            <div className="px-4 pb-6">{sidebar}</div>
-          </SheetContent>
-        </Sheet>
+        {desktop === false ? (
+          <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+            <SheetTrigger render={<Button variant="outline" size="sm" />}>
+              <Settings2Icon data-icon="inline-start" />
+              {selected ? 'Widget settings' : 'Add widget'}
+            </SheetTrigger>
+            <SheetContent side="right" className="w-[min(92vw,24rem)] overflow-y-auto">
+              <SheetHeader>
+                <SheetTitle>{selected ? 'Widget settings' : 'Add widget'}</SheetTitle>
+                <SheetDescription>
+                  Every builder action is available without drag and resize.
+                </SheetDescription>
+              </SheetHeader>
+              <div className="px-4 pb-6">{settingsPanel}</div>
+            </SheetContent>
+          </Sheet>
+        ) : null}
       </div>
       {error ? (
         <Alert variant="destructive">
@@ -371,112 +499,118 @@ export function DashboardBuilder({
       ) : null}
       <div className="grid items-start gap-5 md:grid-cols-[minmax(0,1fr)_20rem]">
         <div>
-          <div
-            ref={containerRef}
-            className="relative hidden min-h-80 rounded-xl bg-muted/50 md:block"
-          >
-            {mounted ? (
-              <>
-                <GridBackground
-                  width={width}
-                  cols={12}
-                  rowHeight={56}
-                  margin={[8, 8]}
-                  rows={Math.max(10, ...layout.map((item) => item.y + item.h + 2))}
-                  color="var(--color-muted)"
-                  borderRadius={6}
-                />
-                <GridLayout
-                  width={width}
-                  layout={layout}
-                  compactor={noCompactor}
-                  gridConfig={{ cols: 12, rowHeight: 56, margin: [8, 8] }}
-                  dragConfig={{ handle: '.widget-drag-handle', threshold: 8 }}
-                  resizeConfig={{ handles: ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'] }}
-                  dropConfig={{ enabled: true, defaultItem: { w: 4, h: 3 } }}
-                  droppingItem={{ i: '__dropping__', x: 0, y: 0, w: 4, h: 3 }}
-                  onDrop={(next, item) => {
-                    const type = draggedType.current;
-                    draggedType.current = undefined;
-                    if (type && item) void addWidget(type, item);
-                    else if (next.length === dashboard.widgets.length) void saveLayout(next);
-                  }}
-                  onDropDragOver={() => {
-                    const entry = catalog.find((item) => item.type === draggedType.current);
-                    return entry ? { w: entry.size.width, h: entry.size.height } : false;
-                  }}
-                  onDragStop={(next) => void saveLayout(next)}
-                  onResizeStop={(next) => {
-                    setChartRevision((value) => value + 1);
-                    void saveLayout(next);
-                  }}
-                >
-                  {dashboard.widgets.map((widget) => (
-                    <div
-                      key={widget.id}
-                      className={cn(
-                        'group overflow-hidden rounded-xl bg-card shadow-sm ring-1 ring-foreground/10',
-                        selectedId === widget.id && 'ring-2 ring-primary',
-                      )}
-                      onClick={() => setSelectedId(widget.id)}
-                    >
-                      <button
-                        type="button"
-                        className="widget-drag-handle absolute top-2 left-1/2 z-10 -translate-x-1/2 rounded-md bg-background/90 p-1 opacity-0 shadow-sm ring-1 ring-foreground/10 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-                        aria-label={`Move ${widgetLabel(widget)}`}
-                      >
-                        <GripVerticalIcon className="size-4" />
-                      </button>
-                      <div
-                        key={`${widget.id}-${chartRevision}`}
-                        className="h-full [&>[data-slot=card]]:h-full"
-                      >
-                        <DashboardWidgetView
-                          dashboard={dashboard}
-                          widget={widget}
-                          preview={Boolean(pendingWidgets[widget.id])}
-                          controlState={controlState}
-                          setControlState={setControlState}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </GridLayout>
-              </>
-            ) : null}
-          </div>
-          <div className="flex flex-col gap-4 md:hidden">
-            {[...dashboard.widgets]
-              .sort(
-                (left, right) => left.layout.y - right.layout.y || left.layout.x - right.layout.x,
-              )
-              .map((widget) => (
-                <div key={widget.id} className="relative rounded-xl ring-1 ring-foreground/10">
-                  <Button
-                    className="absolute top-2 right-2 z-10"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setSelectedId(widget.id);
-                      setMobileOpen(true);
+          {desktop ? (
+            <div ref={containerRef} className="relative min-h-80 rounded-xl bg-muted/50">
+              {mounted ? (
+                <>
+                  <GridBackground
+                    width={width}
+                    cols={12}
+                    rowHeight={56}
+                    margin={[8, 8]}
+                    rows={Math.max(10, ...layout.map((item) => item.y + item.h + 2))}
+                    color="var(--color-muted)"
+                    borderRadius={6}
+                  />
+                  <GridLayout
+                    width={width}
+                    layout={layout}
+                    compactor={noCompactor}
+                    gridConfig={{ cols: 12, rowHeight: 56, margin: [8, 8] }}
+                    dragConfig={{ enabled: !saving, handle: '.widget-drag-handle', threshold: 8 }}
+                    resizeConfig={{
+                      enabled: !saving,
+                      handles: ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'],
+                    }}
+                    dropConfig={{ enabled: !saving, defaultItem: { w: 4, h: 3 } }}
+                    droppingItem={{ i: '__dropping__', x: 0, y: 0, w: 4, h: 3 }}
+                    onDrop={(next, item) => {
+                      const type = draggedType.current;
+                      draggedType.current = undefined;
+                      if (type && item) void addWidget(type, item);
+                      else if (next.length === dashboard.widgets.length) void saveLayout(next);
+                    }}
+                    onDropDragOver={() => {
+                      const entry = catalog.find((item) => item.type === draggedType.current);
+                      return entry ? { w: entry.size.width, h: entry.size.height } : false;
+                    }}
+                    onDragStop={(next) => void saveLayout(next)}
+                    onResizeStop={(next) => {
+                      setChartRevision((value) => value + 1);
+                      void saveLayout(next);
                     }}
                   >
-                    Edit
-                  </Button>
-                  <DashboardWidgetView
-                    dashboard={dashboard}
-                    widget={widget}
-                    preview={Boolean(pendingWidgets[widget.id])}
-                    controlState={controlState}
-                    setControlState={setControlState}
-                  />
-                </div>
-              ))}
-          </div>
+                    {dashboard.widgets.map((widget) => (
+                      <div
+                        key={widget.id}
+                        className={cn(
+                          'group overflow-hidden rounded-xl bg-card shadow-sm ring-1 ring-foreground/10',
+                          selectedId === widget.id && 'ring-2 ring-primary',
+                        )}
+                        onClick={() => setSelectedId(widget.id)}
+                      >
+                        <button
+                          type="button"
+                          className="widget-drag-handle absolute top-2 left-1/2 z-10 -translate-x-1/2 rounded-md bg-background/90 p-1 opacity-0 shadow-sm ring-1 ring-foreground/10 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                          aria-label={`Move ${widgetLabel(widget)}`}
+                        >
+                          <GripVerticalIcon className="size-4" />
+                        </button>
+                        <div
+                          key={`${widget.id}-${chartRevision}`}
+                          className="h-full [&>[data-slot=card]]:h-full"
+                        >
+                          <DashboardWidgetView
+                            dashboard={dashboard}
+                            widget={widget}
+                            preview={Boolean(pendingWidgets[widget.id])}
+                            controlState={controlState}
+                            setControlState={setControlState}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </GridLayout>
+                </>
+              ) : null}
+            </div>
+          ) : null}
+          {desktop === false ? (
+            <div className="flex flex-col gap-4">
+              {[...dashboard.widgets]
+                .sort(
+                  (left, right) => left.layout.y - right.layout.y || left.layout.x - right.layout.x,
+                )
+                .map((widget) => (
+                  <div key={widget.id} className="relative rounded-xl ring-1 ring-foreground/10">
+                    <Button
+                      className="absolute top-2 right-2 z-10"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setSelectedId(widget.id);
+                        setMobileOpen(true);
+                      }}
+                    >
+                      Edit
+                    </Button>
+                    <DashboardWidgetView
+                      dashboard={dashboard}
+                      widget={widget}
+                      preview={Boolean(pendingWidgets[widget.id])}
+                      controlState={controlState}
+                      setControlState={setControlState}
+                    />
+                  </div>
+                ))}
+            </div>
+          ) : null}
         </div>
-        <aside className="sticky top-4 hidden max-h-[calc(100vh-2rem)] overflow-y-auto pr-1 md:block">
-          {sidebar}
-        </aside>
+        {desktop ? (
+          <aside className="sticky top-4 max-h-[calc(100vh-2rem)] overflow-y-auto pr-1">
+            {settingsPanel}
+          </aside>
+        ) : null}
       </div>
     </div>
   );
@@ -582,15 +716,25 @@ function WidgetSettings({
   const [sourceOpen, setSourceOpen] = useState(false);
   const [formulaOpen, setFormulaOpen] = useState(false);
   const [dimensionOpen, setDimensionOpen] = useState(false);
+  const [settingsError, setSettingsError] = useState<string>();
+  const sourceRequestRef = useRef(0);
   const sourceId = 'dataSourceId' in definition ? definition.dataSourceId : undefined;
-  useEffect(() => setDefinition(widget.definition), [widget]);
+  useEffect(() => {
+    sourceRequestRef.current += 1;
+    setDefinition(widget.definition);
+    setSettingsError(undefined);
+  }, [widget]);
   useEffect(() => {
     if (!sourceId) return;
     const currentSourceId = sourceId;
     let current = true;
     async function loadSource() {
-      const next = await describeSource(currentSourceId, dashboardId);
-      if (current) setSource(next);
+      try {
+        const next = await describeSource(currentSourceId, dashboardId);
+        if (current) setSource(next);
+      } catch (caught) {
+        if (current) setSettingsError(message(caught));
+      }
     }
     void loadSource();
     return () => {
@@ -601,6 +745,18 @@ function WidgetSettings({
   async function commit(next: WidgetDefinition) {
     setDefinition(next);
     await onChange(next);
+  }
+
+  async function selectSource(dataSourceId: string) {
+    if (!('dataSourceId' in definition)) return;
+    const request = ++sourceRequestRef.current;
+    setSettingsError(undefined);
+    try {
+      const next = await changeSource(definition, dataSourceId, dashboardId);
+      if (request === sourceRequestRef.current) await commit(next);
+    } catch (caught) {
+      if (request === sourceRequestRef.current) setSettingsError(message(caught));
+    }
   }
 
   const fields = [...(source?.fields ?? []), ...(source?.calculatedFields ?? [])];
@@ -623,6 +779,11 @@ function WidgetSettings({
           <Trash2Icon />
         </Button>
       </div>
+      {settingsError ? (
+        <Alert variant="destructive">
+          <AlertDescription>{settingsError}</AlertDescription>
+        </Alert>
+      ) : null}
       {'title' in definition ? (
         <Field>
           <FieldLabel htmlFor={`title-${widget.id}`}>Title</FieldLabel>
@@ -639,15 +800,30 @@ function WidgetSettings({
           <FieldLabel htmlFor={`text-${widget.id}`}>Text</FieldLabel>
           <Textarea
             id={`text-${widget.id}`}
-            value={plainText(definition.content.document)}
+            value={textDocument(definition.content.document)}
+            readOnly={typeof definition.content.document !== 'string'}
             onChange={(event) =>
+              typeof definition.content.document === 'string' &&
               setDefinition({
                 ...definition,
-                content: { ...definition.content, document: event.target.value },
+                content: {
+                  ...definition.content,
+                  document: replacePlainTextDocument(
+                    definition.content.document,
+                    event.target.value,
+                  ),
+                },
               })
             }
-            onBlur={() => void commit(definition)}
+            onBlur={() => {
+              if (typeof definition.content.document === 'string') void commit(definition);
+            }}
           />
+          {typeof definition.content.document !== 'string' ? (
+            <FieldDescription>
+              Structured text is read-only here so its document format stays intact.
+            </FieldDescription>
+          ) : null}
         </Field>
       ) : null}
       {'dataSourceId' in definition ? (
@@ -658,9 +834,7 @@ function WidgetSettings({
                 label="Source"
                 value={definition.dataSourceId}
                 fields={dataSources.map((item) => ({ id: item.id, label: item.name }))}
-                onChange={(dataSourceId) =>
-                  void changeSource(definition, dataSourceId, dashboardId, commit)
-                }
+                onChange={(dataSourceId) => void selectSource(dataSourceId)}
               />
             </div>
             <Button
@@ -1137,8 +1311,18 @@ function FilterSettings({ definition, fields, commit }: QuerySettingsProps) {
           </NativeSelect>
           {!['isEmpty', 'isNotEmpty'].includes(condition.operator) ? (
             <FilterValueInput
-              value={String(condition.value ?? '')}
-              onCommit={(value) => updateCondition(index, { value })}
+              value={filterInputValue(
+                condition.value,
+                condition.operator === 'in' || condition.operator === 'notIn',
+              )}
+              onCommit={(value) =>
+                updateCondition(index, {
+                  value: filterValueFromInput(
+                    value,
+                    condition.operator === 'in' || condition.operator === 'notIn',
+                  ),
+                })
+              }
             />
           ) : null}
           <Button
@@ -1572,36 +1756,50 @@ function DatasourceFieldRow({
   onSaved: () => Promise<void>;
 }) {
   const [value, setValue] = useState(field);
+  const [saveError, setSaveError] = useState<string>();
+  const [savingField, setSavingField] = useState(false);
+  const savingRef = useRef(false);
   async function save() {
-    if (field.columnName)
-      await callApi({
-        action: 'updateFieldMetadata',
-        dashboardId,
-        dataSourceId: sourceId,
-        columnName: field.columnName,
-        patch: {
-          label: value.label,
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSavingField(true);
+    setSaveError(undefined);
+    try {
+      if (field.columnName)
+        await callApi({
+          action: 'updateFieldMetadata',
+          dashboardId,
+          dataSourceId: sourceId,
+          columnName: field.columnName,
+          patch: {
+            label: value.label,
+            role: value.role,
+            semanticType: value.semanticType,
+            defaultAggregation: value.defaultAggregation ?? null,
+            description: value.description ?? null,
+          },
+        });
+      else if (field.expression)
+        await callApi({
+          action: 'upsertCalculatedField',
+          dashboardId,
+          dataSourceId: sourceId,
+          id: field.id,
+          name: value.label,
+          canonicalName: value.canonicalName,
+          expression: field.expression,
           role: value.role,
           semanticType: value.semanticType,
           defaultAggregation: value.defaultAggregation ?? null,
-          description: value.description ?? null,
-        },
-      });
-    else if (field.expression)
-      await callApi({
-        action: 'upsertCalculatedField',
-        dashboardId,
-        dataSourceId: sourceId,
-        id: field.id,
-        name: value.label,
-        canonicalName: value.canonicalName,
-        expression: field.expression,
-        role: value.role,
-        semanticType: value.semanticType,
-        defaultAggregation: value.defaultAggregation ?? null,
-        description: value.description ?? undefined,
-      });
-    await onSaved();
+          description: value.description ?? undefined,
+        });
+      await onSaved();
+    } catch (caught) {
+      setSaveError(message(caught));
+    } finally {
+      savingRef.current = false;
+      setSavingField(false);
+    }
   }
   return (
     <div
@@ -1672,9 +1870,10 @@ function DatasourceFieldRow({
           onChange={(event) => setValue({ ...value, description: event.target.value })}
         />
       </Field>
-      <Button variant="outline" size="sm" onClick={() => void save()}>
-        Save
+      <Button variant="outline" size="sm" disabled={savingField} onClick={() => void save()}>
+        {savingField ? 'Saving...' : 'Save'}
       </Button>
+      {saveError ? <p className="text-sm text-destructive sm:col-span-full">{saveError}</p> : null}
     </div>
   );
 }
@@ -1702,8 +1901,15 @@ function MetricFormulaDialog({
   const [name, setName] = useState('Custom metric');
   const [expression, setExpression] = useState('');
   const [saveLibrary, setSaveLibrary] = useState(false);
+  const [dialogError, setDialogError] = useState<string>();
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
+    setDialogError(undefined);
     const metric = {
       source: { kind: 'expression' as const, expression },
       userDefinedName: name,
@@ -1715,17 +1921,24 @@ function MetricFormulaDialog({
         : 'metrics' in definition
           ? { ...definition, metrics: [...definition.metrics, metric] }
           : definition;
-    await callApi({ action: 'previewWidget', dashboardId, definition: next });
-    if (saveLibrary)
-      await callApi({
-        action: 'upsertLibraryMetric',
-        dashboardId,
-        name,
-        expression,
-        semanticType: 'ratio',
-      });
-    await onSave(next);
-    onOpenChange(false);
+    try {
+      await callApi({ action: 'previewWidget', dashboardId, definition: next });
+      if (saveLibrary)
+        await callApi({
+          action: 'upsertLibraryMetric',
+          dashboardId,
+          name,
+          expression,
+          semanticType: 'ratio',
+        });
+      await onSave(next);
+      onOpenChange(false);
+    } catch (caught) {
+      setDialogError(message(caught));
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
   }
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1738,6 +1951,11 @@ function MetricFormulaDialog({
         </DialogHeader>
         <form onSubmit={submit}>
           <FieldGroup>
+            {dialogError ? (
+              <Alert variant="destructive">
+                <AlertDescription>{dialogError}</AlertDescription>
+              </Alert>
+            ) : null}
             <Field>
               <FieldLabel>Name</FieldLabel>
               <Input value={name} onChange={(event) => setName(event.target.value)} />
@@ -1758,8 +1976,8 @@ function MetricFormulaDialog({
               />{' '}
               Save to workspace library
             </label>
-            <Button type="submit" disabled={!name.trim() || !expression.trim()}>
-              Preview and add
+            <Button type="submit" disabled={submitting || !name.trim() || !expression.trim()}>
+              {submitting ? 'Adding...' : 'Preview and add'}
             </Button>
           </FieldGroup>
         </form>
@@ -1896,42 +2114,13 @@ async function defaultDefinition(
   return { ...base, type, dimension: { fieldId: dimension.id }, metric, limit: 20 };
 }
 
-async function changeSource(
-  definition: QueryDefinition,
-  sourceId: string,
-  dashboardId: string,
-  commit: (definition: WidgetDefinition) => Promise<void>,
-) {
-  const source = await describeSource(sourceId, dashboardId);
-  const fields = [...source.fields, ...source.calculatedFields];
-  const date = fields.find((field) => field.role === 'date');
-  const dimension = fields.find((field) => field.role === 'dimension' || field.role === 'id');
-  const metricField = fields.find((field) => field.role === 'metric');
-  if (definition.type === 'control') {
-    if (!dimension) throw new Error('The datasource has no dimension.');
-    return commit({
-      ...definition,
-      dataSourceId: sourceId,
-      fieldId: dimension.id,
-      defaultValues: undefined,
-    });
-  }
-  if (!date || !metricField) throw new Error('The datasource needs a date field and metric field.');
-  let next: QueryDefinition = { ...definition, dataSourceId: sourceId, dateRangeFieldId: date.id };
-  if ('dimension' in next && dimension) next = { ...next, dimension: { fieldId: dimension.id } };
-  if ('dimensions' in next && dimension)
-    next = { ...next, dimensions: [{ fieldId: dimension.id }] };
-  const metric = {
-    source: {
-      kind: 'field' as const,
-      fieldId: metricField.id,
-      aggregation: metricField.defaultAggregation ?? 'sum',
-    },
-    dataType: 'number' as const,
-  };
-  if ('metric' in next) next = { ...next, metric };
-  if ('metrics' in next) next = { ...next, metrics: [metric] };
-  return commit(next);
+async function changeSource(definition: QueryDefinition, sourceId: string, dashboardId: string) {
+  const [currentSource, targetSource] = await Promise.all([
+    describeSource(definition.dataSourceId, dashboardId),
+    describeSource(sourceId, dashboardId),
+  ]);
+  const remapped = remapWidgetDefinition(definition, currentSource, sourceId, targetSource);
+  return remapped.type === 'control' ? { ...remapped, defaultValues: undefined } : remapped;
 }
 
 function describeSource(sourceId: string, dashboardId?: string) {
@@ -1947,10 +2136,6 @@ function widgetLabel(widget: DashboardWidget) {
   if (widget.definition.type === 'control') return widget.definition.userDefinedName ?? 'Filter';
   if (widget.definition.type === 'dateControl') return 'Date range';
   return 'Text';
-}
-
-function plainText(value: unknown): string {
-  return typeof value === 'string' ? value : JSON.stringify(value);
 }
 
 function message(error: unknown) {
