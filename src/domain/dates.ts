@@ -90,6 +90,11 @@ export function updateDateRangeBoundary(
   return { range: next };
 }
 
+export function dateRangeOrderError(range: DateRange, timezone: string) {
+  const resolved = resolveDateRange(range, timezone);
+  return resolved.start > resolved.end ? invalidRangeMessage : undefined;
+}
+
 function shiftMonths(date: Date, amount: number) {
   const target = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + amount, 1));
   const lastDay = new Date(

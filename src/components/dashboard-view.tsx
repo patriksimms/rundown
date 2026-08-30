@@ -19,7 +19,7 @@ import { Input } from '#/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '#/components/ui/native-select';
 import { Skeleton } from '#/components/ui/skeleton';
 import { widgetQueryRequest } from '#/domain/widget-query';
-import { resolveDateRange, updateDateRangeBoundary } from '#/domain/dates';
+import { dateRangeOrderError, resolveDateRange, updateDateRangeBoundary } from '#/domain/dates';
 import {
   Table,
   TableBody,
@@ -165,6 +165,7 @@ function DateControl({
   const range = controlState.dateRange;
   const resolved = range ? resolveDateRange(range, timezone) : undefined;
   const [error, setError] = useState<string>();
+  const displayedError = error ?? (range ? dateRangeOrderError(range, timezone) : undefined);
 
   const updateBoundary = (boundary: 'start' | 'end', value: string) => {
     if (!range) return;
@@ -178,27 +179,27 @@ function DateControl({
         <CardTitle>Date range</CardTitle>
       </CardHeader>
       <CardContent className="grid grid-cols-2 gap-3">
-        <Field data-invalid={Boolean(error)}>
+        <Field data-invalid={Boolean(displayedError)}>
           <FieldLabel htmlFor={`date-start-${widgetId}`}>Start</FieldLabel>
           <Input
             id={`date-start-${widgetId}`}
             type="date"
             value={resolved?.start ?? ''}
-            aria-invalid={Boolean(error)}
+            aria-invalid={Boolean(displayedError)}
             onChange={(event) => updateBoundary('start', event.target.value)}
           />
         </Field>
-        <Field data-invalid={Boolean(error)}>
+        <Field data-invalid={Boolean(displayedError)}>
           <FieldLabel htmlFor={`date-end-${widgetId}`}>End</FieldLabel>
           <Input
             id={`date-end-${widgetId}`}
             type="date"
             value={resolved?.end ?? ''}
-            aria-invalid={Boolean(error)}
+            aria-invalid={Boolean(displayedError)}
             onChange={(event) => updateBoundary('end', event.target.value)}
           />
         </Field>
-        <FieldError className="col-span-2">{error}</FieldError>
+        <FieldError className="col-span-2">{displayedError}</FieldError>
       </CardContent>
     </Card>
   );

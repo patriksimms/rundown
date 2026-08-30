@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { comparisonDateRange, resolveDateRange, updateDateRangeBoundary } from './dates';
+import {
+  comparisonDateRange,
+  dateRangeOrderError,
+  resolveDateRange,
+  updateDateRangeBoundary,
+} from './dates';
 
 describe('date range resolution', () => {
   it('resolves relative dates in the dashboard timezone', () => {
@@ -113,6 +118,22 @@ describe('date range resolution', () => {
         '2026-08-11',
       ),
     ).toEqual({ error: 'The start date must not be after the end date.' });
+  });
+
+  it('reports a reversed relative default before it is edited', () => {
+    expect(
+      dateRangeOrderError(
+        {
+          startDate: {
+            relative: { amount: 0, unit: 'day', direction: 'past', anchor: 'now' },
+          },
+          endDate: {
+            relative: { amount: 7, unit: 'day', direction: 'past', anchor: 'now' },
+          },
+        },
+        'UTC',
+      ),
+    ).toBe('The start date must not be after the end date.');
   });
 
   it('builds inclusive previous-period and previous-year ranges', () => {

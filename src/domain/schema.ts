@@ -6,6 +6,7 @@ export const timezoneSchema = z
   .min(1)
   .refine(
     (timezone) => {
+      if (/^[+-]\d{1,2}(?::\d{2})?$/.test(timezone)) return false;
       try {
         new Intl.DateTimeFormat('en', { timeZone: timezone });
         return true;
@@ -219,7 +220,8 @@ export const dashboardDocumentSchema = z.object({
   workspaceId: z.string().min(1),
   name: z.string().trim().min(1),
   schemaVersion: z.literal(2),
-  timezone: timezoneSchema.default('Europe/Berlin'),
+  // Persisted documents predate strict timezone validation. Requests validate new values.
+  timezone: z.string().min(1).default('Europe/Berlin'),
   defaultDateRange: dateRangeSchema,
   columns: z.number().int().positive().default(12),
   widgets: z.array(dashboardWidgetSchema),
