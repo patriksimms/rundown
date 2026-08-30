@@ -72,7 +72,7 @@ function MetricsPage() {
     }
   }
   return (
-    <AppShell>
+    <AppShell requireWorkspace>
       <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6">
         {error ? (
           <ErrorState error={error} />

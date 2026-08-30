@@ -41,7 +41,7 @@ function DashboardPage() {
     onMutation: refresh,
   });
   return (
-    <AppShell>
+    <AppShell requireWorkspace>
       <main className="mx-auto w-full max-w-[100rem] px-4 py-6 sm:px-6">
         {error ? (
           <ErrorState error={error} />

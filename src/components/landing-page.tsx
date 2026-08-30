@@ -1,4 +1,4 @@
-import { SignInButton, SignUpButton } from '@clerk/tanstack-react-start';
+import { SignInAction, SignUpAction } from '#/components/auth-actions';
 import { BrowserFrame } from '#/components/browser-frame';
 import { Button } from '#/components/ui/button';
 
@@ -33,14 +33,14 @@ export function LandingPage() {
             filter, and access rule inspectable.
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-3">
-            <SignUpButton>
+            <SignUpAction>
               <Button className="h-10 px-4">Create account</Button>
-            </SignUpButton>
-            <SignInButton>
+            </SignUpAction>
+            <SignInAction>
               <Button variant="outline" className="h-10 px-4">
                 Sign in
               </Button>
-            </SignInButton>
+            </SignInAction>
           </div>
         </div>
         <BrowserFrame
@@ -97,9 +97,9 @@ export function LandingPage() {
             Point Rundown at a file you already have and see the first dashboard.
           </h2>
           <div className="mt-7">
-            <SignUpButton>
+            <SignUpAction>
               <Button className="h-10 px-4">Create account</Button>
-            </SignUpButton>
+            </SignUpAction>
           </div>
         </div>
       </section>
