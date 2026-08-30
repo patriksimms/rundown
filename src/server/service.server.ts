@@ -677,6 +677,7 @@ async function prepareDatasourceUpload(
     workspaceId: session.workspace.id,
     clerkUserId: session.userId,
     status: 'pending',
+    claimId: null,
     createdAt: now,
     updatedAt: now,
   });
@@ -701,9 +702,10 @@ async function removeDatasourceUpload(
     ))
   )
     throw new ApiError(403, 'invalid_cleanup_token', 'This upload cannot be removed by this user.');
+  const claimId = crypto.randomUUID();
   const claimedRemoval = await database()
     .update(datasourceUploads)
-    .set({ status: 'removing', updatedAt: new Date().toISOString() })
+    .set({ status: 'removing', claimId, updatedAt: new Date().toISOString() })
     .where(
       and(
         eq(datasourceUploads.key, request.key),
@@ -717,17 +719,18 @@ async function removeDatasourceUpload(
     throw new ApiError(409, 'upload_not_pending', 'This upload is not available for removal.');
   try {
     if (await isDatasourceObjectRegistered(session.workspace.id, request.key)) {
-      await deleteUploadState(session, request.key, 'removing');
+      await deleteUploadState(session, request.key, 'removing', claimId);
       throw new ApiError(
         409,
         'upload_in_use',
         'This file belongs to a registered datasource and cannot be removed.',
       );
     }
+    await renewUploadClaim(session, request.key, 'removing', claimId);
     await deleteSourceObject(request.key);
-    await deleteUploadState(session, request.key, 'removing');
+    await deleteUploadState(session, request.key, 'removing', claimId);
   } catch (error) {
-    await restorePendingUpload(session, request.key, 'removing');
+    await restorePendingUpload(session, request.key, 'removing', claimId);
     throw error;
   }
   return { removed: true };
@@ -769,7 +772,9 @@ async function registerDatasource(request: Extract<ApiRequest, { action: 'regist
     isManagedDatasourceUpload(session.workspace.r2Prefix, request.location.key)
       ? request.location.key
       : undefined;
-  if (managedUploadKey) await claimPendingUpload(session, managedUploadKey, request.cleanupToken);
+  const claimId = managedUploadKey
+    ? await claimPendingUpload(session, managedUploadKey, request.cleanupToken)
+    : undefined;
   try {
     const objects =
       request.location.kind === 'object'
@@ -802,6 +807,22 @@ async function registerDatasource(request: Extract<ApiRequest, { action: 'regist
     );
     const now = new Date().toISOString();
     const db = database();
+    if (managedUploadKey && claimId)
+      await renewUploadClaim(session, managedUploadKey, 'registering', claimId);
+    const uploadCompletion =
+      managedUploadKey && claimId
+        ? [
+            db
+              .delete(datasourceUploads)
+              .where(
+                and(
+                  eq(datasourceUploads.key, managedUploadKey),
+                  eq(datasourceUploads.claimId, claimId),
+                  eq(datasourceUploads.status, 'registering'),
+                ),
+              ),
+          ]
+        : [];
     await db.batch([
       db.insert(dataSources).values({
         id: dataSource.id,
@@ -815,13 +836,12 @@ async function registerDatasource(request: Extract<ApiRequest, { action: 'regist
       ...discovered.map((field) =>
         db.insert(fields).values({ ...field, workspaceId: session.workspace.id }),
       ),
-      ...(managedUploadKey
-        ? [db.delete(datasourceUploads).where(eq(datasourceUploads.key, managedUploadKey))]
-        : []),
+      ...uploadCompletion,
     ]);
     return { ...dataSource, fields: discovered };
   } catch (error) {
-    if (managedUploadKey) await restorePendingUpload(session, managedUploadKey, 'registering');
+    if (managedUploadKey && claimId)
+      await restorePendingUpload(session, managedUploadKey, 'registering', claimId);
     throw error;
   }
 }
@@ -853,9 +873,10 @@ async function claimPendingUpload(
     ))
   )
     throw new ApiError(403, 'invalid_cleanup_token', 'This upload belongs to another user.');
+  const claimId = crypto.randomUUID();
   const claimed = await database()
     .update(datasourceUploads)
-    .set({ status: 'registering', updatedAt: new Date().toISOString() })
+    .set({ status: 'registering', claimId, updatedAt: new Date().toISOString() })
     .where(
       and(
         eq(datasourceUploads.key, key),
@@ -867,6 +888,7 @@ async function claimPendingUpload(
     .returning({ key: datasourceUploads.key });
   if (!claimed.length)
     throw new ApiError(409, 'upload_not_pending', 'This upload is already being processed.');
+  return claimId;
 }
 
 function claimableUploadStatus() {
@@ -883,16 +905,18 @@ async function restorePendingUpload(
   session: SessionContext,
   key: string,
   fromStatus: 'registering' | 'removing',
+  claimId: string,
 ) {
   await database()
     .update(datasourceUploads)
-    .set({ status: 'pending', updatedAt: new Date().toISOString() })
+    .set({ status: 'pending', claimId: null, updatedAt: new Date().toISOString() })
     .where(
       and(
         eq(datasourceUploads.key, key),
         eq(datasourceUploads.workspaceId, session.workspace.id),
         eq(datasourceUploads.clerkUserId, session.userId),
         eq(datasourceUploads.status, fromStatus),
+        eq(datasourceUploads.claimId, claimId),
       ),
     );
 }
@@ -901,6 +925,7 @@ async function deleteUploadState(
   session: SessionContext,
   key: string,
   status: 'registering' | 'removing',
+  claimId: string,
 ) {
   await database()
     .delete(datasourceUploads)
@@ -910,8 +935,32 @@ async function deleteUploadState(
         eq(datasourceUploads.workspaceId, session.workspace.id),
         eq(datasourceUploads.clerkUserId, session.userId),
         eq(datasourceUploads.status, status),
+        eq(datasourceUploads.claimId, claimId),
       ),
     );
+}
+
+async function renewUploadClaim(
+  session: SessionContext,
+  key: string,
+  status: 'registering' | 'removing',
+  claimId: string,
+) {
+  const renewed = await database()
+    .update(datasourceUploads)
+    .set({ updatedAt: new Date().toISOString() })
+    .where(
+      and(
+        eq(datasourceUploads.key, key),
+        eq(datasourceUploads.workspaceId, session.workspace.id),
+        eq(datasourceUploads.clerkUserId, session.userId),
+        eq(datasourceUploads.status, status),
+        eq(datasourceUploads.claimId, claimId),
+      ),
+    )
+    .returning({ key: datasourceUploads.key });
+  if (!renewed.length)
+    throw new ApiError(409, 'upload_claim_lost', 'This upload operation was superseded.');
 }
 
 async function updateFieldMetadata(

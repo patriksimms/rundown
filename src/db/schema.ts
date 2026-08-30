@@ -46,6 +46,7 @@ export const datasourceUploads = sqliteTable(
     workspaceId: text('workspace_id').notNull(),
     clerkUserId: text('clerk_user_id').notNull(),
     status: text({ enum: ['pending', 'registering', 'removing'] }).notNull(),
+    claimId: text('claim_id'),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },
