@@ -11,6 +11,7 @@ import {
 } from 'recharts';
 import { useEffect, useState, type CSSProperties } from 'react';
 import type { ControlState, DashboardDocument, DashboardWidget } from '#/domain/schema';
+import type { QueryResultColumn } from '#/domain/query-result';
 import { callApi } from '#/api/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '#/components/ui/card';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '#/components/ui/chart';
@@ -279,14 +280,17 @@ function QueryCard({
   controlState: ControlState;
 }) {
   const [rows, setRows] = useState<Record<string, unknown>[]>();
+  const [columns, setColumns] = useState<QueryResultColumn[]>();
   const [comparisonRows, setComparisonRows] = useState<Record<string, unknown>[]>();
   const [error, setError] = useState<string>();
   useEffect(() => {
     let current = true;
     setRows(undefined);
+    setColumns(undefined);
     setComparisonRows(undefined);
     void callApi<{
       rows: Record<string, unknown>[];
+      columns: QueryResultColumn[];
       comparisonRows?: Record<string, unknown>[];
     }>(
       widgetQueryRequest({
@@ -300,6 +304,7 @@ function QueryCard({
       .then((result) => {
         if (!current) return;
         setRows(result.rows);
+        setColumns(result.columns);
         setComparisonRows(result.comparisonRows);
         setError(undefined);
       })
@@ -319,47 +324,47 @@ function QueryCard({
         {error ? <CardDescription>{error}</CardDescription> : null}
       </CardHeader>
       <CardContent>
-        {!rows ? (
+        {!rows || !columns ? (
           <Skeleton className="h-28 w-full" />
         ) : (
-          <Result definition={definition} rows={rows} comparisonRows={comparisonRows} />
+          <Result
+            definition={definition}
+            rows={rows}
+            columns={columns}
+            comparisonRows={comparisonRows}
+          />
         )}
       </CardContent>
     </Card>
   );
 }
 
-function Result({
+export function Result({
   definition,
   rows,
+  columns,
   comparisonRows,
 }: {
   definition: Extract<DashboardWidget['definition'], { title: string }>;
   rows: Record<string, unknown>[];
+  columns: QueryResultColumn[];
   comparisonRows?: Record<string, unknown>[];
 }) {
-  const columns = Object.keys(rows[0] ?? {});
+  const dimensionColumns = columns.filter((column) => column.kind === 'dimension');
+  const metricColumns = columns.filter((column) => column.kind === 'metric');
   if (definition.type === 'scorecard' || definition.type === 'gauge') {
-    const value = rows[0]?.[columns[0] ?? ''];
-    const previous = comparisonRows?.[0]?.[Object.keys(comparisonRows[0] ?? {})[0] ?? ''];
+    const metric = metricColumns[0]!;
+    const value = rows[0]?.[metric.key];
+    const previous = comparisonRows?.[0]?.[metric.key];
     const maximum =
       definition.type === 'gauge' && definition.upperLimit?.kind === 'manual'
         ? definition.upperLimit.value
         : undefined;
     return (
       <div className="space-y-2">
-        <p className="text-4xl font-semibold tracking-tight">
-          {formatValue(value, definition.metric.dataType, definition.metric.displayFormat?.radix)}
-        </p>
+        <p className="text-4xl font-semibold tracking-tight">{formatValue(value, metric)}</p>
         {previous !== undefined ? (
-          <p className="text-sm text-muted-foreground">
-            Previous:{' '}
-            {formatValue(
-              previous,
-              definition.metric.dataType,
-              definition.metric.displayFormat?.radix,
-            )}
-          </p>
+          <p className="text-sm text-muted-foreground">Previous: {formatValue(previous, metric)}</p>
         ) : null}
         {maximum !== undefined ? (
           <div
@@ -382,7 +387,7 @@ function Result({
           <TableHeader>
             <TableRow>
               {columns.map((column) => (
-                <TableHead key={column}>{column}</TableHead>
+                <TableHead key={column.key}>{column.label}</TableHead>
               ))}
             </TableRow>
           </TableHeader>
@@ -390,7 +395,7 @@ function Result({
             {rows.map((row, index) => (
               <TableRow key={index}>
                 {columns.map((column) => (
-                  <TableCell key={column}>{formatValue(row[column])}</TableCell>
+                  <TableCell key={column.key}>{formatValue(row[column.key], column)}</TableCell>
                 ))}
               </TableRow>
             ))}
@@ -398,48 +403,73 @@ function Result({
         </Table>
       </div>
     );
-  if (!rows.length || columns.length < 2)
+  if (!rows.length || !dimensionColumns.length || !metricColumns.length)
     return <p className="text-sm text-muted-foreground">No rows for this date range.</p>;
-  const dimension = columns[0]!;
-  const metrics = columns.slice(1);
+  const dimension = dimensionColumns[0]!;
+  const chartRows = normalizeMetricValues(rows, metricColumns);
   const config = Object.fromEntries(
-    metrics.map((metric, index) => [
-      metric,
-      { label: metric, color: `var(--chart-${(index % 5) + 1})` },
+    metricColumns.map((metric, index) => [
+      metric.key,
+      { label: metric.label, color: `var(--chart-${(index % 5) + 1})` },
     ]),
+  );
+  const tooltip = (
+    <ChartTooltip
+      content={
+        <ChartTooltipContent
+          formatter={(value, name) => formatValue(value, columnByKey(metricColumns, String(name)))}
+        />
+      }
+    />
   );
   if (definition.type === 'pie')
     return (
       <ChartContainer className="mx-auto aspect-square max-h-72" config={config}>
         <PieChart>
-          <ChartTooltip content={<ChartTooltipContent />} />
-          <Pie data={rows} dataKey={metrics[0]} nameKey={dimension} fill="var(--color-metric_1)" />
+          {tooltip}
+          <Pie
+            data={chartRows}
+            dataKey={metricColumns[0]!.key}
+            nameKey={dimension.key}
+            fill={`var(--color-${metricColumns[0]!.key})`}
+          />
         </PieChart>
       </ChartContainer>
     );
   if (definition.type === 'bar')
     return (
       <ChartContainer className="h-72 w-full" config={config}>
-        <BarChart data={rows}>
+        <BarChart data={chartRows}>
           <CartesianGrid vertical={false} />
-          <XAxis dataKey={dimension} />
-          <YAxis />
-          <ChartTooltip content={<ChartTooltipContent />} />
-          {metrics.map((metric) => (
-            <Bar key={metric} dataKey={metric} fill={`var(--color-${metric})`} />
+          <XAxis
+            dataKey={dimension.key}
+            tickFormatter={(value) => formatAxisValue(value, dimension)}
+          />
+          <YAxis tickFormatter={(value) => formatAxisValue(value, metricColumns[0]!)} />
+          {tooltip}
+          {metricColumns.map((metric) => (
+            <Bar key={metric.key} dataKey={metric.key} fill={`var(--color-${metric.key})`} />
           ))}
         </BarChart>
       </ChartContainer>
     );
   return (
     <ChartContainer className="h-72 w-full" config={config}>
-      <LineChart data={rows}>
+      <LineChart data={chartRows}>
         <CartesianGrid vertical={false} />
-        <XAxis dataKey={dimension} />
-        <YAxis />
-        <ChartTooltip content={<ChartTooltipContent />} />
-        {metrics.map((metric) => (
-          <Line key={metric} dataKey={metric} stroke={`var(--color-${metric})`} dot={false} />
+        <XAxis
+          dataKey={dimension.key}
+          tickFormatter={(value) => formatAxisValue(value, dimension)}
+        />
+        <YAxis tickFormatter={(value) => formatAxisValue(value, metricColumns[0]!)} />
+        {tooltip}
+        {metricColumns.map((metric) => (
+          <Line
+            key={metric.key}
+            dataKey={metric.key}
+            stroke={`var(--color-${metric.key})`}
+            dot={false}
+          />
         ))}
       </LineChart>
     </ChartContainer>
@@ -470,18 +500,82 @@ function richText(value: unknown): string {
     return Object.values(value).map(richText).filter(Boolean).join(' ');
   return '';
 }
-function formatValue(value: unknown, type?: string, radix = 2) {
-  if (typeof value !== 'number') return value == null ? '' : String(value);
-  if (type === 'percent')
+export function formatValue(value: unknown, column: QueryResultColumn) {
+  const number = numericMetricValue(value, column);
+  if (number === undefined) return value == null ? '' : String(value);
+  const radix = column.radix ?? 2;
+  if (column.dataType === 'duration') return formatDuration(number, radix);
+  if (column.dataType === 'percent')
     return new Intl.NumberFormat(undefined, {
       style: 'percent',
       maximumFractionDigits: radix,
-    }).format(value);
-  if (type === 'currency')
+    }).format(number);
+  if (column.dataType === 'currency')
     return new Intl.NumberFormat(undefined, {
       style: 'currency',
       currency: 'EUR',
       maximumFractionDigits: radix,
-    }).format(value);
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: radix }).format(value);
+      minimumFractionDigits: radix,
+    }).format(number);
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: radix }).format(number);
+}
+
+function numericMetricValue(value: unknown, column: QueryResultColumn) {
+  if (column.kind !== 'metric') return undefined;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : undefined;
+}
+
+function normalizeMetricValues(rows: Record<string, unknown>[], metrics: QueryResultColumn[]) {
+  return rows.map((row) =>
+    Object.fromEntries(
+      Object.entries(row).map(([key, value]) => {
+        const column = metrics.find((metric) => metric.key === key);
+        return [key, column ? (numericMetricValue(value, column) ?? value) : value];
+      }),
+    ),
+  );
+}
+
+function columnByKey(columns: QueryResultColumn[], key: string) {
+  return columns.find((column) => column.key === key) ?? columns[0]!;
+}
+
+function formatAxisValue(value: unknown, column: QueryResultColumn) {
+  if (column.kind === 'dimension' && column.dataType === 'date' && typeof value === 'string') {
+    const date = new Date(`${value.slice(0, 10)}T00:00:00`);
+    if (!Number.isNaN(date.valueOf()))
+      return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date);
+  }
+  const number = numericMetricValue(value, column);
+  if (number === undefined) return String(value);
+  if (column.dataType === 'percent')
+    return new Intl.NumberFormat(undefined, {
+      style: 'percent',
+      notation: 'compact',
+      maximumFractionDigits: 1,
+    }).format(number);
+  return new Intl.NumberFormat(undefined, {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(number);
+}
+
+function formatDuration(seconds: number, radix: number) {
+  const sign = seconds < 0 ? '-' : '';
+  const absolute = Math.abs(seconds);
+  if (absolute < 60)
+    return `${sign}${new Intl.NumberFormat(undefined, { maximumFractionDigits: radix }).format(absolute)}s`;
+  const hours = Math.floor(absolute / 3_600);
+  const minutes = Math.floor((absolute % 3_600) / 60);
+  const remainingSeconds = Math.round(absolute % 60);
+  return `${sign}${[
+    hours ? `${hours}h` : '',
+    minutes ? `${minutes}m` : '',
+    remainingSeconds ? `${remainingSeconds}s` : '',
+  ]
+    .filter(Boolean)
+    .join(' ')}`;
 }
