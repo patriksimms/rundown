@@ -3,7 +3,6 @@ import {
   alignDateComparisonRows,
   pieBreakdownRows,
   pivotBreakdownRows,
-  seriesMetricIndex,
   tableSummaryDefinition,
   withComparisonSeries,
 } from './widget-results';
@@ -32,7 +31,10 @@ describe('widget result shaping', () => {
   it('adds comparison values as visible chart series', () => {
     expect(
       withComparisonSeries([{ month: 'Jan', spend: 20 }], [{ month: 'Dec', spend: 10 }]),
-    ).toEqual([{ month: 'Jan', spend: 20, comparison_0: 10 }]);
+    ).toEqual({
+      rows: [{ month: 'Jan', spend: 20, comparison_0: 10 }],
+      series: ['comparison_0'],
+    });
   });
 
   it('aligns categorical comparisons by their dimension value', () => {
@@ -48,10 +50,13 @@ describe('widget result shaping', () => {
         ],
         'key',
       ),
-    ).toEqual([
-      { campaign: 'A', spend: 100, comparison_0: 5 },
-      { campaign: 'B', spend: 10, comparison_0: 50 },
-    ]);
+    ).toEqual({
+      rows: [
+        { campaign: 'A', spend: 100, comparison_0: 5 },
+        { campaign: 'B', spend: 10, comparison_0: 50 },
+      ],
+      series: ['comparison_0'],
+    });
   });
 
   it('keeps dimensions that exist only in the comparison period', () => {
@@ -64,10 +69,13 @@ describe('widget result shaping', () => {
         ],
         'key',
       ),
-    ).toEqual([
-      { campaign: 'A', spend: 100, comparison_0: 50 },
-      { campaign: 'B', spend: undefined, comparison_0: 25 },
-    ]);
+    ).toEqual({
+      rows: [
+        { campaign: 'A', spend: 100, comparison_0: 50 },
+        { campaign: 'B', spend: undefined, comparison_0: 25 },
+      ],
+      series: ['comparison_0'],
+    });
   });
 
   it('normalizes shifted date comparisons without moving sparse buckets', () => {
@@ -108,10 +116,6 @@ describe('widget result shaping', () => {
     ).toEqual([{ hour: '2026-01-02T14:30:00.000Z', spend: 5 }]);
   });
 
-  it('maps previous series back to their source metric', () => {
-    expect(seriesMetricIndex('comparison_1', ['count', 'rate'])).toBe(1);
-  });
-
   it('keeps comparison series for sparse breakdowns', () => {
     const current = pivotBreakdownRows([
       { month: 'Jan', channel: 'Search', spend: 10 },
@@ -121,10 +125,26 @@ describe('widget result shaping', () => {
       { month: 'Jan', channel: 'Search', spend: 5 },
       { month: 'Feb', channel: 'Social', spend: 15 },
     ]);
-    expect(withComparisonSeries(current.rows, previous.rows, 'key', current.series)).toEqual([
-      { month: 'Jan', Search: 10, comparison_0: 5, comparison_1: undefined },
-      { month: 'Feb', Social: 20, comparison_0: undefined, comparison_1: 15 },
-    ]);
+    expect(withComparisonSeries(current.rows, previous.rows, 'key', current.series)).toEqual({
+      rows: [
+        { month: 'Jan', Search: 10, comparison_0: 5, comparison_1: undefined },
+        { month: 'Feb', Social: 20, comparison_0: undefined, comparison_1: 15 },
+      ],
+      series: ['comparison_0', 'comparison_1'],
+    });
+  });
+
+  it('avoids comparison key collisions with metric names', () => {
+    expect(
+      withComparisonSeries(
+        [{ day: 'Mon', comparison_0: 10 }],
+        [{ day: 'Mon', comparison_0: 5 }],
+        'key',
+      ),
+    ).toEqual({
+      rows: [{ day: 'Mon', comparison_0: 10, _comparison_0: 5 }],
+      series: ['_comparison_0'],
+    });
   });
 
   it('builds an unpaged aggregate query for table summaries', () => {

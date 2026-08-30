@@ -32,7 +32,17 @@ export function withComparisonSeries(
   const [dimension, ...rowMetrics] = Object.keys(rows[0] ?? comparisonRows[0] ?? {});
   const metrics =
     metricNames ?? (rowMetrics.length ? rowMetrics : Object.keys(comparisonRows[0] ?? {}).slice(1));
-  if (!dimension) return rows;
+  if (!dimension) return { rows, series: [] };
+  const occupiedKeys = new Set([
+    ...rows.flatMap((row) => Object.keys(row)),
+    ...comparisonRows.flatMap((row) => Object.keys(row)),
+  ]);
+  const comparisonSeries = metrics.map((_, index) => {
+    let key = `comparison_${index}`;
+    while (occupiedKeys.has(key)) key = `_${key}`;
+    occupiedKeys.add(key);
+    return key;
+  });
   const comparisonsByDimension = new Map(
     comparisonRows.map((row) => [String(row[dimension]), row]),
   );
@@ -49,17 +59,20 @@ export function withComparisonSeries(
             })),
         ]
       : rows;
-  return alignedRows.map((row, index) => ({
-    ...row,
-    ...Object.fromEntries(
-      metrics.map((metric, metricIndex) => [
-        `comparison_${metricIndex}`,
-        (alignment === 'key'
-          ? comparisonsByDimension.get(String(row[dimension]))
-          : comparisonRows[index])?.[metric],
-      ]),
-    ),
-  }));
+  return {
+    rows: alignedRows.map((row, index) => ({
+      ...row,
+      ...Object.fromEntries(
+        metrics.map((metric, metricIndex) => [
+          comparisonSeries[metricIndex],
+          (alignment === 'key'
+            ? comparisonsByDimension.get(String(row[dimension]))
+            : comparisonRows[index])?.[metric],
+        ]),
+      ),
+    })),
+    series: comparisonSeries,
+  };
 }
 
 export function alignDateComparisonRows(
@@ -100,12 +113,6 @@ export function alignDateComparisonRows(
           : `${date.toISOString().slice(0, 10)}${typeof value === 'string' ? value.slice(10) : ''}`,
     };
   });
-}
-
-export function seriesMetricIndex(series: string, currentMetrics: string[]) {
-  return series.startsWith('comparison_')
-    ? Number(series.slice('comparison_'.length))
-    : currentMetrics.indexOf(series);
 }
 
 export function tableSummaryDefinition(definition: WidgetDefinition): WidgetDefinition | undefined {

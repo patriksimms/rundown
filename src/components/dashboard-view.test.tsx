@@ -57,7 +57,10 @@ describe('widget result rendering', () => {
       metrics: [metric],
     };
     expect(render(line, [])).toContain('No rows');
-    expect(render(line, [{ month: 'Jan', metric_1: 10 }])).toContain('--color-metric_1');
+    expect(render(line, [{ month: 'Jan', metric_1: 10 }])).toContain('--color-chart_series_0');
+    const previousOnly = render(line, [], [{ month: 'Jan', metric_1: 5 }]);
+    expect(previousOnly).not.toContain('No rows');
+    expect(previousOnly).toContain('--color-chart_series_1');
     const barMarkup = render(
       {
         ...base,
@@ -66,12 +69,13 @@ describe('widget result rendering', () => {
         dimension: { fieldId: 'month' },
         breakdownDimension: { fieldId: 'channel' },
       },
-      [{ month: 'Jan', channel: 'Search', metric_1: 10 }],
-      [{ month: 'Jan', channel: 'Affiliate', metric_1: 5 }],
+      [{ month: 'Jan', channel: 'Paid Search', metric_1: 10 }],
+      [{ month: 'Jan', channel: 'Organic Social', metric_1: 5 }],
     );
-    expect(barMarkup).toContain('--color-Search');
-    expect(barMarkup).toContain('--color-Affiliate');
-    expect(barMarkup).toContain('--color-comparison_1');
+    expect(barMarkup).toContain('--color-chart_series_0');
+    expect(barMarkup).toContain('--color-chart_series_1');
+    expect(barMarkup).toContain('--color-chart_series_3');
+    expect(barMarkup).not.toContain('--color-Paid Search');
     expect(
       render(
         {
@@ -83,7 +87,7 @@ describe('widget result rendering', () => {
         },
         [{ month: 'Jan', channel: 'Search', metric_1: 10 }],
       ),
-    ).toContain('--color-metric_1');
+    ).toContain('--color-chart_series_0');
   });
 
   it('renders current and previous mixed-unit series', () => {
@@ -97,9 +101,9 @@ describe('widget result rendering', () => {
       [{ day: '2026-01-02', metric_1: 10, metric_2: 0.2 }],
       [{ day: '2026-01-02', metric_1: 8, metric_2: 0.1 }],
     );
-    expect(markup).toContain('--color-metric_2');
-    expect(markup).toContain('--color-comparison_0');
-    expect(markup).toContain('--color-comparison_1');
+    expect(markup).toContain('--color-chart_series_1');
+    expect(markup).toContain('--color-chart_series_2');
+    expect(markup).toContain('--color-chart_series_3');
   });
 
   it('renders table summary, comparison label, and empty range', () => {

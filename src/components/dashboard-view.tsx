@@ -23,7 +23,6 @@ import { widgetQueryRequest } from '#/domain/widget-query';
 import {
   pieBreakdownRows,
   pivotBreakdownRows,
-  seriesMetricIndex,
   withComparisonSeries,
 } from '#/domain/widget-results';
 import {
@@ -503,9 +502,13 @@ export function Result({
       </div>
     );
   }
-  if (!rows.length || columns.length < 2)
+  if ((!rows.length && !comparisonRows?.length) || columns.length < 2)
     return <p className="text-sm text-muted-foreground">No rows for this date range.</p>;
-  let chartRows = comparisonRows?.length ? withComparisonSeries(rows, comparisonRows, 'key') : rows;
+  const comparison = comparisonRows?.length
+    ? withComparisonSeries(rows, comparisonRows, 'key')
+    : undefined;
+  let chartRows = comparison?.rows ?? rows;
+  let comparisonMetrics = comparison?.series ?? [];
   let dimension = columns[0]!;
   let metrics = Object.keys(chartRows[0] ?? {}).slice(1);
   if (definition.type === 'bar' && definition.breakdownDimension) {
@@ -514,34 +517,47 @@ export function Result({
     const breakdownSeries = previous
       ? [...new Set([...pivoted.series, ...previous.series])]
       : pivoted.series;
-    chartRows = previous
+    const shaped = previous
       ? withComparisonSeries(pivoted.rows, previous.rows, 'key', breakdownSeries)
-      : pivoted.rows;
-    metrics = [
-      ...breakdownSeries,
-      ...(previous ? breakdownSeries.map((_, index) => `comparison_${index}`) : []),
-    ];
+      : undefined;
+    chartRows = shaped?.rows ?? pivoted.rows;
+    comparisonMetrics = shaped?.series ?? [];
+    metrics = [...breakdownSeries, ...comparisonMetrics];
   }
   if (definition.type === 'pie' && definition.breakdownDimension) {
     chartRows = pieBreakdownRows(rows);
     dimension = 'label';
     metrics = [columns[2]!];
   }
-  const currentMetrics = metrics.filter((metric) => !metric.startsWith('comparison_'));
+  const currentMetrics = metrics.filter((metric) => !comparisonMetrics.includes(metric));
+  const occupiedKeys = new Set(chartRows.flatMap((row) => Object.keys(row)));
+  const series = metrics.map((metric, index) => {
+    let key = `chart_series_${index}`;
+    while (occupiedKeys.has(key)) key = `_${key}`;
+    occupiedKeys.add(key);
+    const comparisonIndex = comparisonMetrics.indexOf(metric);
+    const metricIndex = comparisonIndex === -1 ? currentMetrics.indexOf(metric) : comparisonIndex;
+    return {
+      key,
+      sourceKey: metric,
+      metricIndex,
+      isComparison: comparisonIndex !== -1,
+      label:
+        comparisonIndex === -1 ? metric : `Previous ${currentMetrics[comparisonIndex] ?? metric}`,
+    };
+  });
+  chartRows = chartRows.map((row) => ({
+    ...row,
+    ...Object.fromEntries(series.map((item) => [item.key, row[item.sourceKey]])),
+  }));
   const config = Object.fromEntries(
-    metrics.map((metric, index) => {
-      const comparisonIndex = metric.startsWith('comparison_')
-        ? Number(metric.slice('comparison_'.length))
-        : undefined;
-      const sourceMetric = comparisonIndex === undefined ? metric : currentMetrics[comparisonIndex];
-      return [
-        metric,
-        {
-          label: comparisonIndex === undefined ? metric : `Previous ${sourceMetric}`,
-          color: `var(--chart-${((comparisonIndex ?? index) % 5) + 1})`,
-        },
-      ];
-    }),
+    series.map((item) => [
+      item.key,
+      {
+        label: item.label,
+        color: `var(--chart-${(Math.max(0, item.metricIndex) % 5) + 1})`,
+      },
+    ]),
   );
   if (definition.type === 'pie')
     return (
@@ -550,9 +566,9 @@ export function Result({
           <ChartTooltip content={<ChartTooltipContent />} />
           <Pie
             data={chartRows}
-            dataKey={metrics[0]}
+            dataKey={series[0]?.key ?? ''}
             nameKey={dimension}
-            fill="var(--color-metric_1)"
+            fill={`var(--color-${series[0]?.key ?? ''})`}
           />
         </PieChart>
       </ChartContainer>
@@ -565,8 +581,13 @@ export function Result({
           <XAxis dataKey={dimension} />
           <YAxis />
           <ChartTooltip content={<ChartTooltipContent />} />
-          {metrics.map((metric) => (
-            <Bar key={metric} dataKey={metric} fill={`var(--color-${metric})`} />
+          {series.map((item) => (
+            <Bar
+              key={item.key}
+              dataKey={item.key}
+              fill={`var(--color-${item.key})`}
+              fillOpacity={item.isComparison ? 0.5 : 1}
+            />
           ))}
         </BarChart>
       </ChartContainer>
@@ -586,18 +607,18 @@ export function Result({
           />
         ) : null}
         <ChartTooltip content={<ChartTooltipContent />} />
-        {metrics.map((metric) => (
+        {series.map((item) => (
           <Line
-            key={metric}
-            dataKey={metric}
+            key={item.key}
+            dataKey={item.key}
             yAxisId={
               definition.type === 'line' &&
-              definition.metrics[seriesMetricIndex(metric, currentMetrics)]?.dataType === 'percent'
+              definition.metrics[item.metricIndex]?.dataType === 'percent'
                 ? 'percent'
                 : 'number'
             }
-            stroke={`var(--color-${metric})`}
-            strokeDasharray={metric.startsWith('comparison_') ? '4 4' : undefined}
+            stroke={`var(--color-${item.key})`}
+            strokeDasharray={item.isComparison ? '4 4' : undefined}
             dot={false}
           />
         ))}
