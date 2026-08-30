@@ -1,8 +1,17 @@
 import type { QueryEngineRequest, QueryEngineResponse } from '../src/query/engine-contract';
 import { createQueryEngine, type QueryWorkerEnv } from './engine';
-import wasmModule from './duckdb-workers.wasm';
 
-const execute = createQueryEngine(wasmModule);
+// The 40MB DuckDB wasm is loaded on the first query instead of at module evaluation. In dev the
+// Cloudflare Vite plugin ships wasm imports to workerd as a JSON byte array, which costs ~5s of
+// startup when done eagerly. Production isolates pay the load once per isolate either way.
+let engine: ReturnType<typeof createQueryEngine> | undefined;
+
+async function loadEngine() {
+  engine ??= createQueryEngine(
+    (await import('@ducklings/workers/wasm/duckdb-workers.wasm')).default,
+  );
+  return engine;
+}
 
 export default {
   async fetch(request, environment) {
@@ -11,6 +20,7 @@ export default {
 
     try {
       const input = parseRequest(await request.json());
+      const execute = await loadEngine();
       const data = await execute(input, environment);
       return json<QueryEngineResponse<unknown>>({ ok: true, data });
     } catch (error) {

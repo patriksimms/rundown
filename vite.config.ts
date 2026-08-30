@@ -12,6 +12,10 @@ export default defineConfig(({ command }) => ({
   resolve: {
     tsconfigPaths: true,
   },
+  server: {
+    // Miniflare writes its D1/KV/trace SQLite state here on every start; not app source.
+    watch: { ignored: ['**/.wrangler/**'] },
+  },
   plugins: [
     fileDataPlugin(),
     cloudflare({

@@ -3,8 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun run query:prepare && vite dev --port 3000",
-    "build": "bun run query:prepare && CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false vite build",
+    "dev": "vite dev --port 3000",
+    "build": "CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false vite build",
     "preview": "vite preview",
     "deploy": "bun run build && bun run deploy:built",
     "deploy:built": "bun run db:migrate:production && bun run deploy:query:built && wrangler deploy --config dist/server/wrangler.json",
@@ -12,7 +12,6 @@
     "deploy:dry-run": "wrangler deploy --dry-run --config dist/rundown_query/wrangler.json && wrangler deploy --dry-run --config dist/server/wrangler.json",
     "deploy:preview": "CLOUDFLARE_ENV=preview bun run build && bun run deploy:preview:built",
     "deploy:preview:built": "bun run db:migrate:preview && bun run deploy:query:built && wrangler deploy --config dist/server/wrangler.json",
-    "query:prepare": "cp node_modules/@ducklings/workers/dist/wasm/duckdb-workers.wasm query-worker/duckdb-workers.wasm",
     "db:generate": "drizzle-kit generate",
     "db:migrate:check": "migration_state=$(mktemp -d /tmp/rundown-d1-migrations.XXXXXX) && CI=1 wrangler d1 migrations apply DB --local --persist-to \"$migration_state\"",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",

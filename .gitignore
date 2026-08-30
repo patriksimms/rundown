@@ -3,7 +3,6 @@ node_modules
 .DS_Store
 dist
 dist-ssr
-query-worker/duckdb-workers.wasm
 *.local
 .env
 .env.prod
