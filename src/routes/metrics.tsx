@@ -31,6 +31,14 @@ interface MetricRecord {
 }
 
 function MetricsPage() {
+  return (
+    <AppShell requireWorkspace>
+      <MetricsContent />
+    </AppShell>
+  );
+}
+
+function MetricsContent() {
   const [metrics, setMetrics] = useState<MetricRecord[]>();
   const [isAdmin, setIsAdmin] = useState(false);
   const [error, setError] = useState<string>();
@@ -72,96 +80,94 @@ function MetricsPage() {
     }
   }
   return (
-    <AppShell requireWorkspace>
-      <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6">
-        {error ? (
-          <ErrorState error={error} />
-        ) : !metrics ? (
-          <LoadingState />
-        ) : (
-          <div className="flex flex-col gap-8">
-            <div>
-              <h1 className="text-3xl font-semibold tracking-tight">Metric library</h1>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Reusable aggregate expressions available to every compatible datasource.
-              </p>
-            </div>
-            {isAdmin ? (
-              <form className="max-w-2xl" onSubmit={submit}>
-                <FieldGroup>
-                  <Field>
-                    <FieldLabel htmlFor="metric-name">Name</FieldLabel>
-                    <Input
-                      id="metric-name"
-                      value={form.name}
-                      onChange={(event) => setForm({ ...form, name: event.target.value })}
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="metric-expression">Aggregate expression</FieldLabel>
-                    <Textarea
-                      id="metric-expression"
-                      value={form.expression}
-                      onChange={(event) => setForm({ ...form, expression: event.target.value })}
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="metric-type">Type</FieldLabel>
-                    <NativeSelect
-                      id="metric-type"
-                      value={form.semanticType}
-                      onChange={(event) =>
-                        setForm({ ...form, semanticType: event.target.value as SemanticType })
-                      }
-                    >
-                      {['currency', 'count', 'ratio'].map((item) => (
-                        <NativeSelectOption key={item} value={item}>
-                          {item}
-                        </NativeSelectOption>
-                      ))}
-                    </NativeSelect>
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="metric-description">Description</FieldLabel>
-                    <Input
-                      id="metric-description"
-                      value={form.description}
-                      onChange={(event) => setForm({ ...form, description: event.target.value })}
-                    />
-                  </Field>
-                  <Button type="submit" disabled={!form.name.trim() || !form.expression.trim()}>
-                    Add metric
-                  </Button>
-                </FieldGroup>
-              </form>
-            ) : null}
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Canonical name</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Expression</TableHead>
-                    <TableHead>Description</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {metrics.map((metric) => (
-                    <TableRow key={metric.id}>
-                      <TableCell className="font-medium">{metric.name}</TableCell>
-                      <TableCell>{metric.canonicalName}</TableCell>
-                      <TableCell>{metric.semanticType}</TableCell>
-                      <TableCell className="font-mono text-xs">{metric.expression}</TableCell>
-                      <TableCell>{metric.description}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+    <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6">
+      {error ? (
+        <ErrorState error={error} />
+      ) : !metrics ? (
+        <LoadingState />
+      ) : (
+        <div className="flex flex-col gap-8">
+          <div>
+            <h1 className="text-3xl font-semibold tracking-tight">Metric library</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Reusable aggregate expressions available to every compatible datasource.
+            </p>
           </div>
-        )}
-      </main>
-    </AppShell>
+          {isAdmin ? (
+            <form className="max-w-2xl" onSubmit={submit}>
+              <FieldGroup>
+                <Field>
+                  <FieldLabel htmlFor="metric-name">Name</FieldLabel>
+                  <Input
+                    id="metric-name"
+                    value={form.name}
+                    onChange={(event) => setForm({ ...form, name: event.target.value })}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="metric-expression">Aggregate expression</FieldLabel>
+                  <Textarea
+                    id="metric-expression"
+                    value={form.expression}
+                    onChange={(event) => setForm({ ...form, expression: event.target.value })}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="metric-type">Type</FieldLabel>
+                  <NativeSelect
+                    id="metric-type"
+                    value={form.semanticType}
+                    onChange={(event) =>
+                      setForm({ ...form, semanticType: event.target.value as SemanticType })
+                    }
+                  >
+                    {['currency', 'count', 'ratio'].map((item) => (
+                      <NativeSelectOption key={item} value={item}>
+                        {item}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="metric-description">Description</FieldLabel>
+                  <Input
+                    id="metric-description"
+                    value={form.description}
+                    onChange={(event) => setForm({ ...form, description: event.target.value })}
+                  />
+                </Field>
+                <Button type="submit" disabled={!form.name.trim() || !form.expression.trim()}>
+                  Add metric
+                </Button>
+              </FieldGroup>
+            </form>
+          ) : null}
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Canonical name</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Expression</TableHead>
+                  <TableHead>Description</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {metrics.map((metric) => (
+                  <TableRow key={metric.id}>
+                    <TableCell className="font-medium">{metric.name}</TableCell>
+                    <TableCell>{metric.canonicalName}</TableCell>
+                    <TableCell>{metric.semanticType}</TableCell>
+                    <TableCell className="font-mono text-xs">{metric.expression}</TableCell>
+                    <TableCell>{metric.description}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+      )}
+    </main>
   );
 }

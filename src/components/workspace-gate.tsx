@@ -11,7 +11,8 @@ import { Skeleton } from '#/components/ui/skeleton';
 type PendingAction =
   | { kind: 'invitation'; id: string }
   | { kind: 'membership'; id: string }
-  | { kind: 'create' };
+  | { kind: 'create' }
+  | { kind: 'activation' };
 
 export function WorkspaceGate({ children }: { children: ReactNode }) {
   const { isLoaded, isSignedIn, orgId } = useAuth();
@@ -30,6 +31,7 @@ function WorkspaceSetup() {
     });
   const [name, setName] = useState('');
   const [pendingAction, setPendingAction] = useState<PendingAction>();
+  const [activationRetry, setActivationRetry] = useState<string>();
   const [actionError, setActionError] = useState<string>();
 
   if (
@@ -52,6 +54,7 @@ function WorkspaceSetup() {
   const invitations = userInvitations.data ?? [];
   const memberships = userMemberships.data ?? [];
   const canCreate = user?.createOrganizationEnabled ?? false;
+  const actionDisabled = Boolean(pendingAction || activationRetry);
 
   async function run(action: PendingAction, operation: () => Promise<void>) {
     setPendingAction(action);
@@ -69,6 +72,7 @@ function WorkspaceSetup() {
   async function acceptInvitation(invitation: (typeof invitations)[number]) {
     await run({ kind: 'invitation', id: invitation.id }, async () => {
       await invitation.accept();
+      setActivationRetry(invitation.publicOrganizationData.id);
       await activateOrganization({ organization: invitation.publicOrganizationData.id });
     });
   }
@@ -85,7 +89,15 @@ function WorkspaceSetup() {
     if (!workspaceName || !canCreate) return;
     await run({ kind: 'create' }, async () => {
       const organization = await createClerkOrganization({ name: workspaceName });
+      setActivationRetry(organization.id);
       await activateOrganization({ organization: organization.id });
+    });
+  }
+
+  async function retryActivation() {
+    if (!activationRetry) return;
+    await run({ kind: 'activation' }, async () => {
+      await activateOrganization({ organization: activationRetry });
     });
   }
 
@@ -120,7 +132,16 @@ function WorkspaceSetup() {
             {actionError ? (
               <Alert variant="destructive">
                 <AlertTitle>Could not continue</AlertTitle>
-                <AlertDescription>{actionError} Try the action again.</AlertDescription>
+                <AlertDescription>
+                  <p>{actionError}</p>
+                  {activationRetry ? (
+                    <Button className="mt-3" size="sm" variant="outline" onClick={retryActivation}>
+                      {pendingAction?.kind === 'activation' ? 'Retrying...' : 'Retry activation'}
+                    </Button>
+                  ) : (
+                    <p>Try the action again.</p>
+                  )}
+                </AlertDescription>
               </Alert>
             ) : null}
 
@@ -137,7 +158,7 @@ function WorkspaceSetup() {
                     busy={
                       pendingAction?.kind === 'invitation' && pendingAction.id === invitation.id
                     }
-                    disabled={Boolean(pendingAction)}
+                    disabled={actionDisabled}
                     onClick={() => acceptInvitation(invitation)}
                   />
                 ))}
@@ -169,7 +190,7 @@ function WorkspaceSetup() {
                     busy={
                       pendingAction?.kind === 'membership' && pendingAction.id === membership.id
                     }
-                    disabled={Boolean(pendingAction)}
+                    disabled={actionDisabled}
                     onClick={() => activateMembership(membership)}
                   />
                 ))}
@@ -207,14 +228,14 @@ function WorkspaceSetup() {
                         name="workspaceName"
                         autoComplete="organization"
                         value={name}
-                        disabled={Boolean(pendingAction)}
+                        disabled={actionDisabled}
                         onChange={(event) => setName(event.target.value)}
                         placeholder="esome"
                       />
                       <FieldDescription>You can invite colleagues after setup.</FieldDescription>
                     </Field>
                     <Field orientation="horizontal">
-                      <Button type="submit" disabled={!name.trim() || Boolean(pendingAction)}>
+                      <Button type="submit" disabled={!name.trim() || actionDisabled}>
                         {pendingAction?.kind === 'create' ? 'Creating...' : 'Create workspace'}
                       </Button>
                     </Field>
