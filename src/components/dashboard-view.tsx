@@ -10,13 +10,24 @@ import {
   YAxis,
 } from 'recharts';
 import { useEffect, useState, type CSSProperties } from 'react';
+import { ChevronsUpDown, X } from 'lucide-react';
 import type { ControlState, DashboardDocument, DashboardWidget } from '#/domain/schema';
 import { callApi } from '#/api/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '#/components/ui/card';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '#/components/ui/chart';
+import { Badge } from '#/components/ui/badge';
+import { Button } from '#/components/ui/button';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '#/components/ui/command';
 import { Field, FieldLabel } from '#/components/ui/field';
 import { Input } from '#/components/ui/input';
-import { NativeSelect, NativeSelectOption } from '#/components/ui/native-select';
+import { Popover, PopoverContent, PopoverTrigger } from '#/components/ui/popover';
 import { Skeleton } from '#/components/ui/skeleton';
 import { widgetQueryRequest } from '#/domain/widget-query';
 import {
@@ -218,48 +229,138 @@ function FilterControl({
   setControlState: (state: ControlState) => void;
 }) {
   const [values, setValues] = useState<unknown[]>([]);
+  const [search, setSearch] = useState('');
+  const [retry, setRetry] = useState(0);
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [open, setOpen] = useState(false);
   useEffect(() => {
     let current = true;
-    async function loadOptions() {
-      const result = await callApi<{ values: unknown[] }>({
+    setStatus('loading');
+    const timeout = setTimeout(() => {
+      void callApi<{ values: unknown[] }>({
         action: 'getControlOptions',
         dashboardId,
         controlId: widgetId,
         shareToken,
-      });
-      if (current) setValues(result.values);
-    }
-    void loadOptions();
+        ...(search ? { search } : {}),
+      })
+        .then((result) => {
+          if (!current) return;
+          setValues(result.values);
+          setStatus('ready');
+        })
+        .catch(() => {
+          if (current) setStatus('error');
+        });
+    }, 250);
     return () => {
       current = false;
+      clearTimeout(timeout);
     };
-  }, [dashboardId, definitionHash, shareToken, widgetId]);
-  const selected = controlState.values?.[widgetId]?.[0];
+  }, [dashboardId, definitionHash, retry, search, shareToken, widgetId]);
+  const selected = (controlState.values?.[widgetId] ?? []).map(String);
+  const updateSelected = (next: string[]) =>
+    setControlState({
+      ...controlState,
+      values: { ...controlState.values, [widgetId]: next },
+    });
+  const select = (value: string) => {
+    if (!definition.allowMultiple) {
+      updateSelected([value]);
+      setOpen(false);
+      return;
+    }
+    updateSelected(
+      selected.includes(value)
+        ? selected.filter((selectedValue) => selectedValue !== value)
+        : [...selected, value],
+    );
+  };
   return (
     <Card size="sm">
       <CardHeader>
         <CardTitle>{definition.userDefinedName ?? 'Filter'}</CardTitle>
       </CardHeader>
-      <CardContent>
-        <NativeSelect
-          value={selected === undefined ? '' : String(selected)}
-          onChange={(event) =>
-            setControlState({
-              ...controlState,
-              values: {
-                ...controlState.values,
-                [widgetId]: event.target.value ? [event.target.value] : [],
-              },
-            })
-          }
-        >
-          <NativeSelectOption value="">All</NativeSelectOption>
-          {values.map((value) => (
-            <NativeSelectOption key={String(value)} value={String(value)}>
-              {String(value)}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
+      <CardContent className="flex flex-col gap-2">
+        <Popover open={open} onOpenChange={setOpen}>
+          <PopoverTrigger
+            render={
+              <Button
+                variant="outline"
+                className="w-full justify-between font-normal"
+                aria-label={`Choose ${definition.userDefinedName ?? 'filter'} values`}
+              />
+            }
+          >
+            {selected.length
+              ? definition.allowMultiple
+                ? `${selected.length} selected`
+                : selected[0]
+              : 'All values'}
+            <ChevronsUpDown className="size-4 opacity-50" />
+          </PopoverTrigger>
+          <PopoverContent className="w-(--anchor-width) p-0" align="start">
+            <Command shouldFilter={false}>
+              <CommandInput value={search} onValueChange={setSearch} placeholder="Search values…" />
+              <CommandList>
+                {status === 'loading' ? (
+                  <div className="py-6 text-center text-sm text-muted-foreground">Loading…</div>
+                ) : status === 'error' ? (
+                  <div className="flex flex-col items-center gap-2 py-6 text-sm">
+                    <p>Could not load values.</p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setRetry((value) => value + 1)}
+                    >
+                      Retry
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <CommandEmpty>No values found.</CommandEmpty>
+                    <CommandGroup>
+                      {values.map((value) => {
+                        const option = String(value);
+                        const checked = selected.includes(option);
+                        return (
+                          <CommandItem
+                            key={option}
+                            value={option}
+                            data-checked={checked}
+                            onSelect={() => select(option)}
+                          >
+                            {option}
+                          </CommandItem>
+                        );
+                      })}
+                    </CommandGroup>
+                  </>
+                )}
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+        {selected.length ? (
+          <div className="flex flex-wrap gap-1.5">
+            {selected.map((value) => (
+              <Badge key={value} variant="secondary" className="gap-1 pr-1">
+                {value}
+                <button
+                  type="button"
+                  className="rounded-sm p-0.5 hover:bg-muted"
+                  aria-label={`Remove ${value}`}
+                  onClick={() => updateSelected(selected.filter((item) => item !== value))}
+                >
+                  <X className="size-3" />
+                </button>
+              </Badge>
+            ))}
+            <Button variant="ghost" size="xs" onClick={() => updateSelected([])}>
+              Clear
+            </Button>
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );

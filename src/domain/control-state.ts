@@ -1,4 +1,4 @@
-import type { ControlState, DashboardWidget } from './schema';
+import type { ControlState, DashboardDocument, DashboardWidget } from './schema';
 
 export function mergeControlState(defaults: ControlState, input?: ControlState): ControlState {
   return {
@@ -30,4 +30,16 @@ export function withoutWidgetControlState(
     return { ...state, values: Object.keys(values).length ? values : undefined };
   }
   return state;
+}
+
+export function singleValueControlWithMultipleSelections(
+  dashboard: DashboardDocument,
+  state: ControlState,
+) {
+  return dashboard.widgets.find(
+    (widget) =>
+      widget.definition.type === 'control' &&
+      !widget.definition.allowMultiple &&
+      (state.values?.[widget.id]?.length ?? 0) > 1,
+  )?.id;
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   mergeControlState,
+  singleValueControlWithMultipleSelections,
   withDefaultDateRange,
   withoutWidgetControlState,
 } from './control-state';
@@ -99,5 +100,30 @@ describe('dashboard control defaults', () => {
       definitionHash: 'hash',
     };
     expect(withoutWidgetControlState(defaults, widget, true)).toBe(defaults);
+  });
+
+  it('detects multiple submitted values for a single-select control', () => {
+    const dashboard = {
+      widgets: [
+        {
+          id: 'region',
+          definition: {
+            type: 'control' as const,
+            dataSourceId: 'source',
+            fieldId: 'region',
+            allowMultiple: false,
+          },
+        },
+      ],
+    } as Parameters<typeof singleValueControlWithMultipleSelections>[0];
+
+    expect(
+      singleValueControlWithMultipleSelections(dashboard, {
+        values: { region: ['EMEA', 'APAC'] },
+      }),
+    ).toBe('region');
+    expect(
+      singleValueControlWithMultipleSelections(dashboard, { values: { region: ['EMEA'] } }),
+    ).toBeUndefined();
   });
 });

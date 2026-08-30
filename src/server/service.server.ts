@@ -28,7 +28,10 @@ import { hashJson } from '#/domain/hash';
 import { comparisonDateRange, resolveDateRange } from '#/domain/dates';
 import { queryCacheState, widgetDependencyState } from '#/domain/cache';
 import { remapWidgetDefinition } from '#/domain/remap';
-import { mergeControlState } from '#/domain/control-state';
+import {
+  mergeControlState,
+  singleValueControlWithMultipleSelections,
+} from '#/domain/control-state';
 import { isWorkspaceR2Key, scopedR2Prefix } from '#/domain/tenancy';
 import {
   assertSingleExpression,
@@ -1149,7 +1152,7 @@ async function definitionHash(definition: WidgetDefinition, workspaceId: string)
   return hashJson(widgetDependencyState(definition, metadata));
 }
 
-function validateControlState(dashboard: DashboardDocument, input: ControlState) {
+export function validateControlState(dashboard: DashboardDocument, input: ControlState) {
   const state = controlStateSchema.parse(input);
   if (
     dashboard.widgets.some((widget) => widget.definition.type === 'dateControl') &&
@@ -1164,6 +1167,8 @@ function validateControlState(dashboard: DashboardDocument, input: ControlState)
   for (const key of Object.keys(state.values ?? {}))
     if (!controlIds.has(key))
       throw new ApiError(400, 'unknown_control', `Unknown dashboard control ${key}.`);
+  if (singleValueControlWithMultipleSelections(dashboard, state))
+    throw new ApiError(400, 'multiple_values_not_allowed', 'This filter accepts only one value.');
   return state;
 }
 
