@@ -421,15 +421,19 @@ function Result({
           <TableBody>
             {rows.map((row, index) => (
               <TableRow key={index}>
-                {columns.map((column) => (
-                  <TableCell key={column}>{formatValue(row[column])}</TableCell>
+                {columns.map((column, columnIndex) => (
+                  <TableCell key={column}>
+                    {formatTableValue(definition, columnIndex, row[column])}
+                  </TableCell>
                 ))}
               </TableRow>
             ))}
             {summary ? (
               <TableRow className="font-medium">
-                {columns.map((column) => (
-                  <TableCell key={column}>{formatValue(summary[column])}</TableCell>
+                {columns.map((column, columnIndex) => (
+                  <TableCell key={column}>
+                    {formatTableValue(definition, columnIndex, summary[column])}
+                  </TableCell>
                 ))}
               </TableRow>
             ) : null}
@@ -442,8 +446,10 @@ function Result({
               <TableBody>
                 {comparisonRows.map((row, index) => (
                   <TableRow key={index}>
-                    {columns.map((column) => (
-                      <TableCell key={column}>{formatValue(row[column])}</TableCell>
+                    {columns.map((column, columnIndex) => (
+                      <TableCell key={column}>
+                        {formatTableValue(definition, columnIndex, row[column])}
+                      </TableCell>
                     ))}
                   </TableRow>
                 ))}
@@ -587,6 +593,14 @@ function richText(value: unknown): string {
   if (value && typeof value === 'object')
     return Object.values(value).map(richText).filter(Boolean).join(' ');
   return '';
+}
+function formatTableValue(
+  definition: Extract<DashboardWidget['definition'], { type: 'table' }>,
+  columnIndex: number,
+  value: unknown,
+) {
+  const metric = definition.metrics[columnIndex - definition.dimensions.length];
+  return formatValue(value, metric?.dataType, metric?.displayFormat?.radix);
 }
 function formatValue(value: unknown, type?: string, radix = 2) {
   if (typeof value !== 'number') return value == null ? '' : String(value);

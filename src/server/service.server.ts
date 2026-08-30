@@ -507,7 +507,13 @@ async function queryWidget(
   const hasMore = pageSize !== undefined && rows.length > pageSize;
   const result = {
     rows: normalize(pageSize === undefined ? rows : rows.slice(0, pageSize)),
-    ...(comparisonRows ? { comparisonRows: normalize(comparisonRows) } : {}),
+    ...(comparisonRows
+      ? {
+          comparisonRows: normalize(
+            pageSize === undefined ? comparisonRows : comparisonRows.slice(0, pageSize),
+          ),
+        }
+      : {}),
     controlState,
     cache: 'miss',
     ...(pageSize === undefined ? {} : { page, hasMore }),
