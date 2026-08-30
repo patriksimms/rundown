@@ -33,7 +33,7 @@ describe('dashboard result rendering', () => {
             dataType: 'currency',
           },
         }}
-        rows={[{ dimension_1: '001234', metric_1: '1234.5' }]}
+        rows={[{ dimension_1: '9223372036854775807', metric_1: '1234.5' }]}
         columns={[dimension, currency]}
       />,
     );
@@ -61,12 +61,12 @@ describe('dashboard result rendering', () => {
           ],
           resultLimit: { mode: 'top', amount: 10 },
         }}
-        rows={[{ dimension_1: '001234', metric_1: '1234.5' }]}
+        rows={[{ dimension_1: '9223372036854775807', metric_1: '1234.5' }]}
         columns={[dimension, currency]}
       />,
     );
 
-    expect(html).toContain('001234');
+    expect(html).toContain('9223372036854775807');
     expect(html).toMatch(/1[,.]234[,.]50/u);
   });
 
@@ -88,6 +88,32 @@ describe('dashboard result rendering', () => {
         dataType: 'duration',
       }),
     ).toBe('1h 1m 1s');
-    expect(formatValue('001234', dimension)).toBe('001234');
+    expect(
+      formatValue('3599.6', {
+        key: 'metric_1',
+        label: 'Time',
+        kind: 'metric',
+        dataType: 'duration',
+      }),
+    ).toBe('1h');
+    expect(
+      formatValue('1234', {
+        key: 'metric_1',
+        label: 'Count',
+        kind: 'metric',
+        dataType: 'number',
+        radix: 0,
+      }),
+    ).toMatch(/1[,.]234/u);
+    expect(
+      formatValue('1234.567', {
+        key: 'metric_1',
+        label: 'Average',
+        kind: 'metric',
+        dataType: 'number',
+        radix: 2,
+      }),
+    ).toMatch(/1[,.]234[,.]57/u);
+    expect(formatValue('9223372036854775807', dimension)).toBe('9223372036854775807');
   });
 });

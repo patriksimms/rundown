@@ -417,7 +417,9 @@ export function Result({
     <ChartTooltip
       content={
         <ChartTooltipContent
-          formatter={(value, name) => formatValue(value, columnByKey(metricColumns, String(name)))}
+          valueFormatter={(value, name) =>
+            formatValue(value, columnByKey(metricColumns, String(name)))
+          }
         />
       }
     />
@@ -568,9 +570,10 @@ function formatDuration(seconds: number, radix: number) {
   const absolute = Math.abs(seconds);
   if (absolute < 60)
     return `${sign}${new Intl.NumberFormat(undefined, { maximumFractionDigits: radix }).format(absolute)}s`;
-  const hours = Math.floor(absolute / 3_600);
-  const minutes = Math.floor((absolute % 3_600) / 60);
-  const remainingSeconds = Math.round(absolute % 60);
+  const rounded = Math.round(absolute);
+  const hours = Math.floor(rounded / 3_600);
+  const minutes = Math.floor((rounded % 3_600) / 60);
+  const remainingSeconds = rounded % 60;
   return `${sign}${[
     hours ? `${hours}h` : '',
     minutes ? `${minutes}m` : '',
