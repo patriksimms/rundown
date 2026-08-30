@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+  createDatasourceUploadCleanupToken,
+  dataSourceLocationReferencesKey,
   datasourceNameFromFileName,
   datasourceUploadFormat,
   datasourceUploadKey,
   isManagedDatasourceUpload,
   MAX_DATASOURCE_FILE_BYTES,
   prepareDatasourceUploadSchema,
+  verifyDatasourceUploadCleanupToken,
 } from './datasource-upload';
 
 describe('datasource uploads', () => {
@@ -50,5 +53,48 @@ describe('datasource uploads', () => {
     expect(isManagedDatasourceUpload('ws/acme/', key)).toBe(true);
     expect(isManagedDatasourceUpload('ws/other/', key)).toBe(false);
     expect(isManagedDatasourceUpload('ws/acme/', 'ws/acme/report.parquet')).toBe(false);
+  });
+
+  it('binds cleanup to the uploader, object, and a limited lifetime', async () => {
+    const key = 'ws/acme/uploads/2026-08-30/147d4cd2-990c-4bb5-ab79-5d1f45ea53e5.parquet';
+    const token = await createDatasourceUploadCleanupToken(key, 'user-a', 'secret', 1_000);
+
+    expect(await verifyDatasourceUploadCleanupToken(token, key, 'user-a', 'secret', 1_100)).toBe(
+      true,
+    );
+    expect(await verifyDatasourceUploadCleanupToken(token, key, 'user-b', 'secret', 1_100)).toBe(
+      false,
+    );
+    expect(
+      await verifyDatasourceUploadCleanupToken(
+        token,
+        key.replace('parquet', 'csv'),
+        'user-a',
+        'secret',
+        1_100,
+      ),
+    ).toBe(false);
+    expect(
+      await verifyDatasourceUploadCleanupToken(token, key, 'user-a', 'secret', 1_000 + 86_401),
+    ).toBe(false);
+  });
+
+  it('recognizes registered objects and prefixes that use an upload', () => {
+    const key = 'ws/acme/uploads/2026-08-30/147d4cd2-990c-4bb5-ab79-5d1f45ea53e5.parquet';
+    expect(dataSourceLocationReferencesKey({ kind: 'object', key, format: 'parquet' }, key)).toBe(
+      true,
+    );
+    expect(
+      dataSourceLocationReferencesKey(
+        { kind: 'prefix', key: 'ws/acme/uploads/', format: 'parquet' },
+        key,
+      ),
+    ).toBe(true);
+    expect(
+      dataSourceLocationReferencesKey(
+        { kind: 'object', key: 'ws/acme/other.parquet', format: 'parquet' },
+        key,
+      ),
+    ).toBe(false);
   });
 });

@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { callApi } from '#/api/client';
+import { ApiClientError, callApi } from '#/api/client';
 import { AppShell } from '#/components/app-shell';
 import { ErrorState, LoadingState } from '#/components/request-state';
 import { Alert, AlertDescription, AlertTitle } from '#/components/ui/alert';
@@ -277,6 +277,8 @@ function RegisterForm({ refresh }: { refresh: () => Promise<void> }) {
     'idle' | 'preparing' | 'uploading' | 'registering' | 'inspecting' | 'removing'
   >('idle');
   const [uploadedKey, setUploadedKey] = useState<string>();
+  const [cleanupToken, setCleanupToken] = useState<string>();
+  const [registrationFailure, setRegistrationFailure] = useState<'inspection' | 'other'>();
   const fileInput = useRef<HTMLInputElement | null>(null);
   const uploadRequest = useRef<XMLHttpRequest | undefined>(undefined);
   const uploadStartedAt = useRef(0);
@@ -300,6 +302,7 @@ function RegisterForm({ refresh }: { refresh: () => Promise<void> }) {
     event.preventDefault();
     setFormError(undefined);
     setMessage(undefined);
+    setRegistrationFailure(undefined);
     if (useExistingData) {
       setPhase('registering');
       try {
@@ -329,11 +332,12 @@ function RegisterForm({ refresh }: { refresh: () => Promise<void> }) {
     }
 
     uploadStartedAt.current = Date.now();
+    setProgress(0);
     trackUpload('started', file, uploadFormat, 0);
     setPhase('preparing');
-    let prepared: { key: string; uploadUrl: string };
+    let prepared: { key: string; uploadUrl: string; cleanupToken: string };
     try {
-      prepared = await callApi<{ key: string; uploadUrl: string }>({
+      prepared = await callApi<{ key: string; uploadUrl: string; cleanupToken: string }>({
         action: 'prepareDatasourceUpload',
         fileName: file.name,
         fileSize: file.size,
@@ -344,10 +348,12 @@ function RegisterForm({ refresh }: { refresh: () => Promise<void> }) {
         uploadRequest.current = request;
       });
       setUploadedKey(prepared.key);
+      setCleanupToken(prepared.cleanupToken);
       setPhase('inspecting');
       trackUpload('completed', file, uploadFormat, Date.now() - uploadStartedAt.current);
     } catch (caught) {
       setPhase('idle');
+      setProgress(0);
       uploadRequest.current = undefined;
       const cancelled = caught instanceof UploadCancelledError;
       trackUpload(
@@ -382,12 +388,18 @@ function RegisterForm({ refresh }: { refresh: () => Promise<void> }) {
       setFile(undefined);
       if (fileInput.current) fileInput.current.value = '';
       setUploadedKey(undefined);
+      setCleanupToken(undefined);
+      setRegistrationFailure(undefined);
       setProgress(0);
       setPhase('idle');
       await refresh();
     } catch (caught) {
       setPhase('idle');
-      trackUpload('inspection_failed', file, uploadFormat, Date.now() - uploadStartedAt.current);
+      const inspectionFailed =
+        caught instanceof ApiClientError && caught.code === 'datasource_inspection_failed';
+      setRegistrationFailure(inspectionFailed ? 'inspection' : 'other');
+      if (inspectionFailed)
+        trackUpload('inspection_failed', file, uploadFormat, Date.now() - uploadStartedAt.current);
       setFormError(caught instanceof Error ? caught.message : String(caught));
     }
   }
@@ -395,6 +407,7 @@ function RegisterForm({ refresh }: { refresh: () => Promise<void> }) {
   function selectFile(selectedFile?: File) {
     setMessage(undefined);
     setFormError(undefined);
+    setRegistrationFailure(undefined);
     setFileError(undefined);
     if (!selectedFile) {
       setFile(undefined);
@@ -414,16 +427,18 @@ function RegisterForm({ refresh }: { refresh: () => Promise<void> }) {
   }
 
   async function removeFile() {
-    if (!uploadedKey || !file) return;
+    if (!uploadedKey || !cleanupToken || !file) return;
     const uploadFormat = datasourceUploadFormat(file.name);
     if (!uploadFormat) return;
     setPhase('removing');
     try {
-      await callApi({ action: 'removeDatasourceUpload', key: uploadedKey });
+      await callApi({ action: 'removeDatasourceUpload', key: uploadedKey, cleanupToken });
       trackUpload('file_removed', file, uploadFormat, Date.now() - uploadStartedAt.current);
       setFile(undefined);
       if (fileInput.current) fileInput.current.value = '';
       setUploadedKey(undefined);
+      setCleanupToken(undefined);
+      setRegistrationFailure(undefined);
       setProgress(0);
       setFormError(undefined);
       setMessage('File removed.');
@@ -544,7 +559,11 @@ function RegisterForm({ refresh }: { refresh: () => Promise<void> }) {
         {formError ? (
           <Alert variant="destructive">
             <AlertTitle>
-              {uploadedKey ? 'File uploaded, inspection failed' : 'Could not continue'}
+              {uploadedKey
+                ? registrationFailure === 'inspection'
+                  ? 'File uploaded, inspection failed'
+                  : 'File uploaded, registration failed'
+                : 'Could not continue'}
             </AlertTitle>
             <AlertDescription>{formError}</AlertDescription>
           </Alert>

@@ -107,7 +107,11 @@ export const apiRequestSchema = z.discriminatedUnion('action', [
   }),
   z.object({ action: z.literal('listR2Objects'), prefix: z.string().optional() }),
   prepareDatasourceUploadSchema.extend({ action: z.literal('prepareDatasourceUpload') }),
-  z.object({ action: z.literal('removeDatasourceUpload'), key: z.string().min(1) }),
+  z.object({
+    action: z.literal('removeDatasourceUpload'),
+    key: z.string().min(1),
+    cleanupToken: z.string().min(1),
+  }),
   datasourceUploadEventSchema.extend({ action: z.literal('trackDatasourceUpload') }),
   z.object({
     action: z.literal('registerDatasource'),

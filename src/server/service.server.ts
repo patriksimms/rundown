@@ -35,7 +35,13 @@ import { queryCacheState, widgetDependencyState } from '#/domain/cache';
 import { remapWidgetDefinition } from '#/domain/remap';
 import { mergeControlState } from '#/domain/control-state';
 import { isWorkspaceR2Key, scopedR2Prefix } from '#/domain/tenancy';
-import { isManagedDatasourceUpload } from '#/domain/datasource-upload';
+import {
+  createDatasourceUploadCleanupToken,
+  dataSourceLocationReferencesKey,
+  isManagedDatasourceUpload,
+  MAX_DATASOURCE_FILE_BYTES,
+  verifyDatasourceUploadCleanupToken,
+} from '#/domain/datasource-upload';
 import {
   assertSingleExpression,
   compileLibraryExpression,
@@ -132,7 +138,7 @@ async function dispatchRequest(request: ApiRequest): Promise<unknown> {
     case 'prepareDatasourceUpload':
       return prepareDatasourceUpload(request);
     case 'removeDatasourceUpload':
-      return removeDatasourceUpload(request.key);
+      return removeDatasourceUpload(request);
     case 'trackDatasourceUpload':
       return trackDatasourceUpload(request);
     case 'registerDatasource':
@@ -656,14 +662,39 @@ async function prepareDatasourceUpload(
   request: Extract<ApiRequest, { action: 'prepareDatasourceUpload' }>,
 ) {
   const session = await requireSession();
-  return prepareSourceUpload(session.workspace.r2Prefix, request.format);
+  const upload = await prepareSourceUpload(session.workspace.r2Prefix, request.format);
+  return {
+    ...upload,
+    cleanupToken: await createDatasourceUploadCleanupToken(
+      upload.key,
+      session.userId,
+      uploadCleanupSecret(),
+    ),
+  };
 }
 
-async function removeDatasourceUpload(key: string) {
+async function removeDatasourceUpload(
+  request: Extract<ApiRequest, { action: 'removeDatasourceUpload' }>,
+) {
   const session = await requireSession();
-  if (!isManagedDatasourceUpload(session.workspace.r2Prefix, key))
+  if (!isManagedDatasourceUpload(session.workspace.r2Prefix, request.key))
     throw new ApiError(400, 'invalid_upload_key', 'Only Rundown uploads can be removed here.');
-  await deleteSourceObject(key);
+  if (
+    !(await verifyDatasourceUploadCleanupToken(
+      request.cleanupToken,
+      request.key,
+      session.userId,
+      uploadCleanupSecret(),
+    ))
+  )
+    throw new ApiError(403, 'invalid_cleanup_token', 'This upload cannot be removed by this user.');
+  if (await isDatasourceObjectRegistered(session.workspace.id, request.key))
+    throw new ApiError(
+      409,
+      'upload_in_use',
+      'This file belongs to a registered datasource and cannot be removed.',
+    );
+  await deleteSourceObject(request.key);
   return { removed: true };
 }
 
@@ -695,6 +726,24 @@ async function registerDatasource(request: Extract<ApiRequest, { action: 'regist
       : (await listSourceObjects(request.location.key)).objects;
   if (!objects.length)
     throw new ApiError(404, 'r2_object_not_found', 'No matching R2 objects were found.');
+  if (
+    request.location.kind === 'object' &&
+    isManagedDatasourceUpload(session.workspace.r2Prefix, request.location.key) &&
+    objects[0].size > MAX_DATASOURCE_FILE_BYTES
+  ) {
+    const isRegistered = await isDatasourceObjectRegistered(
+      session.workspace.id,
+      request.location.key,
+    );
+    if (!isRegistered) await deleteSourceObject(request.location.key);
+    throw new ApiError(
+      413,
+      'datasource_upload_too_large',
+      isRegistered
+        ? 'The uploaded file is larger than 100 MB.'
+        : 'The uploaded file is larger than 100 MB and was removed.',
+    );
+  }
   const dataSource: DataSourceRecord = {
     id: `ds_${crypto.randomUUID()}`,
     workspaceId: session.workspace.id,
@@ -729,6 +778,18 @@ async function registerDatasource(request: Extract<ApiRequest, { action: 'regist
     ),
   ]);
   return { ...dataSource, fields: discovered };
+}
+
+function uploadCleanupSecret() {
+  return env.R2_SECRET_ACCESS_KEY || 'rundown-local-development-only';
+}
+
+async function isDatasourceObjectRegistered(workspaceId: string, key: string) {
+  const registeredSources = await database()
+    .select({ location: dataSources.location })
+    .from(dataSources)
+    .where(eq(dataSources.workspaceId, workspaceId));
+  return registeredSources.some(({ location }) => dataSourceLocationReferencesKey(location, key));
 }
 
 async function updateFieldMetadata(

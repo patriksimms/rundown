@@ -21,8 +21,8 @@ Workspace roles come from the Clerk Organization. They are not stored separately
 WorkspaceRole: admin | member
 ```
 
-- `admin` (Clerk org admin): everything in the workspace, including datasource registration and the metric library.
-- `member`: may create dashboards and becomes their first editor. Access to other dashboards comes from grants.
+- `admin` (Clerk org admin): everything in the workspace, including datasource metadata and the metric library.
+- `member`: may register datasources and create dashboards, becoming their first editor. Access to other dashboards comes from grants.
 
 ## Dashboard grant
 
@@ -59,7 +59,8 @@ The server derives the workspace from `dashboardId`. Revoking sets `revokedAt`; 
 
 | Action | admin | editor grant | viewer grant | share link |
 |---|---|---|---|---|
-| Register datasource, edit lookup table | yes | no | no | no |
+| Register datasource | yes | yes | no | no |
+| Edit datasource lookup table | yes | no | no | no |
 | Create or edit library metrics | yes | yes | no | no |
 | Create dashboard | yes | yes (any member) | no | no |
 | Edit widgets, calculated fields used by the dashboard | yes | yes | no | no |
