@@ -9,7 +9,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { useCallback, useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import type { ControlState, DashboardDocument, DashboardWidget } from '#/domain/schema';
 import { callApi } from '#/api/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '#/components/ui/card';
@@ -18,6 +18,7 @@ import { Field, FieldLabel } from '#/components/ui/field';
 import { Input } from '#/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '#/components/ui/native-select';
 import { Skeleton } from '#/components/ui/skeleton';
+import { widgetQueryRequest } from '#/domain/widget-query';
 import {
   Table,
   TableBody,
@@ -70,12 +71,14 @@ function Widget({
   widget,
   dashboardId,
   shareToken,
+  preview,
   controlState,
   setControlState,
 }: {
   widget: DashboardWidget;
   dashboardId: string;
   shareToken?: string;
+  preview?: boolean;
   controlState: ControlState;
   setControlState: (state: ControlState) => void;
 }) {
@@ -105,6 +108,7 @@ function Widget({
       widget={widget}
       dashboardId={dashboardId}
       shareToken={shareToken}
+      preview={preview}
       controlState={controlState}
     />
   );
@@ -113,11 +117,13 @@ function Widget({
 export function DashboardWidgetView({
   dashboard,
   widget,
+  preview = false,
   controlState,
   setControlState,
 }: {
   dashboard: DashboardDocument;
   widget: DashboardWidget;
+  preview?: boolean;
   controlState: ControlState;
   setControlState: (state: ControlState) => void;
 }) {
@@ -125,6 +131,7 @@ export function DashboardWidgetView({
     <Widget
       widget={widget}
       dashboardId={dashboard.id}
+      preview={preview}
       controlState={controlState}
       setControlState={setControlState}
     />
@@ -243,38 +250,47 @@ function QueryCard({
   widget,
   dashboardId,
   shareToken,
+  preview,
   controlState,
 }: {
   widget: DashboardWidget;
   dashboardId: string;
   shareToken?: string;
+  preview?: boolean;
   controlState: ControlState;
 }) {
   const [rows, setRows] = useState<Record<string, unknown>[]>();
   const [comparisonRows, setComparisonRows] = useState<Record<string, unknown>[]>();
   const [error, setError] = useState<string>();
-  const refresh = useCallback(async () => {
-    try {
-      const result = await callApi<{
-        rows: Record<string, unknown>[];
-        comparisonRows?: Record<string, unknown>[];
-      }>({
-        action: 'queryWidget',
-        dashboardId,
-        widgetId: widget.id,
-        shareToken,
-        controlState,
-      });
-      setRows(result.rows);
-      setComparisonRows(result.comparisonRows);
-      setError(undefined);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    }
-  }, [controlState, dashboardId, shareToken, widget.id]);
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    let current = true;
+    setRows(undefined);
+    setComparisonRows(undefined);
+    void callApi<{
+      rows: Record<string, unknown>[];
+      comparisonRows?: Record<string, unknown>[];
+    }>(
+      widgetQueryRequest({
+        dashboardId,
+        widget,
+        controlState,
+        preview: preview ?? false,
+        shareToken,
+      }),
+    )
+      .then((result) => {
+        if (!current) return;
+        setRows(result.rows);
+        setComparisonRows(result.comparisonRows);
+        setError(undefined);
+      })
+      .catch((caught: unknown) => {
+        if (current) setError(caught instanceof Error ? caught.message : String(caught));
+      });
+    return () => {
+      current = false;
+    };
+  }, [controlState, dashboardId, preview, shareToken, widget.definition, widget.id]);
   const definition = widget.definition;
   if (!('title' in definition)) return null;
   return (

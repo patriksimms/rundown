@@ -56,6 +56,7 @@ import {
 } from '#/components/ui/sheet';
 import { Textarea } from '#/components/ui/textarea';
 import { cn } from '#/lib/utils';
+import { patchFilterCondition } from '#/domain/widget-editing';
 import type {
   ControlState,
   Aggregation,
@@ -396,6 +397,7 @@ export function DashboardBuilder({
                         <DashboardWidgetView
                           dashboard={dashboard}
                           widget={widget}
+                          preview
                           controlState={controlState}
                           setControlState={setControlState}
                         />
@@ -427,6 +429,7 @@ export function DashboardBuilder({
                   <DashboardWidgetView
                     dashboard={dashboard}
                     widget={widget}
+                    preview
                     controlState={controlState}
                     setControlState={setControlState}
                   />
@@ -542,11 +545,21 @@ function WidgetSettings({
   const [sourceOpen, setSourceOpen] = useState(false);
   const [formulaOpen, setFormulaOpen] = useState(false);
   const [dimensionOpen, setDimensionOpen] = useState(false);
+  const sourceId = 'dataSourceId' in definition ? definition.dataSourceId : undefined;
   useEffect(() => setDefinition(widget.definition), [widget]);
   useEffect(() => {
-    if (!('dataSourceId' in definition)) return;
-    void describeSource(definition.dataSourceId, dashboardId).then(setSource);
-  }, [dashboardId, definition]);
+    if (!sourceId) return;
+    const currentSourceId = sourceId;
+    let current = true;
+    async function loadSource() {
+      const next = await describeSource(currentSourceId, dashboardId);
+      if (current) setSource(next);
+    }
+    void loadSource();
+    return () => {
+      current = false;
+    };
+  }, [dashboardId, sourceId]);
 
   async function commit(next: WidgetDefinition) {
     setDefinition(next);
@@ -602,31 +615,26 @@ function WidgetSettings({
       ) : null}
       {'dataSourceId' in definition ? (
         <>
-          <Field>
-            <FieldLabel>Source</FieldLabel>
-            <div className="flex gap-2">
-              <NativeSelect
+          <div className="flex items-end gap-2">
+            <div className="min-w-0 flex-1">
+              <FieldPicker
+                label="Source"
                 value={definition.dataSourceId}
-                onChange={(event) =>
-                  void changeSource(definition, event.target.value, dashboardId, commit)
+                fields={dataSources.map((item) => ({ id: item.id, label: item.name }))}
+                onChange={(dataSourceId) =>
+                  void changeSource(definition, dataSourceId, dashboardId, commit)
                 }
-              >
-                {dataSources.map((item) => (
-                  <NativeSelectOption key={item.id} value={item.id}>
-                    {item.name}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-              <Button
-                variant="outline"
-                size="icon"
-                aria-label="Edit datasource fields"
-                onClick={() => setSourceOpen(true)}
-              >
-                <PencilIcon />
-              </Button>
+              />
             </div>
-          </Field>
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label="Edit datasource fields"
+              onClick={() => setSourceOpen(true)}
+            >
+              <PencilIcon />
+            </Button>
+          </div>
           {definition.type === 'control' ? (
             <FieldPicker
               label="Field"
@@ -650,13 +658,18 @@ function WidgetSettings({
                 commit={commit}
               />
               <FilterSettings definition={definition} fields={fields} commit={commit} />
-              <TypeSettings definition={definition} fields={fields} commit={commit} />
+              <TypeSettings
+                definition={definition}
+                fields={fields}
+                source={source}
+                commit={commit}
+              />
               <div className="flex flex-wrap gap-2">
                 <Button variant="outline" size="sm" onClick={() => setFormulaOpen(true)}>
-                  <PlusIcon data-icon="inline-start" /> Metric
+                  <PlusIcon data-icon="inline-start" /> Custom metric
                 </Button>
                 <Button variant="outline" size="sm" onClick={() => setDimensionOpen(true)}>
-                  <PlusIcon data-icon="inline-start" /> Dimension
+                  <PlusIcon data-icon="inline-start" /> New field
                 </Button>
               </div>
             </>
@@ -767,12 +780,13 @@ function LayoutNumberInput({
 }
 
 function DimensionSettings({ definition, fields, commit }: QuerySettingsProps) {
+  const dimensions = fields.filter((field) => field.role !== 'metric' && field.role !== 'date');
   if ('dimension' in definition)
     return (
       <FieldPicker
         label="Dimension"
         value={definition.dimension.fieldId}
-        fields={fields}
+        fields={dimensions}
         onChange={(fieldId) =>
           void commit({ ...definition, dimension: { ...definition.dimension, fieldId } })
         }
@@ -780,17 +794,51 @@ function DimensionSettings({ definition, fields, commit }: QuerySettingsProps) {
     );
   if ('dimensions' in definition)
     return (
-      <FieldPicker
-        label="Dimension"
-        value={definition.dimensions[0]?.fieldId ?? ''}
-        fields={fields}
-        onChange={(fieldId) =>
-          void commit({
-            ...definition,
-            dimensions: [{ fieldId }, ...definition.dimensions.slice(1)],
-          })
-        }
-      />
+      <div className="flex flex-col gap-3">
+        {definition.dimensions.map((dimension, index) => (
+          <div key={`${dimension.fieldId}-${index}`} className="flex items-end gap-2">
+            <div className="min-w-0 flex-1">
+              <FieldPicker
+                label={`Dimension ${index + 1}`}
+                value={dimension.fieldId}
+                fields={dimensions}
+                onChange={(fieldId) =>
+                  void commit({
+                    ...definition,
+                    dimensions: definition.dimensions.map((item, itemIndex) =>
+                      itemIndex === index ? { ...item, fieldId } : item,
+                    ),
+                  })
+                }
+              />
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={`Remove dimension ${index + 1}`}
+              onClick={() =>
+                void commit({
+                  ...definition,
+                  dimensions: definition.dimensions.filter((_, itemIndex) => itemIndex !== index),
+                })
+              }
+            >
+              <Trash2Icon />
+            </Button>
+          </div>
+        ))}
+        <FieldPicker
+          label="Add dimension"
+          value=""
+          fields={dimensions}
+          onChange={(fieldId) =>
+            void commit({
+              ...definition,
+              dimensions: [...definition.dimensions, { fieldId }],
+            })
+          }
+        />
+      </div>
     );
   return null;
 }
@@ -803,19 +851,6 @@ function MetricSettings({
   source,
   commit,
 }: QuerySettingsProps & { source?: SourceDescription }) {
-  const metric =
-    'metric' in definition
-      ? definition.metric
-      : 'metrics' in definition
-        ? definition.metrics[0]
-        : undefined;
-  if (!metric) return null;
-  const value =
-    metric.source.kind === 'field'
-      ? metric.source.fieldId
-      : metric.source.kind === 'library'
-        ? metric.source.libraryMetricId
-        : `expression:${metric.source.expression}`;
   const choices = [
     ...fields
       .filter((field) => field.role === 'metric')
@@ -825,62 +860,180 @@ function MetricSettings({
       label: `${item.name} · library`,
     })),
   ];
-  function update(nextMetric: MetricDefinition) {
+  const metrics =
+    'metric' in definition
+      ? [definition.metric]
+      : 'metrics' in definition
+        ? definition.metrics
+        : [];
+  if (!metrics.length) return null;
+  function update(index: number, nextMetric: MetricDefinition) {
     if ('metric' in definition) return commit({ ...definition, metric: nextMetric });
     if ('metrics' in definition)
-      return commit({ ...definition, metrics: [nextMetric, ...definition.metrics.slice(1)] });
+      return commit({
+        ...definition,
+        metrics: definition.metrics.map((item, itemIndex) =>
+          itemIndex === index ? nextMetric : item,
+        ),
+      });
+    return Promise.resolve();
+  }
+  function metricFor(id: string): MetricDefinition {
+    const library = source?.libraryMetrics.find((item) => item.id === id);
+    const field = fields.find((item) => item.id === id);
+    return {
+      source: library
+        ? { kind: 'library', libraryMetricId: id }
+        : {
+            kind: 'field',
+            fieldId: id,
+            aggregation: field?.defaultAggregation ?? 'sum',
+          },
+      dataType:
+        (field?.semanticType ?? library?.semanticType) === 'currency'
+          ? 'currency'
+          : (field?.semanticType ?? library?.semanticType) === 'ratio'
+            ? 'percent'
+            : 'number',
+    };
   }
   return (
-    <>
-      <FieldPicker
-        label="Metric"
-        value={value}
-        fields={choices}
-        onChange={(id) => {
-          const library = source?.libraryMetrics.find((item) => item.id === id);
-          void update({
-            ...metric,
-            source: library
-              ? { kind: 'library', libraryMetricId: id }
-              : { kind: 'field', fieldId: id, aggregation: 'sum' },
-          });
-        }}
-      />
-      {metric.source.kind === 'field' ? (
-        <Field>
-          <FieldLabel>Aggregation</FieldLabel>
-          <NativeSelect
-            value={metric.source.aggregation}
-            onChange={(event) =>
-              void update({
-                ...metric,
-                source: {
-                  kind: 'field',
-                  fieldId: metric.source.kind === 'field' ? metric.source.fieldId : '',
-                  aggregation: event.target.value as typeof metric.source.aggregation,
-                },
-              })
-            }
-          >
-            {[
-              'sum',
-              'average',
-              'count',
-              'countDistinct',
-              'min',
-              'max',
-              'median',
-              'standardDeviation',
-              'variance',
-            ].map((item) => (
-              <NativeSelectOption key={item} value={item}>
-                {item}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-        </Field>
+    <div className="flex flex-col gap-3">
+      {metrics.map((metric, index) => {
+        const value =
+          metric.source.kind === 'field'
+            ? metric.source.fieldId
+            : metric.source.kind === 'library'
+              ? metric.source.libraryMetricId
+              : `expression:${index}`;
+        const metricChoices =
+          metric.source.kind === 'expression'
+            ? [{ id: value, label: metric.userDefinedName ?? 'Custom expression' }, ...choices]
+            : choices;
+        return (
+          <div key={`${value}-${index}`} className="flex flex-col gap-2">
+            <div className="flex items-end gap-2">
+              <div className="min-w-0 flex-1">
+                <FieldPicker
+                  label={`Metric${metrics.length > 1 ? ` ${index + 1}` : ''}`}
+                  value={value}
+                  fields={metricChoices}
+                  onChange={(id) => {
+                    if (id !== value) void update(index, metricFor(id));
+                  }}
+                />
+              </div>
+              {'metrics' in definition && definition.metrics.length > 1 ? (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={`Remove metric ${index + 1}`}
+                  onClick={() =>
+                    void commit({
+                      ...definition,
+                      metrics: definition.metrics.filter((_, itemIndex) => itemIndex !== index),
+                    })
+                  }
+                >
+                  <Trash2Icon />
+                </Button>
+              ) : null}
+            </div>
+            {metric.source.kind === 'field' ? (
+              <Field>
+                <FieldLabel>Aggregation</FieldLabel>
+                <NativeSelect
+                  value={metric.source.aggregation}
+                  onChange={(event) =>
+                    void update(index, {
+                      ...metric,
+                      source: {
+                        kind: 'field',
+                        fieldId: metric.source.kind === 'field' ? metric.source.fieldId : '',
+                        aggregation: event.target.value as Aggregation,
+                      },
+                    })
+                  }
+                >
+                  {aggregations.map((item) => (
+                    <NativeSelectOption key={item} value={item}>
+                      {item}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </Field>
+            ) : null}
+            {metric.source.kind === 'expression' ? (
+              <MetricExpressionInput
+                metric={metric}
+                onCommit={(nextMetric) => update(index, nextMetric)}
+              />
+            ) : null}
+          </div>
+        );
+      })}
+      {'metrics' in definition ? (
+        <FieldPicker
+          label="Add metric"
+          value=""
+          fields={choices}
+          onChange={(id) =>
+            void commit({ ...definition, metrics: [...definition.metrics, metricFor(id)] })
+          }
+        />
       ) : null}
-    </>
+    </div>
+  );
+}
+
+const aggregations: Aggregation[] = [
+  'sum',
+  'average',
+  'count',
+  'countDistinct',
+  'min',
+  'max',
+  'median',
+  'standardDeviation',
+  'variance',
+];
+
+function MetricExpressionInput({
+  metric,
+  onCommit,
+}: {
+  metric: MetricDefinition;
+  onCommit: (metric: MetricDefinition) => Promise<void>;
+}) {
+  const source = metric.source.kind === 'expression' ? metric.source : undefined;
+  const [name, setName] = useState(metric.userDefinedName ?? '');
+  const [expression, setExpression] = useState(source?.expression ?? '');
+  useEffect(() => {
+    setName(metric.userDefinedName ?? '');
+    setExpression(source?.expression ?? '');
+  }, [metric.userDefinedName, source?.expression]);
+  if (!source) return null;
+  const save = () =>
+    onCommit({
+      ...metric,
+      userDefinedName: name.trim() || undefined,
+      source: { kind: 'expression', expression },
+    });
+  return (
+    <div className="grid gap-2">
+      <Field>
+        <FieldLabel>Name</FieldLabel>
+        <Input value={name} onChange={(event) => setName(event.target.value)} onBlur={save} />
+      </Field>
+      <Field>
+        <FieldLabel>Expression</FieldLabel>
+        <Textarea
+          value={expression}
+          onChange={(event) => setExpression(event.target.value)}
+          onBlur={save}
+        />
+      </Field>
+    </div>
   );
 }
 
@@ -892,50 +1045,57 @@ interface QuerySettingsProps {
 }
 
 function FilterSettings({ definition, fields, commit }: QuerySettingsProps) {
-  const condition = definition.filter?.conditions[0];
+  const filter = definition.filter;
+  const conditions = filter?.conditions ?? [];
+  function updateCondition(index: number, patch: Partial<(typeof conditions)[number]>) {
+    const currentFilter = filter ?? { connector: 'and' as const, conditions };
+    return commit({
+      ...definition,
+      filter: patchFilterCondition(currentFilter, index, patch),
+    });
+  }
   return (
     <div className="flex flex-col gap-2">
-      <FieldLabel>Filter</FieldLabel>
-      {condition ? (
-        <>
-          <FieldPicker
-            label="Field"
-            value={condition.fieldId}
-            fields={fields}
-            onChange={(fieldId) =>
-              void commit({
-                ...definition,
-                filter: {
-                  connector: definition.filter?.connector ?? 'and',
-                  conditions: [{ ...condition, fieldId }],
-                },
-              })
-            }
-          />
+      <div className="flex items-center justify-between gap-2">
+        <FieldLabel>Filters</FieldLabel>
+        {conditions.length > 1 ? (
           <NativeSelect
-            value={condition.operator}
+            className="w-24"
+            aria-label="Filter connector"
+            value={filter?.connector ?? 'and'}
             onChange={(event) =>
               void commit({
                 ...definition,
                 filter: {
-                  connector: definition.filter?.connector ?? 'and',
-                  conditions: [
-                    { ...condition, operator: event.target.value as typeof condition.operator },
-                  ],
+                  connector: event.target.value as 'and' | 'or',
+                  conditions,
                 },
               })
             }
           >
-            {[
-              'equals',
-              'notEquals',
-              'contains',
-              'notContains',
-              'greaterThan',
-              'lessThan',
-              'isEmpty',
-              'isNotEmpty',
-            ].map((item) => (
+            <NativeSelectOption value="and">Match all</NativeSelectOption>
+            <NativeSelectOption value="or">Match any</NativeSelectOption>
+          </NativeSelect>
+        ) : null}
+      </div>
+      {conditions.map((condition, index) => (
+        <div key={`${condition.fieldId}-${index}`} className="grid gap-2 border-l-2 pl-3">
+          <FieldPicker
+            label={`Filter ${index + 1}`}
+            value={condition.fieldId}
+            fields={fields}
+            onChange={(fieldId) => void updateCondition(index, { fieldId })}
+          />
+          <NativeSelect
+            aria-label={`Filter ${index + 1} operator`}
+            value={condition.operator}
+            onChange={(event) =>
+              void updateCondition(index, {
+                operator: event.target.value as typeof condition.operator,
+              })
+            }
+          >
+            {filterOperators.map((item) => (
               <NativeSelectOption key={item} value={item}>
                 {item}
               </NativeSelectOption>
@@ -944,46 +1104,60 @@ function FilterSettings({ definition, fields, commit }: QuerySettingsProps) {
           {!['isEmpty', 'isNotEmpty'].includes(condition.operator) ? (
             <FilterValueInput
               value={String(condition.value ?? '')}
-              onCommit={(value) =>
-                commit({
-                  ...definition,
-                  filter: {
-                    connector: definition.filter?.connector ?? 'and',
-                    conditions: [{ ...condition, value }],
-                  },
-                })
-              }
+              onCommit={(value) => updateCondition(index, { value })}
             />
           ) : null}
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => void commit({ ...definition, filter: undefined })}
+            onClick={() => {
+              const next = conditions.filter((_, itemIndex) => itemIndex !== index);
+              void commit({
+                ...definition,
+                filter: next.length
+                  ? { connector: filter?.connector ?? 'and', conditions: next }
+                  : undefined,
+              });
+            }}
           >
             Remove filter
           </Button>
-        </>
-      ) : (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() =>
-            fields[0] &&
-            void commit({
-              ...definition,
-              filter: {
-                connector: 'and',
-                conditions: [{ fieldId: fields[0].id, operator: 'equals', value: '' }],
-              },
-            })
-          }
-        >
-          <PlusIcon data-icon="inline-start" /> Add filter
-        </Button>
-      )}
+        </div>
+      ))}
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() =>
+          fields[0] &&
+          void commit({
+            ...definition,
+            filter: {
+              connector: filter?.connector ?? 'and',
+              conditions: [...conditions, { fieldId: fields[0].id, operator: 'equals', value: '' }],
+            },
+          })
+        }
+      >
+        <PlusIcon data-icon="inline-start" /> Add filter
+      </Button>
     </div>
   );
 }
+
+const filterOperators = [
+  'equals',
+  'notEquals',
+  'contains',
+  'notContains',
+  'in',
+  'notIn',
+  'greaterThan',
+  'greaterThanOrEqual',
+  'lessThan',
+  'lessThanOrEqual',
+  'isEmpty',
+  'isNotEmpty',
+] as const;
 
 function FilterValueInput({
   value,
@@ -1004,75 +1178,290 @@ function FilterValueInput({
   );
 }
 
-function TypeSettings({ definition, fields, commit }: QuerySettingsProps) {
-  return (
-    <>
-      {'comparison' in definition ? (
-        <Field>
-          <FieldLabel>Comparison</FieldLabel>
-          <NativeSelect
-            value={definition.comparison?.mode ?? 'none'}
-            onChange={(event) =>
-              void commit({
-                ...definition,
-                comparison: {
-                  mode: event.target.value as 'none' | 'previousPeriod' | 'previousYear',
-                },
-              })
-            }
-          >
-            <NativeSelectOption value="none">None</NativeSelectOption>
-            <NativeSelectOption value="previousPeriod">Previous period</NativeSelectOption>
-            <NativeSelectOption value="previousYear">Previous year</NativeSelectOption>
-          </NativeSelect>
-        </Field>
-      ) : null}
-      {'breakdownDimension' in definition ? (
-        <FieldPicker
-          label="Breakdown"
-          value={definition.breakdownDimension?.fieldId ?? ''}
-          fields={[{ id: '', label: 'None' }, ...fields]}
-          onChange={(fieldId) =>
-            void commit({ ...definition, breakdownDimension: fieldId ? { fieldId } : undefined })
-          }
+function TypeSettings({
+  definition,
+  fields,
+  source,
+  commit,
+}: QuerySettingsProps & { source?: SourceDescription }) {
+  const dimensions = fields.filter((field) => field.role !== 'metric' && field.role !== 'date');
+  switch (definition.type) {
+    case 'scorecard':
+    case 'line':
+      return (
+        <ComparisonSetting
+          value={definition.comparison?.mode ?? 'none'}
+          onChange={(mode) => commit({ ...definition, comparison: { mode } })}
         />
-      ) : null}
-      {'limit' in definition ? (
-        <Field>
-          <FieldLabel>Limit</FieldLabel>
-          <Input
-            type="number"
-            min={1}
-            max={500}
-            value={definition.limit ?? 20}
-            onChange={(event) => void commit({ ...definition, limit: event.target.valueAsNumber })}
+      );
+    case 'gauge':
+      return (
+        <>
+          <ComparisonSetting
+            value={definition.comparison?.mode ?? 'none'}
+            onChange={(mode) => commit({ ...definition, comparison: { mode } })}
           />
-        </Field>
-      ) : null}
-      {'sort' in definition ? (
-        <Field>
-          <FieldLabel>Sort</FieldLabel>
-          <NativeSelect
+          <Field>
+            <FieldLabel>Upper limit</FieldLabel>
+            <NativeSelect
+              value={definition.upperLimit?.kind ?? 'none'}
+              onChange={(event) =>
+                void commit({
+                  ...definition,
+                  upperLimit:
+                    event.target.value === 'manual'
+                      ? { kind: 'manual', value: 100 }
+                      : event.target.value === 'library' && source?.libraryMetrics[0]
+                        ? {
+                            kind: 'library',
+                            libraryMetricId: source.libraryMetrics[0].id,
+                          }
+                        : undefined,
+                })
+              }
+            >
+              <NativeSelectOption value="none">Automatic</NativeSelectOption>
+              <NativeSelectOption value="manual">Manual</NativeSelectOption>
+              {source?.libraryMetrics.length ? (
+                <NativeSelectOption value="library">Library metric</NativeSelectOption>
+              ) : null}
+            </NativeSelect>
+          </Field>
+          {definition.upperLimit?.kind === 'manual' ? (
+            <Field>
+              <FieldLabel htmlFor="gauge-upper-limit">Maximum</FieldLabel>
+              <LayoutNumberInput
+                id="gauge-upper-limit"
+                min={1}
+                value={definition.upperLimit.value}
+                onCommit={(value) =>
+                  commit({ ...definition, upperLimit: { kind: 'manual', value } })
+                }
+              />
+            </Field>
+          ) : null}
+          {definition.upperLimit?.kind === 'library' ? (
+            <FieldPicker
+              label="Maximum metric"
+              value={definition.upperLimit.libraryMetricId}
+              fields={(source?.libraryMetrics ?? []).map((metric) => ({
+                id: metric.id,
+                label: metric.name,
+              }))}
+              onChange={(libraryMetricId) =>
+                void commit({
+                  ...definition,
+                  upperLimit: { kind: 'library', libraryMetricId },
+                })
+              }
+            />
+          ) : null}
+        </>
+      );
+    case 'bar':
+      return (
+        <>
+          <ComparisonSetting
+            value={definition.comparison?.mode ?? 'none'}
+            onChange={(mode) => commit({ ...definition, comparison: { mode } })}
+          />
+          <BreakdownSetting
+            value={definition.breakdownDimension?.fieldId ?? ''}
+            fields={dimensions}
+            onChange={(fieldId) =>
+              commit({ ...definition, breakdownDimension: fieldId ? { fieldId } : undefined })
+            }
+          />
+          <LimitSetting
+            value={definition.limit ?? 20}
+            onChange={(limit) => commit({ ...definition, limit })}
+          />
+          <SortSetting
             value={definition.sort?.[0]?.direction ?? 'desc'}
-            onChange={(event) =>
-              void commit({
+            onChange={(direction) =>
+              commit({
                 ...definition,
-                sort: [
-                  {
-                    target: { kind: 'metric', index: 0 },
-                    direction: event.target.value as 'asc' | 'desc',
-                  },
-                ],
+                sort: sortWithDirection(definition.sort, direction),
               })
             }
-          >
-            <NativeSelectOption value="desc">Highest first</NativeSelectOption>
-            <NativeSelectOption value="asc">Lowest first</NativeSelectOption>
-          </NativeSelect>
-        </Field>
-      ) : null}
-    </>
+          />
+        </>
+      );
+    case 'pie':
+      return (
+        <>
+          <BreakdownSetting
+            value={definition.breakdownDimension?.fieldId ?? ''}
+            fields={dimensions}
+            onChange={(fieldId) =>
+              commit({ ...definition, breakdownDimension: fieldId ? { fieldId } : undefined })
+            }
+          />
+          <LimitSetting
+            value={definition.limit ?? 20}
+            onChange={(limit) => commit({ ...definition, limit })}
+          />
+          <SortSetting
+            value={definition.sort?.[0]?.direction ?? 'desc'}
+            onChange={(direction) =>
+              commit({
+                ...definition,
+                sort: sortWithDirection(definition.sort, direction),
+              })
+            }
+          />
+        </>
+      );
+    case 'table':
+      return (
+        <>
+          <ComparisonSetting
+            value={definition.comparison?.mode ?? 'none'}
+            onChange={(mode) => commit({ ...definition, comparison: { mode } })}
+          />
+          <Field>
+            <FieldLabel>Result mode</FieldLabel>
+            <NativeSelect
+              value={definition.resultLimit.mode}
+              onChange={(event) =>
+                void commit({
+                  ...definition,
+                  resultLimit: {
+                    ...definition.resultLimit,
+                    mode: event.target.value as 'pagination' | 'top',
+                  },
+                })
+              }
+            >
+              <NativeSelectOption value="top">Top results</NativeSelectOption>
+              <NativeSelectOption value="pagination">Pagination</NativeSelectOption>
+            </NativeSelect>
+          </Field>
+          <LimitSetting
+            label="Result limit"
+            value={definition.resultLimit.amount}
+            onChange={(amount) =>
+              commit({ ...definition, resultLimit: { ...definition.resultLimit, amount } })
+            }
+          />
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={definition.showSummaryRow ?? false}
+              onChange={(event) =>
+                void commit({ ...definition, showSummaryRow: event.target.checked })
+              }
+            />
+            Show summary row
+          </label>
+          <SortSetting
+            value={definition.sort?.[0]?.direction ?? 'desc'}
+            onChange={(direction) =>
+              commit({
+                ...definition,
+                sort: sortWithDirection(definition.sort, direction),
+              })
+            }
+          />
+        </>
+      );
+    default:
+      return null;
+  }
+}
+
+type ComparisonMode = 'none' | 'previousPeriod' | 'previousYear';
+
+function ComparisonSetting({
+  value,
+  onChange,
+}: {
+  value: ComparisonMode;
+  onChange: (value: ComparisonMode) => Promise<void>;
+}) {
+  return (
+    <Field>
+      <FieldLabel>Comparison</FieldLabel>
+      <NativeSelect
+        value={value}
+        onChange={(event) => void onChange(event.target.value as ComparisonMode)}
+      >
+        <NativeSelectOption value="none">None</NativeSelectOption>
+        <NativeSelectOption value="previousPeriod">Previous period</NativeSelectOption>
+        <NativeSelectOption value="previousYear">Previous year</NativeSelectOption>
+      </NativeSelect>
+    </Field>
   );
+}
+
+function BreakdownSetting({
+  value,
+  fields,
+  onChange,
+}: {
+  value: string;
+  fields: SourceField[];
+  onChange: (value: string) => Promise<void>;
+}) {
+  return (
+    <FieldPicker
+      label="Breakdown"
+      value={value}
+      fields={[{ id: '', label: 'None' }, ...fields]}
+      onChange={(fieldId) => void onChange(fieldId)}
+    />
+  );
+}
+
+function LimitSetting({
+  label = 'Limit',
+  value,
+  onChange,
+}: {
+  label?: string;
+  value: number;
+  onChange: (value: number) => Promise<void>;
+}) {
+  const id = `type-${label.toLocaleLowerCase().replaceAll(' ', '-')}`;
+  return (
+    <Field>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <LayoutNumberInput id={id} min={1} max={500} value={value} onCommit={onChange} />
+    </Field>
+  );
+}
+
+function SortSetting({
+  value,
+  onChange,
+}: {
+  value: 'asc' | 'desc';
+  onChange: (value: 'asc' | 'desc') => Promise<void>;
+}) {
+  return (
+    <Field>
+      <FieldLabel>Sort</FieldLabel>
+      <NativeSelect
+        value={value}
+        onChange={(event) => void onChange(event.target.value as 'asc' | 'desc')}
+      >
+        <NativeSelectOption value="desc">Highest first</NativeSelectOption>
+        <NativeSelectOption value="asc">Lowest first</NativeSelectOption>
+      </NativeSelect>
+    </Field>
+  );
+}
+
+type SortDefinition = Extract<WidgetDefinition, { type: 'table' }>['sort'];
+
+function sortWithDirection(sort: SortDefinition, direction: 'asc' | 'desc') {
+  return [
+    {
+      ...(sort?.[0] ?? { target: { kind: 'metric' as const, index: 0 } }),
+      direction,
+    },
+    ...(sort?.slice(1) ?? []),
+  ];
 }
 
 function FieldPicker({
@@ -1240,7 +1629,12 @@ function DatasourceFieldRow({
     await onSaved();
   }
   return (
-    <div className="grid items-end gap-2 rounded-lg bg-muted p-3 sm:grid-cols-[minmax(8rem,1fr)_8rem_9rem_9rem_minmax(10rem,1fr)_auto]">
+    <div
+      className={cn(
+        'grid items-end gap-2 border-l-4 bg-muted/60 p-3 sm:grid-cols-[minmax(8rem,1fr)_8rem_9rem_9rem_minmax(10rem,1fr)_auto]',
+        fieldRoleStyles[value.role],
+      )}
+    >
       <Field>
         <FieldLabel>Name</FieldLabel>
         <Input
@@ -1319,6 +1713,13 @@ function DatasourceFieldRow({
     </div>
   );
 }
+
+const fieldRoleStyles: Record<FieldRole, string> = {
+  dimension: 'border-l-blue-500',
+  metric: 'border-l-emerald-500',
+  date: 'border-l-amber-500',
+  id: 'border-l-violet-500',
+};
 
 function MetricFormulaDialog({
   open,
