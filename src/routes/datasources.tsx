@@ -377,6 +377,7 @@ function RegisterForm({ refresh }: { refresh: () => Promise<void> }) {
         action: 'registerDatasource',
         name,
         location: { kind: 'object', key: prepared.key, format: uploadFormat },
+        cleanupToken: prepared.cleanupToken,
       });
       trackUpload(
         'datasource_registered',
@@ -569,12 +570,7 @@ function RegisterForm({ refresh }: { refresh: () => Promise<void> }) {
           </Alert>
         ) : null}
         {uploadedKey ? (
-          <Button
-            type="button"
-            variant="outline"
-            disabled={phase === 'removing'}
-            onClick={removeFile}
-          >
+          <Button type="button" variant="outline" disabled={busy} onClick={removeFile}>
             Remove file
           </Button>
         ) : null}

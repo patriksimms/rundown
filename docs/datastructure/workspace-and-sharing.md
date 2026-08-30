@@ -57,7 +57,10 @@ The server derives the workspace from `dashboardId`. Revoking sets `revokedAt`; 
 
 ## Permission summary
 
-| Action | admin | editor grant | viewer grant | share link |
+Workspace-wide datasource registration follows organization membership. Dashboard grants apply only
+to actions on their dashboard.
+
+| Action | admin | member / editor grant | viewer grant | share link |
 |---|---|---|---|---|
 | Register datasource | yes | yes | no | no |
 | Edit datasource lookup table | yes | no | no | no |

@@ -117,6 +117,7 @@ export const apiRequestSchema = z.discriminatedUnion('action', [
     action: z.literal('registerDatasource'),
     name: z.string().trim().min(1),
     location: dataSourceLocationSchema,
+    cleanupToken: z.string().min(1).optional(),
   }),
   z.object({
     action: z.literal('updateFieldMetadata'),

@@ -14,6 +14,7 @@ import {
   dashboardGrants,
   dashboards,
   dataSources,
+  datasourceUploads,
   fields,
   libraryMetrics,
   shareLinks,
@@ -663,13 +664,23 @@ async function prepareDatasourceUpload(
 ) {
   const session = await requireSession();
   const upload = await prepareSourceUpload(session.workspace.r2Prefix, request.format);
+  const cleanupToken = await createDatasourceUploadCleanupToken(
+    upload.key,
+    session.userId,
+    uploadCleanupSecret(),
+  );
+  const now = new Date().toISOString();
+  await database().insert(datasourceUploads).values({
+    key: upload.key,
+    workspaceId: session.workspace.id,
+    clerkUserId: session.userId,
+    status: 'pending',
+    createdAt: now,
+    updatedAt: now,
+  });
   return {
     ...upload,
-    cleanupToken: await createDatasourceUploadCleanupToken(
-      upload.key,
-      session.userId,
-      uploadCleanupSecret(),
-    ),
+    cleanupToken,
   };
 }
 
@@ -688,13 +699,35 @@ async function removeDatasourceUpload(
     ))
   )
     throw new ApiError(403, 'invalid_cleanup_token', 'This upload cannot be removed by this user.');
-  if (await isDatasourceObjectRegistered(session.workspace.id, request.key))
+  const claimedRemoval = await database()
+    .update(datasourceUploads)
+    .set({ status: 'removing', updatedAt: new Date().toISOString() })
+    .where(
+      and(
+        eq(datasourceUploads.key, request.key),
+        eq(datasourceUploads.workspaceId, session.workspace.id),
+        eq(datasourceUploads.clerkUserId, session.userId),
+        eq(datasourceUploads.status, 'pending'),
+      ),
+    )
+    .returning({ key: datasourceUploads.key });
+  if (!claimedRemoval.length)
+    throw new ApiError(409, 'upload_not_pending', 'This upload is not available for removal.');
+  if (await isDatasourceObjectRegistered(session.workspace.id, request.key)) {
+    await deleteUploadState(session, request.key, 'removing');
     throw new ApiError(
       409,
       'upload_in_use',
       'This file belongs to a registered datasource and cannot be removed.',
     );
-  await deleteSourceObject(request.key);
+  }
+  try {
+    await deleteSourceObject(request.key);
+  } catch (error) {
+    await restorePendingUpload(session, request.key, 'removing');
+    throw error;
+  }
+  await deleteUploadState(session, request.key, 'removing');
   return { removed: true };
 }
 
@@ -720,64 +753,75 @@ async function registerDatasource(request: Extract<ApiRequest, { action: 'regist
       'invalid_r2_prefix',
       `Datasource keys must start with ${session.workspace.r2Prefix}.`,
     );
-  const objects =
-    request.location.kind === 'object'
-      ? [await headSourceObject(request.location.key)].filter((item) => item !== null)
-      : (await listSourceObjects(request.location.key)).objects;
-  if (!objects.length)
-    throw new ApiError(404, 'r2_object_not_found', 'No matching R2 objects were found.');
-  if (
+  const managedUploadKey =
     request.location.kind === 'object' &&
-    isManagedDatasourceUpload(session.workspace.r2Prefix, request.location.key) &&
-    objects[0].size > MAX_DATASOURCE_FILE_BYTES
-  ) {
-    const isRegistered = await isDatasourceObjectRegistered(
-      session.workspace.id,
-      request.location.key,
+    isManagedDatasourceUpload(session.workspace.r2Prefix, request.location.key)
+      ? request.location.key
+      : undefined;
+  if (managedUploadKey) await claimPendingUpload(session, managedUploadKey, request.cleanupToken);
+  try {
+    const objects =
+      request.location.kind === 'object'
+        ? [await headSourceObject(request.location.key)].filter((item) => item !== null)
+        : (await listSourceObjects(request.location.key)).objects;
+    if (!objects.length)
+      throw new ApiError(404, 'r2_object_not_found', 'No matching R2 objects were found.');
+    if (
+      request.location.kind === 'prefix' &&
+      objects.some((object) => isManagedDatasourceUpload(session.workspace.r2Prefix, object.key))
+    )
+      throw new ApiError(
+        400,
+        'managed_upload_prefix_not_allowed',
+        'Rundown uploads must be registered as a single object.',
+      );
+    if (managedUploadKey && objects[0].size > MAX_DATASOURCE_FILE_BYTES)
+      throw new ApiError(
+        413,
+        'datasource_upload_too_large',
+        'The uploaded file is larger than 100 MB.',
+      );
+    const dataSource: DataSourceRecord = {
+      id: `ds_${crypto.randomUUID()}`,
+      workspaceId: session.workspace.id,
+      name: request.name,
+      location: request.location,
+      version: await hashJson(objects.map((object) => [object.key, object.etag])),
+    };
+    const inspection = await describeDataSource(dataSource).catch((error: unknown) => {
+      throw new ApiError(
+        422,
+        'datasource_inspection_failed',
+        error instanceof Error ? error.message : 'DuckDB could not inspect this file.',
+      );
+    });
+    const discovered = inspection.description.map((column) =>
+      seedField(dataSource.id, column, inspection.samples),
     );
-    if (!isRegistered) await deleteSourceObject(request.location.key);
-    throw new ApiError(
-      413,
-      'datasource_upload_too_large',
-      isRegistered
-        ? 'The uploaded file is larger than 100 MB.'
-        : 'The uploaded file is larger than 100 MB and was removed.',
-    );
+    const now = new Date().toISOString();
+    const db = database();
+    await db.batch([
+      db.insert(dataSources).values({
+        id: dataSource.id,
+        workspaceId: dataSource.workspaceId,
+        name: dataSource.name,
+        location: dataSource.location,
+        version: dataSource.version,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      ...discovered.map((field) =>
+        db.insert(fields).values({ ...field, workspaceId: session.workspace.id }),
+      ),
+      ...(managedUploadKey
+        ? [db.delete(datasourceUploads).where(eq(datasourceUploads.key, managedUploadKey))]
+        : []),
+    ]);
+    return { ...dataSource, fields: discovered };
+  } catch (error) {
+    if (managedUploadKey) await restorePendingUpload(session, managedUploadKey, 'registering');
+    throw error;
   }
-  const dataSource: DataSourceRecord = {
-    id: `ds_${crypto.randomUUID()}`,
-    workspaceId: session.workspace.id,
-    name: request.name,
-    location: request.location,
-    version: await hashJson(objects.map((object) => [object.key, object.etag])),
-  };
-  const inspection = await describeDataSource(dataSource).catch((error: unknown) => {
-    throw new ApiError(
-      422,
-      'datasource_inspection_failed',
-      error instanceof Error ? error.message : 'DuckDB could not inspect this file.',
-    );
-  });
-  const discovered = inspection.description.map((column) =>
-    seedField(dataSource.id, column, inspection.samples),
-  );
-  const now = new Date().toISOString();
-  const db = database();
-  await db.batch([
-    db.insert(dataSources).values({
-      id: dataSource.id,
-      workspaceId: dataSource.workspaceId,
-      name: dataSource.name,
-      location: dataSource.location,
-      version: dataSource.version,
-      createdAt: now,
-      updatedAt: now,
-    }),
-    ...discovered.map((field) =>
-      db.insert(fields).values({ ...field, workspaceId: session.workspace.id }),
-    ),
-  ]);
-  return { ...dataSource, fields: discovered };
 }
 
 function uploadCleanupSecret() {
@@ -790,6 +834,72 @@ async function isDatasourceObjectRegistered(workspaceId: string, key: string) {
     .from(dataSources)
     .where(eq(dataSources.workspaceId, workspaceId));
   return registeredSources.some(({ location }) => dataSourceLocationReferencesKey(location, key));
+}
+
+async function claimPendingUpload(
+  session: SessionContext,
+  key: string,
+  cleanupToken: string | undefined,
+) {
+  if (
+    !cleanupToken ||
+    !(await verifyDatasourceUploadCleanupToken(
+      cleanupToken,
+      key,
+      session.userId,
+      uploadCleanupSecret(),
+    ))
+  )
+    throw new ApiError(403, 'invalid_cleanup_token', 'This upload belongs to another user.');
+  const claimed = await database()
+    .update(datasourceUploads)
+    .set({ status: 'registering', updatedAt: new Date().toISOString() })
+    .where(
+      and(
+        eq(datasourceUploads.key, key),
+        eq(datasourceUploads.workspaceId, session.workspace.id),
+        eq(datasourceUploads.clerkUserId, session.userId),
+        eq(datasourceUploads.status, 'pending'),
+      ),
+    )
+    .returning({ key: datasourceUploads.key });
+  if (!claimed.length)
+    throw new ApiError(409, 'upload_not_pending', 'This upload is already being processed.');
+}
+
+async function restorePendingUpload(
+  session: SessionContext,
+  key: string,
+  fromStatus: 'registering' | 'removing',
+) {
+  await database()
+    .update(datasourceUploads)
+    .set({ status: 'pending', updatedAt: new Date().toISOString() })
+    .where(
+      and(
+        eq(datasourceUploads.key, key),
+        eq(datasourceUploads.workspaceId, session.workspace.id),
+        eq(datasourceUploads.clerkUserId, session.userId),
+        eq(datasourceUploads.status, fromStatus),
+      ),
+    );
+}
+
+async function deleteUploadState(
+  session: SessionContext,
+  key: string,
+  status: 'registering' | 'removing',
+) {
+  await database()
+    .delete(datasourceUploads)
+    .where(
+      and(
+        eq(datasourceUploads.key, key),
+        eq(datasourceUploads.workspaceId, session.workspace.id),
+        eq(datasourceUploads.clerkUserId, session.userId),
+        eq(datasourceUploads.status, status),
+      ),
+    );
 }
 
 async function updateFieldMetadata(

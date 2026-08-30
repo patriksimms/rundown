@@ -22,6 +22,13 @@
       "when": 1788111645023,
       "tag": "0002_tricky_northstar",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1788122250433,
+      "tag": "0003_sticky_pet_avengers",
+      "breakpoints": true
     }
   ]
 }
