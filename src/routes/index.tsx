@@ -4,6 +4,7 @@ import { PlusIcon } from 'lucide-react';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { callApi } from '#/api/client';
 import { AppShell } from '#/components/app-shell';
+import { LandingPage } from '#/components/landing-page';
 import { ErrorState, LoadingState } from '#/components/request-state';
 import { Button } from '#/components/ui/button';
 import {
@@ -38,29 +39,12 @@ function Home() {
   return (
     <AppShell>
       <Show when="signed-out">
-        <SignedOut />
+        <LandingPage />
       </Show>
       <Show when="signed-in">
         <DashboardIndex />
       </Show>
     </AppShell>
-  );
-}
-
-function SignedOut() {
-  return (
-    <main className="mx-auto flex min-h-[calc(100vh-3.5rem)] w-full max-w-7xl flex-col justify-center px-4 py-16 sm:px-6">
-      <p className="mb-3 text-sm font-medium text-muted-foreground">
-        Client reporting without the rebuild
-      </p>
-      <h1 className="max-w-3xl text-4xl font-semibold tracking-tight sm:text-6xl">
-        Describe the report. Fine-tune it in the browser.
-      </h1>
-      <p className="mt-5 max-w-2xl text-base leading-7 text-muted-foreground">
-        Rundown turns reporting intent into query-backed dashboards while keeping every formula,
-        filter, and access rule inspectable.
-      </p>
-    </main>
   );
 }
 
