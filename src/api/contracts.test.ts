@@ -18,7 +18,9 @@ describe('dashboard timezone contracts', () => {
   it.each([
     { action: 'createDashboard', name: 'Performance', timezone: 'Berlin' },
     { action: 'createDashboard', name: 'Performance', timezone: '+01:00' },
+    { action: 'createDashboard', name: 'Performance', timezone: '+0100' },
     { action: 'createDashboard', name: 'Performance', timezone: '-05:30' },
+    { action: 'createDashboard', name: 'Performance', timezone: '-0530' },
     { action: 'updateDashboard', dashboardId: 'dashboard-1', timezone: 'Not/A_Timezone' },
   ])('rejects an invalid timezone for $action', (request) => {
     expect(apiRequestSchema.safeParse(request).success).toBe(false);

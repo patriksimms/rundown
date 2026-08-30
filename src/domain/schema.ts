@@ -6,7 +6,7 @@ export const timezoneSchema = z
   .min(1)
   .refine(
     (timezone) => {
-      if (/^[+-]\d{1,2}(?::\d{2})?$/.test(timezone)) return false;
+      if (/^[+-]/.test(timezone)) return false;
       try {
         new Intl.DateTimeFormat('en', { timeZone: timezone });
         return true;
