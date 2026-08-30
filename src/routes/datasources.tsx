@@ -64,6 +64,7 @@ function DatasourcesPage() {
   const [selected, setSelected] = useState<string>();
   const [description, setDescription] = useState<Description>();
   const [objects, setObjects] = useState<Array<{ key: string }>>([]);
+  const [objectsCursor, setObjectsCursor] = useState<string>();
   const [error, setError] = useState<string>();
   const refresh = useCallback(async () => {
     try {
@@ -76,10 +77,13 @@ function DatasourcesPage() {
           await callApi<Description>({ action: 'describeDatasource', dataSourceId: id }),
         );
       }
-      if (data.isAdmin)
-        setObjects(
-          (await callApi<{ objects: Array<{ key: string }> }>({ action: 'listR2Objects' })).objects,
-        );
+      if (data.isAdmin) {
+        const listing = await callApi<{ objects: Array<{ key: string }>; cursor?: string }>({
+          action: 'listR2Objects',
+        });
+        setObjects(listing.objects);
+        setObjectsCursor(listing.cursor);
+      }
       setError(undefined);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -135,7 +139,20 @@ function DatasourcesPage() {
                 {description ? <FieldTable source={description} refresh={refresh} /> : null}
               </TabsContent>
               <TabsContent value="register" className="pt-5">
-                <RegisterForm objects={objects} refresh={refresh} />
+                <RegisterForm
+                  objects={objects}
+                  objectsCursor={objectsCursor}
+                  loadMore={async () => {
+                    if (!objectsCursor) return;
+                    const listing = await callApi<{
+                      objects: Array<{ key: string }>;
+                      cursor?: string;
+                    }>({ action: 'listR2Objects', cursor: objectsCursor });
+                    setObjects((current) => [...current, ...listing.objects]);
+                    setObjectsCursor(listing.cursor);
+                  }}
+                  refresh={refresh}
+                />
               </TabsContent>
             </Tabs>
           </div>
@@ -261,9 +278,13 @@ function FieldRow({
 
 function RegisterForm({
   objects,
+  objectsCursor,
+  loadMore,
   refresh,
 }: {
   objects: Array<{ key: string }>;
+  objectsCursor?: string;
+  loadMore: () => Promise<void>;
   refresh: () => Promise<void>;
 }) {
   const [name, setName] = useState('');
@@ -274,6 +295,10 @@ function RegisterForm({
   useEffect(() => {
     if (!key && objects[0]) setKey(objects[0].key);
   }, [key, objects]);
+  useEffect(() => {
+    const extension = key.toLowerCase().match(/\.(csv|parquet)$/)?.[1];
+    if (extension) setFormat(extension as typeof format);
+  }, [key]);
   async function submit(event: FormEvent) {
     event.preventDefault();
     await callApi({ action: 'registerDatasource', name, location: { kind, key, format } });
@@ -289,17 +314,31 @@ function RegisterForm({
         </Field>
         <Field>
           <FieldLabel htmlFor="source-key">R2 key or prefix</FieldLabel>
-          <NativeSelect
-            id="source-key"
-            value={key}
-            onChange={(event) => setKey(event.target.value)}
-          >
-            {objects.map((object) => (
-              <NativeSelectOption key={object.key} value={object.key}>
-                {object.key}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
+          {kind === 'prefix' ? (
+            <Input
+              id="source-key"
+              value={key}
+              placeholder="workspace/exports/2026/"
+              onChange={(event) => setKey(event.target.value)}
+            />
+          ) : (
+            <NativeSelect
+              id="source-key"
+              value={key}
+              onChange={(event) => setKey(event.target.value)}
+            >
+              {objects.map((object) => (
+                <NativeSelectOption key={object.key} value={object.key}>
+                  {object.key}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          )}
+          {kind === 'object' && objectsCursor ? (
+            <Button type="button" variant="ghost" size="sm" onClick={() => void loadMore()}>
+              Load more objects
+            </Button>
+          ) : null}
         </Field>
         <Field>
           <FieldLabel htmlFor="source-kind">Location</FieldLabel>

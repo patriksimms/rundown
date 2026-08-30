@@ -219,7 +219,7 @@ export const controlStateSchema = z.object({
 
 export const dataSourceLocationSchema = z.object({
   kind: z.enum(['object', 'prefix']),
-  key: z.string().min(1),
+  key: z.string().trim().min(1),
   format: z.enum(['parquet', 'csv']),
 });
 

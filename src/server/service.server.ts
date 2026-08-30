@@ -4,6 +4,7 @@ import { env } from 'cloudflare:workers';
 import type { ApiRequest } from '#/api/contracts';
 import { createDatabase } from '#/db/client';
 import { headSourceObject, listSourceObjects } from '#/data/source.server';
+import { collectObjectPages, matchingSourceObjects } from '#/data/listing';
 import {
   calculatedFields,
   dashboardGrants,
@@ -122,7 +123,7 @@ async function dispatchRequest(request: ApiRequest): Promise<unknown> {
     case 'describeDatasource':
       return describeDatasource(request.dataSourceId, request.dashboardId, request.shareToken);
     case 'listR2Objects':
-      return listR2Objects(request.prefix);
+      return listR2Objects(request.prefix, request.cursor);
     case 'registerDatasource':
       return registerDatasource(request);
     case 'updateFieldMetadata':
@@ -632,13 +633,13 @@ async function sharedDatasourceWorkspace(
   return access.document.workspaceId;
 }
 
-async function listR2Objects(prefix?: string) {
+async function listR2Objects(prefix?: string, cursor?: string) {
   const session = await requireSession();
   requireAdmin(session);
   const safePrefix = scopedR2Prefix(session.workspace.r2Prefix, prefix);
   if (!safePrefix)
     throw new ApiError(400, 'invalid_r2_prefix', 'R2 prefixes cannot contain traversal segments.');
-  return listSourceObjects(safePrefix);
+  return listSourceObjects(safePrefix, cursor);
 }
 
 async function registerDatasource(request: Extract<ApiRequest, { action: 'registerDatasource' }>) {
@@ -653,7 +654,10 @@ async function registerDatasource(request: Extract<ApiRequest, { action: 'regist
   const objects =
     request.location.kind === 'object'
       ? [await headSourceObject(request.location.key)].filter((item) => item !== null)
-      : (await listSourceObjects(request.location.key)).objects;
+      : matchingSourceObjects(
+          await collectObjectPages((cursor) => listSourceObjects(request.location.key, cursor)),
+          request.location.format,
+        );
   if (!objects.length)
     throw new ApiError(404, 'r2_object_not_found', 'No matching R2 objects were found.');
   const dataSource: DataSourceRecord = {

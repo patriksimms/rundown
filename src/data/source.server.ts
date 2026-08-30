@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { z } from 'zod';
 import { compileSourceSqlFromBaseUrl } from '#/query/compiler';
 import type { DataSourceRecord } from '#/query/types';
+import { collectObjectPages, matchingSourceObjects } from './listing';
 
 const sourceObjectSchema = z.object({
   key: z.string(),
@@ -19,9 +20,9 @@ const sourceListingSchema = z.object({
 export type SourceObject = z.infer<typeof sourceObjectSchema>;
 export type SourceListing = z.infer<typeof sourceListingSchema>;
 
-export async function listSourceObjects(prefix?: string): Promise<SourceListing> {
+export async function listSourceObjects(prefix?: string, cursor?: string): Promise<SourceListing> {
   if (usesR2()) {
-    const listing = await env.DATA.list({ prefix, limit: 1000 });
+    const listing = await env.DATA.list({ prefix, cursor, limit: 1000 });
     return {
       objects: listing.objects.map(({ key, size, etag, uploaded }) => ({
         key,
@@ -36,6 +37,7 @@ export async function listSourceObjects(prefix?: string): Promise<SourceListing>
 
   const url = new URL(env.DATA_SOURCE_BASE_URL);
   if (prefix) url.searchParams.set('prefix', prefix);
+  if (cursor) url.searchParams.set('cursor', cursor);
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Local data listing returned HTTP ${response.status}.`);
   return sourceListingSchema.parse(await response.json());
@@ -72,9 +74,10 @@ export async function resolveDataSource(dataSource: DataSourceRecord) {
   const keys =
     dataSource.location.kind === 'object'
       ? [dataSource.location.key]
-      : (await listSourceObjects(dataSource.location.key)).objects
-          .map((object) => object.key)
-          .filter((key) => key.endsWith(`.${dataSource.location.format}`));
+      : matchingSourceObjects(
+          await collectObjectPages((cursor) => listSourceObjects(dataSource.location.key, cursor)),
+          dataSource.location.format,
+        ).map((object) => object.key);
   if (!keys.length) throw new Error('No matching local data files were found.');
   return {
     sql: compileSourceSqlFromBaseUrl(dataSource, env.QUERY_DATA_SOURCE_BASE_URL, keys),
