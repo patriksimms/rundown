@@ -23,11 +23,14 @@ interface QueryMetadata {
 }
 
 export function widgetDependencyState(definition: WidgetDefinition, metadata: QueryMetadata) {
-  const libraryMetricIds = new Set(
-    metricsIn(definition).flatMap((metric) =>
+  const libraryMetricIds = new Set([
+    ...metricsIn(definition).flatMap((metric) =>
       metric.source.kind === 'library' ? [metric.source.libraryMetricId] : [],
     ),
-  );
+    ...(definition.type === 'gauge' && definition.upperLimit?.kind === 'library'
+      ? [definition.upperLimit.libraryMetricId]
+      : []),
+  ]);
   return {
     definition,
     fields: metadata.fields

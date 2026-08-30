@@ -13,12 +13,19 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import type { ControlState, DashboardDocument, DashboardWidget } from '#/domain/schema';
 import { callApi } from '#/api/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '#/components/ui/card';
+import { Button } from '#/components/ui/button';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '#/components/ui/chart';
 import { Field, FieldLabel } from '#/components/ui/field';
 import { Input } from '#/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '#/components/ui/native-select';
 import { Skeleton } from '#/components/ui/skeleton';
 import { widgetQueryRequest } from '#/domain/widget-query';
+import {
+  pieBreakdownRows,
+  pivotBreakdownRows,
+  tableSummary,
+  withComparisonSeries,
+} from '#/domain/widget-results';
 import {
   Table,
   TableBody,
@@ -281,6 +288,9 @@ function QueryCard({
   const [rows, setRows] = useState<Record<string, unknown>[]>();
   const [comparisonRows, setComparisonRows] = useState<Record<string, unknown>[]>();
   const [error, setError] = useState<string>();
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  useEffect(() => setPage(0), [controlState, dashboardId, widget.definition, widget.id]);
   useEffect(() => {
     let current = true;
     setRows(undefined);
@@ -288,6 +298,7 @@ function QueryCard({
     void callApi<{
       rows: Record<string, unknown>[];
       comparisonRows?: Record<string, unknown>[];
+      hasMore?: boolean;
     }>(
       widgetQueryRequest({
         dashboardId,
@@ -295,12 +306,14 @@ function QueryCard({
         controlState,
         preview: preview ?? false,
         shareToken,
+        page,
       }),
     )
       .then((result) => {
         if (!current) return;
         setRows(result.rows);
         setComparisonRows(result.comparisonRows);
+        setHasMore(Boolean(result.hasMore));
         setError(undefined);
       })
       .catch((caught: unknown) => {
@@ -309,7 +322,7 @@ function QueryCard({
     return () => {
       current = false;
     };
-  }, [controlState, dashboardId, preview, shareToken, widget.definition, widget.id]);
+  }, [controlState, dashboardId, page, preview, shareToken, widget.definition, widget.id]);
   const definition = widget.definition;
   if (!('title' in definition)) return null;
   return (
@@ -322,7 +335,14 @@ function QueryCard({
         {!rows ? (
           <Skeleton className="h-28 w-full" />
         ) : (
-          <Result definition={definition} rows={rows} comparisonRows={comparisonRows} />
+          <Result
+            definition={definition}
+            rows={rows}
+            comparisonRows={comparisonRows}
+            page={page}
+            hasMore={hasMore}
+            setPage={setPage}
+          />
         )}
       </CardContent>
     </Card>
@@ -333,19 +353,28 @@ function Result({
   definition,
   rows,
   comparisonRows,
+  page,
+  hasMore,
+  setPage,
 }: {
   definition: Extract<DashboardWidget['definition'], { title: string }>;
   rows: Record<string, unknown>[];
   comparisonRows?: Record<string, unknown>[];
+  page: number;
+  hasMore: boolean;
+  setPage: (page: number) => void;
 }) {
   const columns = Object.keys(rows[0] ?? {});
   if (definition.type === 'scorecard' || definition.type === 'gauge') {
     const value = rows[0]?.[columns[0] ?? ''];
     const previous = comparisonRows?.[0]?.[Object.keys(comparisonRows[0] ?? {})[0] ?? ''];
     const maximum =
-      definition.type === 'gauge' && definition.upperLimit?.kind === 'manual'
-        ? definition.upperLimit.value
+      definition.type === 'gauge'
+        ? definition.upperLimit?.kind === 'manual'
+          ? definition.upperLimit.value
+          : rows[0]?.upper_limit
         : undefined;
+    const numericMaximum = maximum == null ? undefined : Number(maximum);
     return (
       <div className="space-y-2">
         <p className="text-4xl font-semibold tracking-tight">
@@ -361,23 +390,26 @@ function Result({
             )}
           </p>
         ) : null}
-        {maximum !== undefined ? (
+        {numericMaximum !== undefined ? (
           <div
             className="h-2 overflow-hidden rounded-full bg-muted"
-            aria-label={`${String(value)} of ${maximum}`}
+            aria-label={`${String(value)} of ${numericMaximum}`}
           >
             <div
               className="h-full bg-primary"
-              style={{ width: `${Math.min(100, Math.max(0, (Number(value) / maximum) * 100))}%` }}
+              style={{
+                width: `${Math.min(100, Math.max(0, (Number(value) / numericMaximum) * 100))}%`,
+              }}
             />
           </div>
         ) : null}
       </div>
     );
   }
-  if (definition.type === 'table')
+  if (definition.type === 'table') {
+    const summary = definition.showSummaryRow ? tableSummary(definition, rows) : undefined;
     return (
-      <div className="overflow-x-auto">
+      <div className="space-y-3 overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
@@ -394,14 +426,75 @@ function Result({
                 ))}
               </TableRow>
             ))}
+            {summary ? (
+              <TableRow className="font-medium">
+                {columns.map((column) => (
+                  <TableCell key={column}>{formatValue(summary[column])}</TableCell>
+                ))}
+              </TableRow>
+            ) : null}
           </TableBody>
         </Table>
+        {comparisonRows?.length ? (
+          <div>
+            <p className="mb-2 text-sm font-medium">Previous period</p>
+            <Table>
+              <TableBody>
+                {comparisonRows.map((row, index) => (
+                  <TableRow key={index}>
+                    {columns.map((column) => (
+                      <TableCell key={column}>{formatValue(row[column])}</TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        ) : null}
+        {definition.resultLimit.mode === 'pagination' ? (
+          <div className="flex items-center justify-between text-sm">
+            <span>
+              {page * definition.resultLimit.amount + 1}–
+              {page * definition.resultLimit.amount + rows.length}
+            </span>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={page === 0}
+                onClick={() => setPage(page - 1)}
+              >
+                Previous
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!hasMore}
+                onClick={() => setPage(page + 1)}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </div>
     );
+  }
   if (!rows.length || columns.length < 2)
     return <p className="text-sm text-muted-foreground">No rows for this date range.</p>;
-  const dimension = columns[0]!;
-  const metrics = columns.slice(1);
+  let chartRows = comparisonRows?.length ? withComparisonSeries(rows, comparisonRows) : rows;
+  let dimension = columns[0]!;
+  let metrics = Object.keys(chartRows[0] ?? {}).slice(1);
+  if (definition.type === 'bar' && definition.breakdownDimension) {
+    const pivoted = pivotBreakdownRows(rows);
+    chartRows = pivoted.rows;
+    metrics = pivoted.series;
+  }
+  if (definition.type === 'pie' && definition.breakdownDimension) {
+    chartRows = pieBreakdownRows(rows);
+    dimension = 'label';
+    metrics = [columns[2]!];
+  }
   const config = Object.fromEntries(
     metrics.map((metric, index) => [
       metric,
@@ -413,14 +506,19 @@ function Result({
       <ChartContainer className="mx-auto aspect-square max-h-72" config={config}>
         <PieChart>
           <ChartTooltip content={<ChartTooltipContent />} />
-          <Pie data={rows} dataKey={metrics[0]} nameKey={dimension} fill="var(--color-metric_1)" />
+          <Pie
+            data={chartRows}
+            dataKey={metrics[0]}
+            nameKey={dimension}
+            fill="var(--color-metric_1)"
+          />
         </PieChart>
       </ChartContainer>
     );
   if (definition.type === 'bar')
     return (
       <ChartContainer className="h-72 w-full" config={config}>
-        <BarChart data={rows}>
+        <BarChart data={chartRows}>
           <CartesianGrid vertical={false} />
           <XAxis dataKey={dimension} />
           <YAxis />
@@ -433,13 +531,33 @@ function Result({
     );
   return (
     <ChartContainer className="h-72 w-full" config={config}>
-      <LineChart data={rows}>
+      <LineChart data={chartRows}>
         <CartesianGrid vertical={false} />
         <XAxis dataKey={dimension} />
-        <YAxis />
+        <YAxis yAxisId="number" />
+        {definition.type === 'line' &&
+        definition.metrics.some((metric) => metric.dataType === 'percent') ? (
+          <YAxis
+            yAxisId="percent"
+            orientation="right"
+            tickFormatter={(value) => `${Number(value) * 100}%`}
+          />
+        ) : null}
         <ChartTooltip content={<ChartTooltipContent />} />
         {metrics.map((metric) => (
-          <Line key={metric} dataKey={metric} stroke={`var(--color-${metric})`} dot={false} />
+          <Line
+            key={metric}
+            dataKey={metric}
+            yAxisId={
+              definition.type === 'line' &&
+              definition.metrics[metrics.indexOf(metric)]?.dataType === 'percent'
+                ? 'percent'
+                : 'number'
+            }
+            stroke={`var(--color-${metric})`}
+            strokeDasharray={metric.startsWith('Previous ') ? '4 4' : undefined}
+            dot={false}
+          />
         ))}
       </LineChart>
     </ChartContainer>

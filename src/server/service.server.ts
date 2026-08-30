@@ -105,6 +105,7 @@ async function dispatchRequest(request: ApiRequest): Promise<unknown> {
         request.widgetId,
         request.controlState,
         request.shareToken,
+        request.page,
       );
     case 'explainWidget':
       return explainWidget(request.dashboardId, request.widgetId, request.shareToken);
@@ -427,6 +428,7 @@ async function queryWidget(
   widgetId: string,
   state: ControlState | undefined,
   shareToken?: string,
+  page = 0,
 ) {
   const access = await authorizeDashboard(dashboardId, 'viewer', shareToken);
   const widget = widgetById(access.document, widgetId);
@@ -454,8 +456,8 @@ async function queryWidget(
     },
   };
   const currentDefinitionHash = await hashJson(widgetDependencyState(widget.definition, metadata));
-  const cacheKey = await hashJson(
-    queryCacheState({
+  const cacheKey = await hashJson({
+    ...queryCacheState({
       definitionHash: currentDefinitionHash,
       requestedDateRange: dateRange,
       resolvedDateRange,
@@ -463,13 +465,16 @@ async function queryWidget(
       dataSourceVersion: dataSource.version,
       timezone: access.document.timezone,
     }),
-  );
+    page,
+  });
   const cached = await env.QUERY_CACHE.get(cacheKey, 'json');
   if (cached) {
     console.info('rundown.query_cache', { dashboardId, widgetId, outcome: 'hit' });
     return { ...(cached as object), cache: 'hit' };
   }
   console.info('rundown.query_cache', { dashboardId, widgetId, outcome: 'miss' });
+  const pageSize =
+    widget.definition.type === 'table' ? widget.definition.resultLimit.amount : undefined;
   const run = (queryControlState: ControlState) =>
     runIsolatedPreparedQuery<Record<string, unknown>>(dataSource, (sourceTableName) => {
       const compiled = compileWidgetQuery({
@@ -481,6 +486,7 @@ async function queryWidget(
         bucketName: env.R2_BUCKET_NAME,
         sourceTableName,
         resolvedControls,
+        offset: pageSize === undefined ? undefined : page * pageSize,
       });
       return { sql: compiled.sql, parameters: compiled.parameters };
     });
@@ -498,11 +504,13 @@ async function queryWidget(
         })
       : Promise.resolve(undefined),
   ]);
+  const hasMore = pageSize !== undefined && rows.length > pageSize;
   const result = {
-    rows: normalize(rows),
+    rows: normalize(pageSize === undefined ? rows : rows.slice(0, pageSize)),
     ...(comparisonRows ? { comparisonRows: normalize(comparisonRows) } : {}),
     controlState,
     cache: 'miss',
+    ...(pageSize === undefined ? {} : { page, hasMore }),
   };
   await env.QUERY_CACHE.put(cacheKey, JSON.stringify(result), { expirationTtl: 86_400 });
   return result;

@@ -115,6 +115,66 @@ describe('query compiler', () => {
     expect(result.parameters.at(-1)).toBe('Alpha');
   });
 
+  it('fetches one extra table row when paging so the viewer can offer next', () => {
+    const result = compileWidgetQuery({
+      dashboard,
+      definition: {
+        type: 'table',
+        title: 'Cost',
+        dataSourceId: 'source',
+        dateRangeFieldId: 'date',
+        dimensions: [{ fieldId: 'campaign' }],
+        metrics: [
+          { source: { kind: 'field', fieldId: 'cost', aggregation: 'sum' }, dataType: 'currency' },
+        ],
+        resultLimit: { mode: 'pagination', amount: 20 },
+      },
+      dataSource,
+      fields,
+      calculatedFields: [],
+      libraryMetrics: [],
+      controlState: {},
+      bucketName: 'bucket',
+      sourceTableName: 'rundown_source',
+      offset: 40,
+    });
+    expect(result.sql).toContain('LIMIT 21 OFFSET 40');
+  });
+
+  it('selects a library-driven gauge upper limit', () => {
+    const result = compileWidgetQuery({
+      dashboard,
+      definition: {
+        type: 'gauge',
+        title: 'Spend',
+        dataSourceId: 'source',
+        dateRangeFieldId: 'date',
+        metric: {
+          source: { kind: 'field', fieldId: 'cost', aggregation: 'sum' },
+          dataType: 'currency',
+        },
+        upperLimit: { kind: 'library', libraryMetricId: 'budget' },
+      },
+      dataSource,
+      fields,
+      calculatedFields: [],
+      libraryMetrics: [
+        {
+          id: 'budget',
+          name: 'Budget',
+          canonicalName: 'budget',
+          expression: '1000',
+          semanticType: 'currency',
+          description: null,
+        },
+      ],
+      controlState: {},
+      bucketName: 'bucket',
+      sourceTableName: 'rundown_source',
+    });
+    expect(result.sql).toContain('1000 AS "upper_limit"');
+  });
+
   it('rewrites canonical library fields to raw datasource columns', () => {
     expect(compileLibraryExpression('SUM(media_cost)', { fields, calculatedFields: [] })).toBe(
       'SUM("MediaCost")',

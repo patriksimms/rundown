@@ -85,6 +85,7 @@ export const apiRequestSchema = z.discriminatedUnion('action', [
     ...dashboardRef,
     widgetId: z.string().min(1),
     controlState: controlStateSchema.optional(),
+    page: z.number().int().nonnegative().optional(),
   }),
   z.object({ action: z.literal('explainWidget'), ...dashboardRef, widgetId: z.string().min(1) }),
   z.object({

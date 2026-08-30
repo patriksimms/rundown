@@ -19,6 +19,7 @@ export interface QueryContext {
   bucketName: string;
   sourceTableName?: string;
   resolvedControls?: Array<{ fieldId: string; values: unknown[] }>;
+  offset?: number;
 }
 
 export interface CompiledQuery {
@@ -48,6 +49,18 @@ export function compileWidgetQuery(context: QueryContext): CompiledQuery {
       const compiled = metricExpression(metric, context, definitions);
       return `${compiled} AS ${quoteIdentifier(metric.userDefinedName ?? `metric_${index + 1}`)}`;
     }),
+    ...(definition.type === 'gauge' && definition.upperLimit?.kind === 'library'
+      ? [
+          `${metricExpression(
+            {
+              source: { kind: 'library', libraryMetricId: definition.upperLimit.libraryMetricId },
+              dataType: 'number',
+            },
+            context,
+            definitions,
+          )} AS "upper_limit"`,
+        ]
+      : []),
   ];
   const parameters: unknown[] = [];
   const conditions: string[] = [];
@@ -74,7 +87,7 @@ export function compileWidgetQuery(context: QueryContext): CompiledQuery {
       : '';
   const limit = widgetLimit(definition);
   return {
-    sql: `SELECT ${select.join(', ')} FROM ${source} WHERE ${conditions.join(' AND ')}${groupBy}${orderBy}${limit ? ` LIMIT ${limit}` : ''}`,
+    sql: `SELECT ${select.join(', ')} FROM ${source} WHERE ${conditions.join(' AND ')}${groupBy}${orderBy}${limit ? ` LIMIT ${context.offset === undefined ? limit : limit + 1}` : ''}${context.offset ? ` OFFSET ${context.offset}` : ''}`,
     parameters,
     definitions,
   };
