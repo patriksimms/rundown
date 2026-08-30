@@ -43,3 +43,10 @@ export function singleValueControlWithMultipleSelections(
       (state.values?.[widget.id]?.length ?? 0) > 1,
   )?.id;
 }
+
+export function toggleControlValue(selected: string[], value: string, allowMultiple: boolean) {
+  if (!allowMultiple) return [value];
+  return selected.includes(value)
+    ? selected.filter((selectedValue) => selectedValue !== value)
+    : [...selected, value];
+}

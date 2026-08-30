@@ -32,6 +32,7 @@ import {
   mergeControlState,
   singleValueControlWithMultipleSelections,
 } from '#/domain/control-state';
+import { controlOptionsQuery } from '#/domain/control-options';
 import { isWorkspaceR2Key, scopedR2Prefix } from '#/domain/tenancy';
 import {
   assertSingleExpression,
@@ -564,17 +565,11 @@ async function getControlOptions(
   if (!field) throw new ApiError(400, 'unknown_field', 'The control field no longer exists.');
   const expression =
     'columnName' in field ? quoteIdentifier(field.columnName) : `(${field.expression})`;
-  const parameters: unknown[] = [];
-  const where = search ? ` WHERE CAST(${expression} AS VARCHAR) ILIKE ?` : '';
-  if (search) parameters.push(`%${search}%`);
   const direction = controlDefinition.optionsSortDirection?.toUpperCase() ?? 'ASC';
-  const rows = await runIsolatedPreparedQuery<{ value: unknown }>(
-    dataSource,
-    (sourceTableName) => ({
-      sql: `SELECT ${expression} AS value FROM ${quoteIdentifier(sourceTableName)}${where} GROUP BY 1 ORDER BY 1 ${direction} LIMIT 100`,
-      parameters,
-    }),
-  );
+  const rows = await runIsolatedPreparedQuery<{ value: unknown }>(dataSource, (sourceTableName) => {
+    const query = controlOptionsQuery(expression, search, direction);
+    return { ...query, sql: query.sql.replace('rundown_source', quoteIdentifier(sourceTableName)) };
+  });
   return { values: rows.map((row) => normalize(row.value)) };
 }
 

@@ -30,6 +30,7 @@ import { Input } from '#/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '#/components/ui/popover';
 import { Skeleton } from '#/components/ui/skeleton';
 import { widgetQueryRequest } from '#/domain/widget-query';
+import { toggleControlValue } from '#/domain/control-state';
 import {
   Table,
   TableBody,
@@ -266,15 +267,11 @@ function FilterControl({
     });
   const select = (value: string) => {
     if (!definition.allowMultiple) {
-      updateSelected([value]);
+      updateSelected(toggleControlValue(selected, value, false));
       setOpen(false);
       return;
     }
-    updateSelected(
-      selected.includes(value)
-        ? selected.filter((selectedValue) => selectedValue !== value)
-        : [...selected, value],
-    );
+    updateSelected(toggleControlValue(selected, value, true));
   };
   return (
     <Card size="sm">
@@ -300,13 +297,18 @@ function FilterControl({
             <ChevronsUpDown className="size-4 opacity-50" />
           </PopoverTrigger>
           <PopoverContent className="w-(--anchor-width) p-0" align="start">
-            <Command shouldFilter={false}>
+            <Command
+              shouldFilter={false}
+              aria-label={definition.userDefinedName ?? 'Filter values'}
+            >
               <CommandInput value={search} onValueChange={setSearch} placeholder="Search values…" />
-              <CommandList>
+              <CommandList aria-multiselectable={definition.allowMultiple || undefined}>
                 {status === 'loading' ? (
-                  <div className="py-6 text-center text-sm text-muted-foreground">Loading…</div>
+                  <div role="status" className="py-6 text-center text-sm text-muted-foreground">
+                    Loading…
+                  </div>
                 ) : status === 'error' ? (
-                  <div className="flex flex-col items-center gap-2 py-6 text-sm">
+                  <div role="alert" className="flex flex-col items-center gap-2 py-6 text-sm">
                     <p>Could not load values.</p>
                     <Button
                       size="sm"
@@ -328,6 +330,8 @@ function FilterControl({
                             key={option}
                             value={option}
                             data-checked={checked}
+                            aria-label={`${option}${checked ? ', selected' : ''}`}
+                            className="min-h-10"
                             onSelect={() => select(option)}
                           >
                             {option}
@@ -348,7 +352,7 @@ function FilterControl({
                 {value}
                 <button
                   type="button"
-                  className="rounded-sm p-0.5 hover:bg-muted"
+                  className="flex size-6 items-center justify-center rounded-sm hover:bg-muted"
                   aria-label={`Remove ${value}`}
                   onClick={() => updateSelected(selected.filter((item) => item !== value))}
                 >

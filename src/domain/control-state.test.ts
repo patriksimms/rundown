@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   mergeControlState,
   singleValueControlWithMultipleSelections,
+  toggleControlValue,
   withDefaultDateRange,
   withoutWidgetControlState,
 } from './control-state';
@@ -125,5 +126,11 @@ describe('dashboard control defaults', () => {
     expect(
       singleValueControlWithMultipleSelections(dashboard, { values: { region: ['EMEA'] } }),
     ).toBeUndefined();
+  });
+
+  it('replaces a single selection and toggles multiple selections', () => {
+    expect(toggleControlValue(['EMEA'], 'APAC', false)).toEqual(['APAC']);
+    expect(toggleControlValue(['EMEA'], 'APAC', true)).toEqual(['EMEA', 'APAC']);
+    expect(toggleControlValue(['EMEA', 'APAC'], 'EMEA', true)).toEqual(['APAC']);
   });
 });
