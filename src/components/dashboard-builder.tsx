@@ -64,7 +64,8 @@ import {
 } from '#/domain/widget-editing';
 import { remapWidgetDefinition } from '#/domain/remap';
 import { replacePlainTextDocument, textDocument } from '#/domain/text-content';
-import { withDefaultDateRange } from '#/domain/control-state';
+import { withDefaultDateRange, withoutWidgetControlState } from '#/domain/control-state';
+import { canonicalMetricExpression } from '#/domain/library-metric';
 import { createSerialQueue } from '#/domain/serial-queue';
 import { rollbackFailedLayout } from '#/domain/layout';
 import type {
@@ -413,10 +414,20 @@ export function DashboardBuilder({
           widgetId: widget.id,
         }),
       );
-      updateDashboard((current) => ({
-        ...current,
-        widgets: current.widgets.filter((item) => item.id !== widget.id),
-      }));
+      updateDashboard((current) => {
+        const next = {
+          ...current,
+          widgets: current.widgets.filter((item) => item.id !== widget.id),
+        };
+        setControlState((controlState) =>
+          withoutWidgetControlState(
+            controlState,
+            widget,
+            next.widgets.some((item) => item.definition.type === 'dateControl'),
+          ),
+        );
+        return next;
+      });
       setSelectedId(undefined);
       if (revision === mutationRevisionRef.current) {
         setError(undefined);
@@ -499,7 +510,7 @@ export function DashboardBuilder({
       ) : null}
       <div className="grid items-start gap-5 md:grid-cols-[minmax(0,1fr)_20rem]">
         <div>
-          {desktop ? (
+          {desktop !== false ? (
             <div ref={containerRef} className="relative min-h-80 rounded-xl bg-muted/50">
               {mounted ? (
                 <>
@@ -718,12 +729,16 @@ function WidgetSettings({
   const [dimensionOpen, setDimensionOpen] = useState(false);
   const [settingsError, setSettingsError] = useState<string>();
   const sourceRequestRef = useRef(0);
+  const definitionRef = useRef(widget.definition);
   const sourceId = 'dataSourceId' in definition ? definition.dataSourceId : undefined;
   useEffect(() => {
-    sourceRequestRef.current += 1;
+    definitionRef.current = widget.definition;
     setDefinition(widget.definition);
+  }, [widget.definition]);
+  useEffect(() => {
+    sourceRequestRef.current += 1;
     setSettingsError(undefined);
-  }, [widget]);
+  }, [widget.id]);
   useEffect(() => {
     if (!sourceId) return;
     const currentSourceId = sourceId;
@@ -743,16 +758,28 @@ function WidgetSettings({
   }, [dashboardId, sourceId]);
 
   async function commit(next: WidgetDefinition) {
+    definitionRef.current = next;
     setDefinition(next);
     await onChange(next);
   }
 
+  function setLocalDefinition(next: WidgetDefinition) {
+    definitionRef.current = next;
+    setDefinition(next);
+  }
+
   async function selectSource(dataSourceId: string) {
-    if (!('dataSourceId' in definition)) return;
+    const currentDefinition = definitionRef.current;
+    if (!('dataSourceId' in currentDefinition)) return;
     const request = ++sourceRequestRef.current;
     setSettingsError(undefined);
     try {
-      const next = await changeSource(definition, dataSourceId, dashboardId);
+      const next = await changeSource(
+        currentDefinition,
+        dataSourceId,
+        dashboardId,
+        () => definitionRef.current,
+      );
       if (request === sourceRequestRef.current) await commit(next);
     } catch (caught) {
       if (request === sourceRequestRef.current) setSettingsError(message(caught));
@@ -790,7 +817,7 @@ function WidgetSettings({
           <Input
             id={`title-${widget.id}`}
             value={definition.title}
-            onChange={(event) => setDefinition({ ...definition, title: event.target.value })}
+            onChange={(event) => setLocalDefinition({ ...definition, title: event.target.value })}
             onBlur={() => void commit(definition)}
           />
         </Field>
@@ -804,7 +831,7 @@ function WidgetSettings({
             readOnly={typeof definition.content.document !== 'string'}
             onChange={(event) =>
               typeof definition.content.document === 'string' &&
-              setDefinition({
+              setLocalDefinition({
                 ...definition,
                 content: {
                   ...definition.content,
@@ -896,6 +923,7 @@ function WidgetSettings({
             onOpenChange={setFormulaOpen}
             dashboardId={dashboardId}
             definition={definition}
+            source={source}
             onSave={commit}
           />
           <CalculatedFieldDialog
@@ -1890,12 +1918,14 @@ function MetricFormulaDialog({
   onOpenChange,
   dashboardId,
   definition,
+  source,
   onSave,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   dashboardId: string;
   definition: QueryDefinition;
+  source?: SourceDescription;
   onSave: (definition: WidgetDefinition) => Promise<void>;
 }) {
   const [name, setName] = useState('Custom metric');
@@ -1923,14 +1953,19 @@ function MetricFormulaDialog({
           : definition;
     try {
       await callApi({ action: 'previewWidget', dashboardId, definition: next });
-      if (saveLibrary)
+      if (saveLibrary) {
+        if (!source) throw new Error('Datasource fields are still loading.');
         await callApi({
           action: 'upsertLibraryMetric',
           dashboardId,
           name,
-          expression,
-          semanticType: 'ratio',
+          expression: canonicalMetricExpression(expression, [
+            ...source.fields,
+            ...source.calculatedFields,
+          ]),
+          semanticType: 'count',
         });
+      }
       await onSave(next);
       onOpenChange(false);
     } catch (caught) {
@@ -2114,12 +2149,20 @@ async function defaultDefinition(
   return { ...base, type, dimension: { fieldId: dimension.id }, metric, limit: 20 };
 }
 
-async function changeSource(definition: QueryDefinition, sourceId: string, dashboardId: string) {
+async function changeSource(
+  definition: QueryDefinition,
+  sourceId: string,
+  dashboardId: string,
+  latestDefinition: () => WidgetDefinition = () => definition,
+) {
   const [currentSource, targetSource] = await Promise.all([
     describeSource(definition.dataSourceId, dashboardId),
     describeSource(sourceId, dashboardId),
   ]);
-  const remapped = remapWidgetDefinition(definition, currentSource, sourceId, targetSource);
+  const latest = latestDefinition();
+  if (!('dataSourceId' in latest) || latest.dataSourceId !== definition.dataSourceId)
+    throw new Error('Widget datasource changed while loading.');
+  const remapped = remapWidgetDefinition(latest, currentSource, sourceId, targetSource);
   return remapped.type === 'control' ? { ...remapped, defaultValues: undefined } : remapped;
 }
 

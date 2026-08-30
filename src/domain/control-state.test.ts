@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { mergeControlState, withDefaultDateRange } from './control-state';
+import {
+  mergeControlState,
+  withDefaultDateRange,
+  withoutWidgetControlState,
+} from './control-state';
 
 describe('dashboard control defaults', () => {
   const defaults = {
@@ -50,5 +54,50 @@ describe('dashboard control defaults', () => {
     expect(withDefaultDateRange({ dateRange: selected }, defaults.dateRange)).toEqual({
       dateRange: selected,
     });
+  });
+
+  it('clears a removed filter control value', () => {
+    expect(
+      withoutWidgetControlState(
+        defaults,
+        {
+          id: 'region',
+          definition: {
+            type: 'control',
+            dataSourceId: 'source',
+            fieldId: 'region',
+            allowMultiple: true,
+          },
+          layout: { x: 0, y: 0, width: 3, height: 1 },
+          definitionHash: 'hash',
+        },
+        false,
+      ),
+    ).toEqual({ dateRange: defaults.dateRange, values: { channel: ['search'] } });
+  });
+
+  it('clears the date range when the last date control is removed', () => {
+    expect(
+      withoutWidgetControlState(
+        defaults,
+        {
+          id: 'date',
+          definition: { type: 'dateControl' },
+          layout: { x: 0, y: 0, width: 3, height: 1 },
+          definitionHash: 'hash',
+        },
+        false,
+      ),
+    ).toEqual({ values: defaults.values });
+  });
+
+  it('keeps the date range while another date control remains', () => {
+    const widget = {
+      id: 'date',
+      definition: { type: 'dateControl' as const },
+      layout: { x: 0, y: 0, width: 3, height: 1 },
+      definitionHash: 'hash',
+    };
+    expect(withoutWidgetControlState(defaults, widget, true)).toBe(defaults);
   });
 });
