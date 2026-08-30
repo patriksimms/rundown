@@ -59,7 +59,7 @@ describe('Ducklings query engine', () => {
     ).rejects.toThrow(/operations are disabled by configuration/iu);
   });
 
-  it('describes and samples the materialized source', async () => {
+  it('describes and samples the source without materializing every row', async () => {
     await expect(
       execute(
         { operation: 'describeSource', sourceSql, requiresR2Credentials: false },
@@ -74,6 +74,20 @@ describe('Ducklings query engine', () => {
         { day: 1, spend: 10 },
         { day: 2, spend: 20 },
       ],
+    });
+
+    await expect(
+      execute(
+        {
+          operation: 'describeSource',
+          sourceSql: 'range(1000000000)',
+          requiresR2Credentials: false,
+        },
+        environment,
+      ),
+    ).resolves.toMatchObject({
+      description: [{ column_name: 'range', column_type: 'BIGINT' }],
+      samples: Array.from({ length: 20 }, (_, range) => ({ range })),
     });
   });
 });

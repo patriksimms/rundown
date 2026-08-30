@@ -41,17 +41,21 @@ async function execute(
         `CREATE SECRET rundown_r2 (TYPE R2, KEY_ID ${sqlString(environment.R2_ACCESS_KEY_ID)}, SECRET ${sqlString(environment.R2_SECRET_ACCESS_KEY)}, ACCOUNT_ID ${sqlString(environment.CLOUDFLARE_ACCOUNT_ID)})`,
       );
     }
+
+    if (request.operation === 'describeSource') {
+      await connection.execute(
+        `CREATE TEMP TABLE rundown_source_sample AS SELECT * FROM ${request.sourceSql} LIMIT 20`,
+      );
+      return {
+        description: await connection.query('DESCRIBE rundown_source_sample'),
+        samples: await connection.query('SELECT * FROM rundown_source_sample'),
+      };
+    }
+
     await connection.execute(
       `CREATE TEMP TABLE rundown_source AS SELECT * FROM ${request.sourceSql}`,
     );
     await connection.execute('SET enable_external_access = false');
-
-    if (request.operation === 'describeSource') {
-      return {
-        description: await connection.query('DESCRIBE rundown_source'),
-        samples: await connection.query('SELECT * FROM rundown_source LIMIT 20'),
-      };
-    }
 
     const statement = connection.prepare(sanitizeSql(request.sql));
     try {
