@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  alignDateComparisonRows,
   pieBreakdownRows,
   pivotBreakdownRows,
-  tableSummary,
+  seriesMetricIndex,
   withComparisonSeries,
 } from './widget-results';
 
@@ -52,50 +53,51 @@ describe('widget result shaping', () => {
     ]);
   });
 
-  it('summarizes metrics using their configured aggregation', () => {
-    const definition = {
-      type: 'table' as const,
-      dimensions: [{ fieldId: 'month' }],
-      metrics: [
-        {
-          source: { kind: 'field' as const, fieldId: 'spend', aggregation: 'sum' as const },
-          dataType: 'number' as const,
-        },
-        {
-          source: { kind: 'field' as const, fieldId: 'rate', aggregation: 'average' as const },
-          dataType: 'percent' as const,
-        },
-      ],
-    } as Extract<Parameters<typeof tableSummary>[0], { type: 'table' }>;
-    const summary = tableSummary(definition, [
-      { month: 'Jan', spend: 10, rate: 0.2 },
-      { month: 'Feb', spend: 30, rate: 0.4 },
+  it('normalizes shifted date comparisons without moving sparse buckets', () => {
+    expect(
+      alignDateComparisonRows(
+        [
+          { day: '2026-01-01', spend: 5 },
+          { day: '2026-01-03', spend: 7 },
+        ],
+        'previousPeriod',
+        { start: '2026-01-04', end: '2026-01-06' },
+      ),
+    ).toEqual([
+      { day: '2026-01-04', spend: 5 },
+      { day: '2026-01-06', spend: 7 },
     ]);
-    expect(summary).toMatchObject({ month: 'Summary', spend: 40 });
-    expect(summary.rate).toBeCloseTo(0.3);
   });
 
-  it('calculates non-additive summary aggregations', () => {
-    const metric = (aggregation: 'median' | 'standardDeviation' | 'variance') => ({
-      source: { kind: 'field' as const, fieldId: aggregation, aggregation },
-      dataType: 'number' as const,
-    });
-    const definition = {
-      type: 'table' as const,
-      title: 'Summary',
-      dataSourceId: 'source',
-      dateRangeFieldId: 'date',
-      dimensions: [],
-      metrics: [metric('median'), metric('standardDeviation'), metric('variance')],
-      resultLimit: { mode: 'top' as const, amount: 20 },
-    };
-    const summary = tableSummary(definition, [
-      { median: 10, standardDeviation: 10, variance: 10 },
-      { median: 20, standardDeviation: 20, variance: 20 },
-      { median: 100, standardDeviation: 30, variance: 30 },
+  it('normalizes database date objects', () => {
+    expect(
+      alignDateComparisonRows(
+        [new Date('2025-02-28T00:00:00Z')].map((day) => ({ day })),
+        'previousYear',
+        {
+          start: '2026-01-01',
+          end: '2026-12-31',
+        },
+      ),
+    ).toEqual([{ day: new Date('2026-02-28T00:00:00Z') }]);
+  });
+
+  it('maps previous series back to their source metric', () => {
+    expect(seriesMetricIndex('comparison_1', ['count', 'rate'])).toBe(1);
+  });
+
+  it('keeps comparison series for sparse breakdowns', () => {
+    const current = pivotBreakdownRows([
+      { month: 'Jan', channel: 'Search', spend: 10 },
+      { month: 'Feb', channel: 'Social', spend: 20 },
     ]);
-    expect(summary.median).toBe(20);
-    expect(summary.standardDeviation).toBe(10);
-    expect(summary.variance).toBe(100);
+    const previous = pivotBreakdownRows([
+      { month: 'Jan', channel: 'Search', spend: 5 },
+      { month: 'Feb', channel: 'Social', spend: 15 },
+    ]);
+    expect(withComparisonSeries(current.rows, previous.rows, 'key', current.series)).toEqual([
+      { month: 'Jan', Search: 10, comparison_0: 5, comparison_1: undefined },
+      { month: 'Feb', Social: 20, comparison_0: undefined, comparison_1: 15 },
+    ]);
   });
 });

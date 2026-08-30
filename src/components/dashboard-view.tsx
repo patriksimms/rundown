@@ -23,7 +23,7 @@ import { widgetQueryRequest } from '#/domain/widget-query';
 import {
   pieBreakdownRows,
   pivotBreakdownRows,
-  tableSummary,
+  seriesMetricIndex,
   withComparisonSeries,
 } from '#/domain/widget-results';
 import {
@@ -287,6 +287,7 @@ function QueryCard({
 }) {
   const [rows, setRows] = useState<Record<string, unknown>[]>();
   const [comparisonRows, setComparisonRows] = useState<Record<string, unknown>[]>();
+  const [summaryRow, setSummaryRow] = useState<Record<string, unknown>>();
   const [error, setError] = useState<string>();
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
@@ -295,9 +296,11 @@ function QueryCard({
     let current = true;
     setRows(undefined);
     setComparisonRows(undefined);
+    setSummaryRow(undefined);
     void callApi<{
       rows: Record<string, unknown>[];
       comparisonRows?: Record<string, unknown>[];
+      summaryRow?: Record<string, unknown>;
       hasMore?: boolean;
     }>(
       widgetQueryRequest({
@@ -313,6 +316,7 @@ function QueryCard({
         if (!current) return;
         setRows(result.rows);
         setComparisonRows(result.comparisonRows);
+        setSummaryRow(result.summaryRow);
         setHasMore(Boolean(result.hasMore));
         setError(undefined);
       })
@@ -339,6 +343,7 @@ function QueryCard({
             definition={definition}
             rows={rows}
             comparisonRows={comparisonRows}
+            summaryRow={summaryRow}
             page={page}
             hasMore={hasMore}
             setPage={setPage}
@@ -353,6 +358,7 @@ export function Result({
   definition,
   rows,
   comparisonRows,
+  summaryRow,
   page,
   hasMore,
   setPage,
@@ -360,6 +366,7 @@ export function Result({
   definition: Extract<DashboardWidget['definition'], { title: string }>;
   rows: Record<string, unknown>[];
   comparisonRows?: Record<string, unknown>[];
+  summaryRow?: Record<string, unknown>;
   page: number;
   hasMore: boolean;
   setPage: (page: number) => void;
@@ -411,7 +418,7 @@ export function Result({
     );
   }
   if (definition.type === 'table') {
-    const summary = definition.showSummaryRow ? tableSummary(definition, rows) : undefined;
+    const summary = definition.showSummaryRow ? summaryRow : undefined;
     return (
       <div className="space-y-3 overflow-x-auto">
         <Table>
@@ -436,7 +443,11 @@ export function Result({
               <TableRow className="font-medium">
                 {columns.map((column, columnIndex) => (
                   <TableCell key={column}>
-                    {formatTableValue(definition, columnIndex, summary[column])}
+                    {columnIndex === 0
+                      ? 'Summary'
+                      : columnIndex < definition.dimensions.length
+                        ? ''
+                        : formatTableValue(definition, columnIndex, summary[column])}
                   </TableCell>
                 ))}
               </TableRow>
@@ -494,15 +505,15 @@ export function Result({
   }
   if (!rows.length || columns.length < 2)
     return <p className="text-sm text-muted-foreground">No rows for this date range.</p>;
-  let chartRows = comparisonRows?.length
-    ? withComparisonSeries(rows, comparisonRows, definition.type === 'bar' ? 'key' : 'index')
-    : rows;
+  let chartRows = comparisonRows?.length ? withComparisonSeries(rows, comparisonRows, 'key') : rows;
   let dimension = columns[0]!;
   let metrics = Object.keys(chartRows[0] ?? {}).slice(1);
   if (definition.type === 'bar' && definition.breakdownDimension) {
     const pivoted = pivotBreakdownRows(rows);
     const previous = comparisonRows?.length ? pivotBreakdownRows(comparisonRows) : undefined;
-    chartRows = previous ? withComparisonSeries(pivoted.rows, previous.rows, 'key') : pivoted.rows;
+    chartRows = previous
+      ? withComparisonSeries(pivoted.rows, previous.rows, 'key', pivoted.series)
+      : pivoted.rows;
     metrics = [
       ...pivoted.series,
       ...(previous ? pivoted.series.map((_, index) => `comparison_${index}`) : []),
@@ -578,11 +589,7 @@ export function Result({
             dataKey={metric}
             yAxisId={
               definition.type === 'line' &&
-              definition.metrics[
-                metric.startsWith('comparison_')
-                  ? Number(metric.slice('comparison_'.length))
-                  : currentMetrics.indexOf(metric)
-              ]?.dataType === 'percent'
+              definition.metrics[seriesMetricIndex(metric, currentMetrics)]?.dataType === 'percent'
                 ? 'percent'
                 : 'number'
             }

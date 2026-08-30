@@ -66,6 +66,7 @@ export function queryCacheState(input: {
   timezone: string;
 }) {
   return {
+    version: 2,
     definitionHash: input.definitionHash,
     controlState: {
       dateRange: {

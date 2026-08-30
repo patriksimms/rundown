@@ -1,5 +1,3 @@
-import type { WidgetDefinition } from './schema';
-
 export function pivotBreakdownRows(rows: Record<string, unknown>[]) {
   const [dimension, breakdown, metric] = Object.keys(rows[0] ?? {});
   if (!dimension || !breakdown || !metric) return { rows, series: metric ? [metric] : [] };
@@ -27,8 +25,10 @@ export function withComparisonSeries(
   rows: Record<string, unknown>[],
   comparisonRows: Record<string, unknown>[],
   alignment: 'key' | 'index' = 'index',
+  metricNames?: string[],
 ) {
-  const [dimension, ...metrics] = Object.keys(rows[0] ?? {});
+  const [dimension, ...rowMetrics] = Object.keys(rows[0] ?? {});
+  const metrics = metricNames ?? rowMetrics;
   if (!dimension) return rows;
   const comparisonsByDimension = new Map(
     comparisonRows.map((row) => [String(row[dimension]), row]),
@@ -46,46 +46,45 @@ export function withComparisonSeries(
   }));
 }
 
-export function tableSummary(
-  definition: Extract<WidgetDefinition, { type: 'table' }>,
+export function alignDateComparisonRows(
   rows: Record<string, unknown>[],
+  mode: 'previousPeriod' | 'previousYear',
+  currentRange: { start: string; end: string },
 ) {
-  const columns = Object.keys(rows[0] ?? {});
-  const dimensionCount = definition.dimensions.length;
-  return Object.fromEntries(
-    columns.map((column, index) => {
-      if (index < dimensionCount) return [column, index === 0 ? 'Summary' : ''];
-      const values = rows.map((row) => Number(row[column])).filter(Number.isFinite);
-      const aggregation = definition.metrics[index - dimensionCount]?.source;
-      if (!values.length) return [column, null];
-      if (aggregation?.kind === 'field') {
-        if (aggregation.aggregation === 'average')
-          return [column, values.reduce((sum, value) => sum + value, 0) / values.length];
-        if (aggregation.aggregation === 'min') return [column, Math.min(...values)];
-        if (aggregation.aggregation === 'max') return [column, Math.max(...values)];
-        if (aggregation.aggregation === 'median') {
-          const sorted = [...values].sort((left, right) => left - right);
-          const middle = Math.floor(sorted.length / 2);
-          return [
-            column,
-            sorted.length % 2 ? sorted[middle] : (sorted[middle - 1]! + sorted[middle]!) / 2,
-          ];
-        }
-        if (
-          aggregation.aggregation === 'standardDeviation' ||
-          aggregation.aggregation === 'variance'
-        ) {
-          if (values.length < 2) return [column, 0];
-          const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
-          const variance =
-            values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (values.length - 1);
-          return [
-            column,
-            aggregation.aggregation === 'standardDeviation' ? Math.sqrt(variance) : variance,
-          ];
-        }
-      }
-      return [column, values.reduce((sum, value) => sum + value, 0)];
-    }),
-  );
+  const dimension = Object.keys(rows[0] ?? {})[0];
+  if (!dimension) return rows;
+  const periodDays =
+    Math.round(
+      (Date.parse(`${currentRange.end}T00:00:00Z`) -
+        Date.parse(`${currentRange.start}T00:00:00Z`)) /
+        86_400_000,
+    ) + 1;
+  return rows.map((row) => {
+    const value = row[dimension];
+    const sourceDate =
+      value instanceof Date
+        ? value
+        : typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value)
+          ? new Date(`${value.slice(0, 10)}T00:00:00Z`)
+          : undefined;
+    if (!sourceDate) return row;
+    const date = new Date(sourceDate);
+    if (mode === 'previousPeriod') date.setUTCDate(date.getUTCDate() + periodDays);
+    else {
+      const month = date.getUTCMonth();
+      date.setUTCFullYear(date.getUTCFullYear() + 1, month, 1);
+      const lastDay = new Date(Date.UTC(date.getUTCFullYear(), month + 1, 0)).getUTCDate();
+      date.setUTCDate(Math.min(sourceDate.getUTCDate(), lastDay));
+    }
+    return {
+      ...row,
+      [dimension]: value instanceof Date ? date : date.toISOString().slice(0, 10),
+    };
+  });
+}
+
+export function seriesMetricIndex(series: string, currentMetrics: string[]) {
+  return series.startsWith('comparison_')
+    ? Number(series.slice('comparison_'.length))
+    : currentMetrics.indexOf(series);
 }

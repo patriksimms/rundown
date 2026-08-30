@@ -18,12 +18,14 @@ function render(
   definition: QueryDefinition,
   rows: Record<string, unknown>[],
   comparisonRows?: Record<string, unknown>[],
+  summaryRow?: Record<string, unknown>,
 ) {
   return renderToStaticMarkup(
     <Result
       definition={definition}
       rows={rows}
       comparisonRows={comparisonRows}
+      summaryRow={summaryRow}
       page={0}
       hasMore={false}
       setPage={() => {}}
@@ -97,6 +99,7 @@ describe('widget result rendering', () => {
       definition,
       [{ month: 'Jan', metric_1: 10 }],
       [{ month: 'Jan', metric_1: 5 }],
+      { month: 'Summary', metric_1: 10 },
     );
     expect(markup).toContain('Summary');
     expect(markup).toContain('Previous year');

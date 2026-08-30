@@ -29,6 +29,7 @@ import { comparisonDateRange, resolveDateRange } from '#/domain/dates';
 import { queryCacheState, widgetDependencyState } from '#/domain/cache';
 import { remapWidgetDefinition } from '#/domain/remap';
 import { mergeControlState } from '#/domain/control-state';
+import { alignDateComparisonRows } from '#/domain/widget-results';
 import { isWorkspaceR2Key, scopedR2Prefix } from '#/domain/tenancy';
 import {
   assertSingleExpression,
@@ -477,23 +478,28 @@ async function queryWidget(
     widget.definition.type === 'table' && widget.definition.resultLimit.mode === 'pagination'
       ? widget.definition.resultLimit.amount
       : undefined;
-  const run = (queryControlState: ControlState) =>
+  const run = (
+    queryControlState: ControlState,
+    queryDefinition: WidgetDefinition = widget.definition,
+    offset = pageSize === undefined ? undefined : page * pageSize,
+  ) =>
     runIsolatedPreparedQuery<Record<string, unknown>>(dataSource, (sourceTableName) => {
       const compiled = compileWidgetQuery({
         dashboard: access.document,
-        definition: widget.definition,
+        definition: queryDefinition,
         dataSource,
         ...metadata,
         controlState: queryControlState,
         bucketName: env.R2_BUCKET_NAME,
         sourceTableName,
         resolvedControls,
-        offset: pageSize === undefined ? undefined : page * pageSize,
+        offset,
       });
       return { sql: compiled.sql, parameters: compiled.parameters };
     });
   const comparison = widgetComparison(widget.definition);
-  const [rows, comparisonRows] = await Promise.all([
+  const summaryDefinition = tableSummaryDefinition(widget.definition);
+  const [rows, comparisonRows, summaryRows] = await Promise.all([
     run(resolvedControlState),
     comparison
       ? run({
@@ -505,17 +511,25 @@ async function queryWidget(
           ),
         })
       : Promise.resolve(undefined),
+    summaryDefinition ? run(resolvedControlState, summaryDefinition, undefined) : undefined,
   ]);
+  const alignedComparisonRows =
+    comparisonRows && comparison && hasDateDimension(widget.definition, metadata)
+      ? alignDateComparisonRows(comparisonRows, comparison, resolvedDateRange)
+      : comparisonRows;
   const hasMore = pageSize !== undefined && rows.length > pageSize;
   const result = {
     rows: normalize(pageSize === undefined ? rows : rows.slice(0, pageSize)),
-    ...(comparisonRows
+    ...(alignedComparisonRows
       ? {
           comparisonRows: normalize(
-            pageSize === undefined ? comparisonRows : comparisonRows.slice(0, pageSize),
+            pageSize === undefined
+              ? alignedComparisonRows
+              : alignedComparisonRows.slice(0, pageSize),
           ),
         }
       : {}),
+    ...(summaryRows?.[0] ? { summaryRow: normalize(summaryRows[0]) } : {}),
     controlState,
     cache: 'miss',
     ...(pageSize === undefined ? {} : { page, hasMore }),
@@ -1109,11 +1123,11 @@ async function runDefinition(
       endDate: { fixed: resolvedDateRange.end },
     },
   };
-  const run = (queryControlState: ControlState) =>
+  const run = (queryControlState: ControlState, queryDefinition: WidgetDefinition = definition) =>
     runIsolatedPreparedQuery<Record<string, unknown>>(dataSource, (sourceTableName) => {
       const compiled = compileWidgetQuery({
         dashboard,
-        definition,
+        definition: queryDefinition,
         dataSource,
         ...metadata,
         controlState: queryControlState,
@@ -1124,7 +1138,8 @@ async function runDefinition(
       return { sql: compiled.sql, parameters: compiled.parameters };
     });
   const comparison = widgetComparison(definition);
-  const [rows, comparisonRows] = await Promise.all([
+  const summaryDefinition = tableSummaryDefinition(definition);
+  const [rows, comparisonRows, summaryRows] = await Promise.all([
     run(resolvedControlState),
     comparison
       ? run({
@@ -1136,10 +1151,16 @@ async function runDefinition(
           ),
         })
       : Promise.resolve(undefined),
+    summaryDefinition ? run(resolvedControlState, summaryDefinition) : undefined,
   ]);
+  const alignedComparisonRows =
+    comparisonRows && comparison && hasDateDimension(definition, metadata)
+      ? alignDateComparisonRows(comparisonRows, comparison, resolvedDateRange)
+      : comparisonRows;
   return {
     rows: normalize(rows),
-    ...(comparisonRows ? { comparisonRows: normalize(comparisonRows) } : {}),
+    ...(alignedComparisonRows ? { comparisonRows: normalize(alignedComparisonRows) } : {}),
+    ...(summaryRows?.[0] ? { summaryRow: normalize(summaryRows[0]) } : {}),
     controlState,
   };
 }
@@ -1186,6 +1207,33 @@ function validateControlState(dashboard: DashboardDocument, input: ControlState)
 function widgetComparison(definition: WidgetDefinition) {
   if (!('comparison' in definition) || !definition.comparison) return undefined;
   return definition.comparison.mode === 'none' ? undefined : definition.comparison.mode;
+}
+
+function tableSummaryDefinition(definition: WidgetDefinition): WidgetDefinition | undefined {
+  if (definition.type !== 'table' || !definition.showSummaryRow) return undefined;
+  return {
+    ...definition,
+    dimensions: [],
+    resultLimit: { mode: 'top', amount: 1 },
+    sort: undefined,
+    showSummaryRow: false,
+  };
+}
+
+function hasDateDimension(
+  definition: WidgetDefinition,
+  metadata: {
+    fields: Array<{ id: string; semanticType: string }>;
+    calculatedFields: Array<{ id: string; semanticType: string }>;
+  },
+) {
+  const fieldId =
+    definition.type === 'line' || definition.type === 'bar'
+      ? definition.dimension.fieldId
+      : undefined;
+  return [...metadata.fields, ...metadata.calculatedFields].some(
+    (field) => field.id === fieldId && field.semanticType === 'date',
+  );
 }
 
 async function resolveControls(
