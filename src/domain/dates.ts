@@ -5,6 +5,8 @@ export interface ResolvedDateRange {
   end: string;
 }
 
+const invalidRangeMessage = 'The start date must not be after the end date.';
+
 export function resolveDateRange(
   range: DateRange,
   timezone: string,
@@ -26,8 +28,8 @@ export function comparisonDateRange(
   const start = parseDate(resolved.start);
   const end = parseDate(resolved.end);
   if (mode === 'previousYear') {
-    start.setUTCFullYear(start.getUTCFullYear() - 1);
-    end.setUTCFullYear(end.getUTCFullYear() - 1);
+    start.setTime(shiftMonths(start, -12).getTime());
+    end.setTime(shiftMonths(end, -12).getTime());
   } else {
     const days = Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
     end.setUTCDate(start.getUTCDate() - 1);
@@ -60,16 +62,41 @@ function resolveDateValue(value: DateRange['startDate'], timezone: string, now: 
       resolved.setUTCDate(resolved.getUTCDate() + amount * 7);
       break;
     case 'month':
-      resolved.setUTCMonth(resolved.getUTCMonth() + amount);
+      resolved = shiftMonths(resolved, amount);
       break;
     case 'quarter':
-      resolved.setUTCMonth(resolved.getUTCMonth() + amount * 3);
+      resolved = shiftMonths(resolved, amount * 3);
       break;
     case 'year':
-      resolved.setUTCFullYear(resolved.getUTCFullYear() + amount);
+      resolved = shiftMonths(resolved, amount * 12);
       break;
   }
   return resolved.toISOString().slice(0, 10);
+}
+
+export function updateDateRangeBoundary(
+  range: DateRange,
+  timezone: string,
+  boundary: 'start' | 'end',
+  value: string,
+): { range?: DateRange; error?: string } {
+  if (!value) return {};
+  const resolved = resolveDateRange(range, timezone);
+  const next = {
+    startDate: { fixed: boundary === 'start' ? value : resolved.start },
+    endDate: { fixed: boundary === 'end' ? value : resolved.end },
+  } satisfies DateRange;
+  if (next.startDate.fixed > next.endDate.fixed) return { error: invalidRangeMessage };
+  return { range: next };
+}
+
+function shiftMonths(date: Date, amount: number) {
+  const target = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + amount, 1));
+  const lastDay = new Date(
+    Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+  target.setUTCDate(Math.min(date.getUTCDate(), lastDay));
+  return target;
 }
 
 function parseDate(value: string) {

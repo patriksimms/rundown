@@ -14,11 +14,12 @@ import type { ControlState, DashboardDocument, DashboardWidget } from '#/domain/
 import { callApi } from '#/api/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '#/components/ui/card';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '#/components/ui/chart';
-import { Field, FieldLabel } from '#/components/ui/field';
+import { Field, FieldError, FieldLabel } from '#/components/ui/field';
 import { Input } from '#/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '#/components/ui/native-select';
 import { Skeleton } from '#/components/ui/skeleton';
 import { widgetQueryRequest } from '#/domain/widget-query';
+import { resolveDateRange, updateDateRangeBoundary } from '#/domain/dates';
 import {
   Table,
   TableBody,
@@ -57,6 +58,7 @@ export function DashboardView({
           <Widget
             widget={widget}
             dashboardId={dashboard.id}
+            timezone={dashboard.timezone}
             shareToken={shareToken}
             controlState={controlState}
             setControlState={setControlState}
@@ -70,6 +72,7 @@ export function DashboardView({
 function Widget({
   widget,
   dashboardId,
+  timezone,
   shareToken,
   preview,
   controlState,
@@ -77,6 +80,7 @@ function Widget({
 }: {
   widget: DashboardWidget;
   dashboardId: string;
+  timezone: string;
   shareToken?: string;
   preview?: boolean;
   controlState: ControlState;
@@ -94,6 +98,7 @@ function Widget({
     return (
       <DateControl
         widgetId={widget.id}
+        timezone={timezone}
         controlState={controlState}
         setControlState={setControlState}
       />
@@ -138,6 +143,7 @@ export function DashboardWidgetView({
     <Widget
       widget={widget}
       dashboardId={dashboard.id}
+      timezone={dashboard.timezone}
       preview={preview}
       controlState={controlState}
       setControlState={setControlState}
@@ -147,54 +153,52 @@ export function DashboardWidgetView({
 
 function DateControl({
   widgetId,
+  timezone,
   controlState,
   setControlState,
 }: {
   widgetId: string;
+  timezone: string;
   controlState: ControlState;
   setControlState: (state: ControlState) => void;
 }) {
   const range = controlState.dateRange;
+  const resolved = range ? resolveDateRange(range, timezone) : undefined;
+  const [error, setError] = useState<string>();
+
+  const updateBoundary = (boundary: 'start' | 'end', value: string) => {
+    if (!range) return;
+    const result = updateDateRangeBoundary(range, timezone, boundary, value);
+    setError(result.error);
+    if (result.range) setControlState({ ...controlState, dateRange: result.range });
+  };
   return (
     <Card size="sm">
       <CardHeader>
         <CardTitle>Date range</CardTitle>
       </CardHeader>
       <CardContent className="grid grid-cols-2 gap-3">
-        <Field>
+        <Field data-invalid={Boolean(error)}>
           <FieldLabel htmlFor={`date-start-${widgetId}`}>Start</FieldLabel>
           <Input
             id={`date-start-${widgetId}`}
             type="date"
-            value={range && 'fixed' in range.startDate ? range.startDate.fixed : ''}
-            onChange={(event) =>
-              setControlState({
-                ...controlState,
-                dateRange: {
-                  startDate: { fixed: event.target.value },
-                  endDate: range?.endDate ?? { fixed: event.target.value },
-                },
-              })
-            }
+            value={resolved?.start ?? ''}
+            aria-invalid={Boolean(error)}
+            onChange={(event) => updateBoundary('start', event.target.value)}
           />
         </Field>
-        <Field>
+        <Field data-invalid={Boolean(error)}>
           <FieldLabel htmlFor={`date-end-${widgetId}`}>End</FieldLabel>
           <Input
             id={`date-end-${widgetId}`}
             type="date"
-            value={range && 'fixed' in range.endDate ? range.endDate.fixed : ''}
-            onChange={(event) =>
-              setControlState({
-                ...controlState,
-                dateRange: {
-                  startDate: range?.startDate ?? { fixed: event.target.value },
-                  endDate: { fixed: event.target.value },
-                },
-              })
-            }
+            value={resolved?.end ?? ''}
+            aria-invalid={Boolean(error)}
+            onChange={(event) => updateBoundary('end', event.target.value)}
           />
         </Field>
+        <FieldError className="col-span-2">{error}</FieldError>
       </CardContent>
     </Card>
   );
