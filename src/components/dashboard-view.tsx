@@ -17,14 +17,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '#/com
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '#/components/ui/chart';
 import { Badge } from '#/components/ui/badge';
 import { Button } from '#/components/ui/button';
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from '#/components/ui/command';
+import { Command, CommandGroup, CommandInput, CommandList } from '#/components/ui/command';
 import { Field, FieldLabel } from '#/components/ui/field';
 import { Input } from '#/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '#/components/ui/popover';
@@ -297,10 +290,7 @@ function FilterControl({
             <ChevronsUpDown className="size-4 opacity-50" />
           </PopoverTrigger>
           <PopoverContent className="w-(--anchor-width) p-0" align="start">
-            <Command
-              shouldFilter={false}
-              aria-label={definition.userDefinedName ?? 'Filter values'}
-            >
+            <Command shouldFilter={false} label={definition.userDefinedName ?? 'Filter values'}>
               <CommandInput value={search} onValueChange={setSearch} placeholder="Search values…" />
               <CommandList aria-multiselectable={definition.allowMultiple || undefined}>
                 {status === 'loading' ? (
@@ -318,28 +308,30 @@ function FilterControl({
                       Retry
                     </Button>
                   </div>
+                ) : values.length ? (
+                  <CommandGroup>
+                    {values.map((value) => {
+                      const option = String(value);
+                      const checked = selected.includes(option);
+                      return (
+                        <button
+                          type="button"
+                          role="option"
+                          key={option}
+                          aria-selected={checked}
+                          className="flex min-h-10 w-full items-center rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+                          onClick={() => select(option)}
+                        >
+                          {option}
+                          <span aria-hidden="true" className="ml-auto">
+                            {checked ? '✓' : ''}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </CommandGroup>
                 ) : (
-                  <>
-                    <CommandEmpty>No values found.</CommandEmpty>
-                    <CommandGroup>
-                      {values.map((value) => {
-                        const option = String(value);
-                        const checked = selected.includes(option);
-                        return (
-                          <CommandItem
-                            key={option}
-                            value={option}
-                            data-checked={checked}
-                            aria-label={`${option}${checked ? ', selected' : ''}`}
-                            className="min-h-10"
-                            onSelect={() => select(option)}
-                          >
-                            {option}
-                          </CommandItem>
-                        );
-                      })}
-                    </CommandGroup>
-                  </>
+                  <div className="py-6 text-center text-sm">No values found.</div>
                 )}
               </CommandList>
             </Command>
