@@ -81,10 +81,13 @@ export function compileWidgetQuery(context: QueryContext): CompiledQuery {
   const groupBy = dimensions.length
     ? ` GROUP BY ${dimensions.map((_, index) => index + 1).join(', ')}`
     : '';
-  const orderBy =
+  const explicitSort =
     'sort' in definition && definition.sort?.length
-      ? ` ORDER BY ${compileSort(definition.sort, dimensions.length, context)}`
-      : '';
+      ? compileSort(definition.sort, dimensions.length, context)
+      : undefined;
+  const stableDimensions = dimensions.map((_, index) => `${index + 1} ASC`).join(', ');
+  const order = [explicitSort, stableDimensions].filter(Boolean).join(', ');
+  const orderBy = order ? ` ORDER BY ${order}` : '';
   const limit = widgetLimit(definition);
   return {
     sql: `SELECT ${select.join(', ')} FROM ${source} WHERE ${conditions.join(' AND ')}${groupBy}${orderBy}${limit ? ` LIMIT ${context.offset === undefined ? limit : limit + 1}` : ''}${context.offset ? ` OFFSET ${context.offset}` : ''}`,

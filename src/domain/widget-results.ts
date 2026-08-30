@@ -26,13 +26,22 @@ export function pieBreakdownRows(rows: Record<string, unknown>[]) {
 export function withComparisonSeries(
   rows: Record<string, unknown>[],
   comparisonRows: Record<string, unknown>[],
+  alignment: 'key' | 'index' = 'index',
 ) {
   const [dimension, ...metrics] = Object.keys(rows[0] ?? {});
   if (!dimension) return rows;
+  const comparisonsByDimension = new Map(
+    comparisonRows.map((row) => [String(row[dimension]), row]),
+  );
   return rows.map((row, index) => ({
     ...row,
     ...Object.fromEntries(
-      metrics.map((metric) => [`Previous ${metric}`, comparisonRows[index]?.[metric]]),
+      metrics.map((metric, metricIndex) => [
+        `comparison_${metricIndex}`,
+        (alignment === 'key'
+          ? comparisonsByDimension.get(String(row[dimension]))
+          : comparisonRows[index])?.[metric],
+      ]),
     ),
   }));
 }
@@ -49,12 +58,33 @@ export function tableSummary(
       const values = rows.map((row) => Number(row[column])).filter(Number.isFinite);
       const aggregation = definition.metrics[index - dimensionCount]?.source;
       if (!values.length) return [column, null];
-      if (aggregation?.kind === 'field' && aggregation.aggregation === 'average')
-        return [column, values.reduce((sum, value) => sum + value, 0) / values.length];
-      if (aggregation?.kind === 'field' && aggregation.aggregation === 'min')
-        return [column, Math.min(...values)];
-      if (aggregation?.kind === 'field' && aggregation.aggregation === 'max')
-        return [column, Math.max(...values)];
+      if (aggregation?.kind === 'field') {
+        if (aggregation.aggregation === 'average')
+          return [column, values.reduce((sum, value) => sum + value, 0) / values.length];
+        if (aggregation.aggregation === 'min') return [column, Math.min(...values)];
+        if (aggregation.aggregation === 'max') return [column, Math.max(...values)];
+        if (aggregation.aggregation === 'median') {
+          const sorted = [...values].sort((left, right) => left - right);
+          const middle = Math.floor(sorted.length / 2);
+          return [
+            column,
+            sorted.length % 2 ? sorted[middle] : (sorted[middle - 1]! + sorted[middle]!) / 2,
+          ];
+        }
+        if (
+          aggregation.aggregation === 'standardDeviation' ||
+          aggregation.aggregation === 'variance'
+        ) {
+          if (values.length < 2) return [column, 0];
+          const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+          const variance =
+            values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (values.length - 1);
+          return [
+            column,
+            aggregation.aggregation === 'standardDeviation' ? Math.sqrt(variance) : variance,
+          ];
+        }
+      }
       return [column, values.reduce((sum, value) => sum + value, 0)];
     }),
   );

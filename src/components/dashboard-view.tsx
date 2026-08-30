@@ -349,7 +349,7 @@ function QueryCard({
   );
 }
 
-function Result({
+export function Result({
   definition,
   rows,
   comparisonRows,
@@ -374,7 +374,11 @@ function Result({
           ? definition.upperLimit.value
           : rows[0]?.upper_limit
         : undefined;
-    const numericMaximum = maximum == null ? undefined : Number(maximum);
+    const parsedMaximum = maximum == null ? undefined : Number(maximum);
+    const numericMaximum =
+      parsedMaximum !== undefined && Number.isFinite(parsedMaximum) && parsedMaximum > 0
+        ? parsedMaximum
+        : undefined;
     return (
       <div className="space-y-2">
         <p className="text-4xl font-semibold tracking-tight">
@@ -441,7 +445,9 @@ function Result({
         </Table>
         {comparisonRows?.length ? (
           <div>
-            <p className="mb-2 text-sm font-medium">Previous period</p>
+            <p className="mb-2 text-sm font-medium">
+              {definition.comparison?.mode === 'previousYear' ? 'Previous year' : 'Previous period'}
+            </p>
             <Table>
               <TableBody>
                 {comparisonRows.map((row, index) => (
@@ -460,8 +466,8 @@ function Result({
         {definition.resultLimit.mode === 'pagination' ? (
           <div className="flex items-center justify-between text-sm">
             <span>
-              {page * definition.resultLimit.amount + 1}–
-              {page * definition.resultLimit.amount + rows.length}
+              {rows.length ? page * definition.resultLimit.amount + 1 : 0}–
+              {rows.length ? page * definition.resultLimit.amount + rows.length : 0}
             </span>
             <div className="flex gap-2">
               <Button
@@ -488,24 +494,40 @@ function Result({
   }
   if (!rows.length || columns.length < 2)
     return <p className="text-sm text-muted-foreground">No rows for this date range.</p>;
-  let chartRows = comparisonRows?.length ? withComparisonSeries(rows, comparisonRows) : rows;
+  let chartRows = comparisonRows?.length
+    ? withComparisonSeries(rows, comparisonRows, definition.type === 'bar' ? 'key' : 'index')
+    : rows;
   let dimension = columns[0]!;
   let metrics = Object.keys(chartRows[0] ?? {}).slice(1);
   if (definition.type === 'bar' && definition.breakdownDimension) {
     const pivoted = pivotBreakdownRows(rows);
-    chartRows = pivoted.rows;
-    metrics = pivoted.series;
+    const previous = comparisonRows?.length ? pivotBreakdownRows(comparisonRows) : undefined;
+    chartRows = previous ? withComparisonSeries(pivoted.rows, previous.rows, 'key') : pivoted.rows;
+    metrics = [
+      ...pivoted.series,
+      ...(previous ? pivoted.series.map((_, index) => `comparison_${index}`) : []),
+    ];
   }
   if (definition.type === 'pie' && definition.breakdownDimension) {
     chartRows = pieBreakdownRows(rows);
     dimension = 'label';
     metrics = [columns[2]!];
   }
+  const currentMetrics = metrics.filter((metric) => !metric.startsWith('comparison_'));
   const config = Object.fromEntries(
-    metrics.map((metric, index) => [
-      metric,
-      { label: metric, color: `var(--chart-${(index % 5) + 1})` },
-    ]),
+    metrics.map((metric, index) => {
+      const comparisonIndex = metric.startsWith('comparison_')
+        ? Number(metric.slice('comparison_'.length))
+        : undefined;
+      const sourceMetric = comparisonIndex === undefined ? metric : currentMetrics[comparisonIndex];
+      return [
+        metric,
+        {
+          label: comparisonIndex === undefined ? metric : `Previous ${sourceMetric}`,
+          color: `var(--chart-${((comparisonIndex ?? index) % 5) + 1})`,
+        },
+      ];
+    }),
   );
   if (definition.type === 'pie')
     return (
@@ -556,12 +578,16 @@ function Result({
             dataKey={metric}
             yAxisId={
               definition.type === 'line' &&
-              definition.metrics[metrics.indexOf(metric)]?.dataType === 'percent'
+              definition.metrics[
+                metric.startsWith('comparison_')
+                  ? Number(metric.slice('comparison_'.length))
+                  : currentMetrics.indexOf(metric)
+              ]?.dataType === 'percent'
                 ? 'percent'
                 : 'number'
             }
             stroke={`var(--color-${metric})`}
-            strokeDasharray={metric.startsWith('Previous ') ? '4 4' : undefined}
+            strokeDasharray={metric.startsWith('comparison_') ? '4 4' : undefined}
             dot={false}
           />
         ))}

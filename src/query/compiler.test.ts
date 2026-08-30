@@ -111,7 +111,7 @@ describe('query compiler', () => {
     });
     expect(result.sql).toContain('FROM "rundown_source"');
     expect(result.sql).toContain('"Campaign" IN (?)');
-    expect(result.sql).toContain('GROUP BY 1 ORDER BY 2 DESC LIMIT 20');
+    expect(result.sql).toContain('GROUP BY 1 ORDER BY 2 DESC, 1 ASC LIMIT 20');
     expect(result.parameters.at(-1)).toBe('Alpha');
   });
 
@@ -139,6 +139,7 @@ describe('query compiler', () => {
       offset: 40,
     });
     expect(result.sql).toContain('LIMIT 21 OFFSET 40');
+    expect(result.sql).toContain('ORDER BY 1 ASC');
   });
 
   it('selects a library-driven gauge upper limit', () => {

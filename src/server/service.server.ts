@@ -474,7 +474,9 @@ async function queryWidget(
   }
   console.info('rundown.query_cache', { dashboardId, widgetId, outcome: 'miss' });
   const pageSize =
-    widget.definition.type === 'table' ? widget.definition.resultLimit.amount : undefined;
+    widget.definition.type === 'table' && widget.definition.resultLimit.mode === 'pagination'
+      ? widget.definition.resultLimit.amount
+      : undefined;
   const run = (queryControlState: ControlState) =>
     runIsolatedPreparedQuery<Record<string, unknown>>(dataSource, (sourceTableName) => {
       const compiled = compileWidgetQuery({

@@ -30,7 +30,26 @@ describe('widget result shaping', () => {
   it('adds comparison values as visible chart series', () => {
     expect(
       withComparisonSeries([{ month: 'Jan', spend: 20 }], [{ month: 'Dec', spend: 10 }]),
-    ).toEqual([{ month: 'Jan', spend: 20, 'Previous spend': 10 }]);
+    ).toEqual([{ month: 'Jan', spend: 20, comparison_0: 10 }]);
+  });
+
+  it('aligns categorical comparisons by their dimension value', () => {
+    expect(
+      withComparisonSeries(
+        [
+          { campaign: 'A', spend: 100 },
+          { campaign: 'B', spend: 10 },
+        ],
+        [
+          { campaign: 'B', spend: 50 },
+          { campaign: 'A', spend: 5 },
+        ],
+        'key',
+      ),
+    ).toEqual([
+      { campaign: 'A', spend: 100, comparison_0: 5 },
+      { campaign: 'B', spend: 10, comparison_0: 50 },
+    ]);
   });
 
   it('summarizes metrics using their configured aggregation', () => {
@@ -54,5 +73,29 @@ describe('widget result shaping', () => {
     ]);
     expect(summary).toMatchObject({ month: 'Summary', spend: 40 });
     expect(summary.rate).toBeCloseTo(0.3);
+  });
+
+  it('calculates non-additive summary aggregations', () => {
+    const metric = (aggregation: 'median' | 'standardDeviation' | 'variance') => ({
+      source: { kind: 'field' as const, fieldId: aggregation, aggregation },
+      dataType: 'number' as const,
+    });
+    const definition = {
+      type: 'table' as const,
+      title: 'Summary',
+      dataSourceId: 'source',
+      dateRangeFieldId: 'date',
+      dimensions: [],
+      metrics: [metric('median'), metric('standardDeviation'), metric('variance')],
+      resultLimit: { mode: 'top' as const, amount: 20 },
+    };
+    const summary = tableSummary(definition, [
+      { median: 10, standardDeviation: 10, variance: 10 },
+      { median: 20, standardDeviation: 20, variance: 20 },
+      { median: 100, standardDeviation: 30, variance: 30 },
+    ]);
+    expect(summary.median).toBe(20);
+    expect(summary.standardDeviation).toBe(10);
+    expect(summary.variance).toBe(100);
   });
 });
