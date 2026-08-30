@@ -17,10 +17,8 @@ export function patchFilterCondition(
 }
 
 export function clearControlValue(state: ControlState, controlId: string): ControlState {
-  const values = { ...state.values };
-  delete values[controlId];
   return {
     ...state,
-    values: Object.keys(values).length ? values : undefined,
+    values: { ...state.values, [controlId]: [] },
   };
 }

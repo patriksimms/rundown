@@ -265,15 +265,14 @@ export function DashboardBuilder({
       }));
       await refresh();
     } catch (caught) {
-      if (controlFieldChanged && previousControlValues)
-        setControlState((current) =>
-          current.values?.[widget.id]
-            ? current
-            : {
-                ...current,
-                values: { ...current.values, [widget.id]: previousControlValues },
-              },
-        );
+      if (controlFieldChanged)
+        setControlState((current) => {
+          if ((current.values?.[widget.id]?.length ?? 0) > 0) return current;
+          const values = { ...current.values };
+          if (previousControlValues) values[widget.id] = previousControlValues;
+          else delete values[widget.id];
+          return { ...current, values: Object.keys(values).length ? values : undefined };
+        });
       setDashboard((current) => ({
         ...current,
         widgets: current.widgets.map((item) =>
@@ -678,7 +677,9 @@ function WidgetSettings({
               label="Field"
               value={definition.fieldId}
               fields={fields.filter((field) => field.role !== 'metric')}
-              onChange={(fieldId) => void commit({ ...definition, fieldId })}
+              onChange={(fieldId) =>
+                void commit({ ...definition, fieldId, defaultValues: undefined })
+              }
             />
           ) : (
             <>
@@ -1908,7 +1909,12 @@ async function changeSource(
   const metricField = fields.find((field) => field.role === 'metric');
   if (definition.type === 'control') {
     if (!dimension) throw new Error('The datasource has no dimension.');
-    return commit({ ...definition, dataSourceId: sourceId, fieldId: dimension.id });
+    return commit({
+      ...definition,
+      dataSourceId: sourceId,
+      fieldId: dimension.id,
+      defaultValues: undefined,
+    });
   }
   if (!date || !metricField) throw new Error('The datasource needs a date field and metric field.');
   let next: QueryDefinition = { ...definition, dataSourceId: sourceId, dateRangeFieldId: date.id };
