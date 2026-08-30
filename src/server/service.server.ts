@@ -1,5 +1,5 @@
 import { clerkClient } from '@clerk/tanstack-react-start/server';
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull, lt, or } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 import type { ApiRequest } from '#/api/contracts';
 import { createDatabase } from '#/db/client';
@@ -39,6 +39,7 @@ import { isWorkspaceR2Key, scopedR2Prefix } from '#/domain/tenancy';
 import {
   createDatasourceUploadCleanupToken,
   dataSourceLocationReferencesKey,
+  datasourcePrefixOverlapsManagedUploads,
   isManagedDatasourceUpload,
   MAX_DATASOURCE_FILE_BYTES,
   verifyDatasourceUploadCleanupToken,
@@ -60,6 +61,7 @@ import { ApiError } from './errors';
 import { loadDashboard, loadDataSource, loadQueryMetadata } from './records.server';
 
 const database = () => createDatabase(env.DB);
+const UPLOAD_CLAIM_LEASE_MS = 60 * 60 * 1000;
 
 export async function executeRequest(request: ApiRequest): Promise<unknown> {
   const startedAt = Date.now();
@@ -707,27 +709,27 @@ async function removeDatasourceUpload(
         eq(datasourceUploads.key, request.key),
         eq(datasourceUploads.workspaceId, session.workspace.id),
         eq(datasourceUploads.clerkUserId, session.userId),
-        eq(datasourceUploads.status, 'pending'),
+        claimableUploadStatus(),
       ),
     )
     .returning({ key: datasourceUploads.key });
   if (!claimedRemoval.length)
     throw new ApiError(409, 'upload_not_pending', 'This upload is not available for removal.');
-  if (await isDatasourceObjectRegistered(session.workspace.id, request.key)) {
-    await deleteUploadState(session, request.key, 'removing');
-    throw new ApiError(
-      409,
-      'upload_in_use',
-      'This file belongs to a registered datasource and cannot be removed.',
-    );
-  }
   try {
+    if (await isDatasourceObjectRegistered(session.workspace.id, request.key)) {
+      await deleteUploadState(session, request.key, 'removing');
+      throw new ApiError(
+        409,
+        'upload_in_use',
+        'This file belongs to a registered datasource and cannot be removed.',
+      );
+    }
     await deleteSourceObject(request.key);
+    await deleteUploadState(session, request.key, 'removing');
   } catch (error) {
     await restorePendingUpload(session, request.key, 'removing');
     throw error;
   }
-  await deleteUploadState(session, request.key, 'removing');
   return { removed: true };
 }
 
@@ -753,6 +755,15 @@ async function registerDatasource(request: Extract<ApiRequest, { action: 'regist
       'invalid_r2_prefix',
       `Datasource keys must start with ${session.workspace.r2Prefix}.`,
     );
+  if (
+    request.location.kind === 'prefix' &&
+    datasourcePrefixOverlapsManagedUploads(session.workspace.r2Prefix, request.location.key)
+  )
+    throw new ApiError(
+      400,
+      'managed_upload_prefix_not_allowed',
+      'Prefixes cannot include Rundown-managed uploads.',
+    );
   const managedUploadKey =
     request.location.kind === 'object' &&
     isManagedDatasourceUpload(session.workspace.r2Prefix, request.location.key)
@@ -766,15 +777,6 @@ async function registerDatasource(request: Extract<ApiRequest, { action: 'regist
         : (await listSourceObjects(request.location.key)).objects;
     if (!objects.length)
       throw new ApiError(404, 'r2_object_not_found', 'No matching R2 objects were found.');
-    if (
-      request.location.kind === 'prefix' &&
-      objects.some((object) => isManagedDatasourceUpload(session.workspace.r2Prefix, object.key))
-    )
-      throw new ApiError(
-        400,
-        'managed_upload_prefix_not_allowed',
-        'Rundown uploads must be registered as a single object.',
-      );
     if (managedUploadKey && objects[0].size > MAX_DATASOURCE_FILE_BYTES)
       throw new ApiError(
         413,
@@ -859,12 +861,22 @@ async function claimPendingUpload(
         eq(datasourceUploads.key, key),
         eq(datasourceUploads.workspaceId, session.workspace.id),
         eq(datasourceUploads.clerkUserId, session.userId),
-        eq(datasourceUploads.status, 'pending'),
+        claimableUploadStatus(),
       ),
     )
     .returning({ key: datasourceUploads.key });
   if (!claimed.length)
     throw new ApiError(409, 'upload_not_pending', 'This upload is already being processed.');
+}
+
+function claimableUploadStatus() {
+  return or(
+    eq(datasourceUploads.status, 'pending'),
+    and(
+      inArray(datasourceUploads.status, ['registering', 'removing']),
+      lt(datasourceUploads.updatedAt, new Date(Date.now() - UPLOAD_CLAIM_LEASE_MS).toISOString()),
+    ),
+  );
 }
 
 async function restorePendingUpload(

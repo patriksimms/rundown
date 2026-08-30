@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createDatasourceUploadCleanupToken,
   dataSourceLocationReferencesKey,
+  datasourcePrefixOverlapsManagedUploads,
   datasourceNameFromFileName,
   datasourceUploadFormat,
   datasourceUploadKey,
@@ -96,5 +97,13 @@ describe('datasource uploads', () => {
         key,
       ),
     ).toBe(false);
+  });
+
+  it('rejects every prefix namespace that can include managed uploads', () => {
+    expect(datasourcePrefixOverlapsManagedUploads('ws/acme/', 'ws/acme/')).toBe(true);
+    expect(datasourcePrefixOverlapsManagedUploads('ws/acme/', 'ws/acme/uploads/2026-08-30/')).toBe(
+      true,
+    );
+    expect(datasourcePrefixOverlapsManagedUploads('ws/acme/', 'ws/acme/reports/')).toBe(false);
   });
 });

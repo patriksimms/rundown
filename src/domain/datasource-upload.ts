@@ -70,6 +70,11 @@ export function dataSourceLocationReferencesKey(location: unknown, key: string) 
   return parsed.data.kind === 'object' ? parsed.data.key === key : key.startsWith(parsed.data.key);
 }
 
+export function datasourcePrefixOverlapsManagedUploads(workspacePrefix: string, prefix: string) {
+  const uploadPrefix = `${workspacePrefix}uploads/`;
+  return uploadPrefix.startsWith(prefix) || prefix.startsWith(uploadPrefix);
+}
+
 export async function createDatasourceUploadCleanupToken(
   key: string,
   userId: string,
