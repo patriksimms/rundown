@@ -1210,7 +1210,8 @@ function widgetComparison(definition: WidgetDefinition) {
 }
 
 function tableSummaryDefinition(definition: WidgetDefinition): WidgetDefinition | undefined {
-  if (definition.type !== 'table' || !definition.showSummaryRow) return undefined;
+  if (definition.type !== 'table' || !definition.showSummaryRow || !definition.dimensions.length)
+    return undefined;
   return {
     ...definition,
     dimensions: [],
