@@ -2055,8 +2055,8 @@ function CalculatedFieldDialog({
         semanticType: role === 'metric' ? 'count' : 'text',
         defaultAggregation: role === 'metric' ? 'sum' : null,
       });
-      await onSaved();
       onOpenChange(false);
+      await onSaved();
     } catch (caught) {
       setError(message(caught));
     } finally {

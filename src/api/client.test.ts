@@ -21,6 +21,6 @@ describe('API client boundary', () => {
       'fetch',
       vi.fn(() => Promise.resolve(Response.json({ data: 'missing envelope' }))),
     );
-    await expect(callApi({ action: 'bootstrap' })).rejects.toThrow('Invalid input');
+    await expect(callApi({ action: 'bootstrap' })).rejects.toThrow('Invalid discriminator');
   });
 });

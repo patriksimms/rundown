@@ -296,7 +296,14 @@ function RegisterForm({
     try {
       await callApi({ action: 'registerDatasource', name, location: { kind, key, format } });
       setMessage(`${name} registered.`);
-      await refresh();
+      setName('');
+      try {
+        await refresh();
+      } catch {
+        setError(
+          'The datasource was registered, but the list could not be refreshed. Reload to see it.',
+        );
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -346,7 +353,7 @@ function RegisterForm({
             <NativeSelectOption value="parquet">Parquet</NativeSelectOption>
           </NativeSelect>
         </Field>
-        <Button type="submit" disabled={submitting}>
+        <Button type="submit" disabled={submitting || !name.trim() || !key.trim()}>
           {submitting ? 'Registering…' : 'Register datasource'}
         </Button>
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
