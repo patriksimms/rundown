@@ -15,6 +15,13 @@
       "when": 1788019114696,
       "tag": "0001_dashboard-product",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788111645023,
+      "tag": "0002_tricky_northstar",
+      "breakpoints": true
     }
   ]
 }

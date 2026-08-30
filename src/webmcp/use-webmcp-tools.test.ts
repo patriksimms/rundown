@@ -20,4 +20,17 @@ describe('WebMCP input schemas', () => {
     expect(schema.properties).toHaveProperty('operation');
     expect(schema.required).toContain('operation');
   });
+
+  it('exposes batch placements without asking for the open dashboard id', () => {
+    const schema = inputSchemaFor('updateLayout', { dashboardId: 'dashboard' });
+    expect(schema.properties).toHaveProperty('placements');
+    expect(schema.properties).not.toHaveProperty('dashboardId');
+  });
+
+  it('fixes the dashboard id for editor field metadata updates', () => {
+    const schema = inputSchemaFor('updateFieldMetadata', { dashboardId: 'dashboard' });
+    expect(schema.properties).toHaveProperty('dataSourceId');
+    expect(schema.properties).toHaveProperty('patch');
+    expect(schema.properties).not.toHaveProperty('dashboardId');
+  });
 });

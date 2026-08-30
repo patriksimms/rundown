@@ -2,6 +2,7 @@
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
 @import '@fontsource-variable/geist';
+@import 'react-grid-layout/css/styles.css';
 
 @custom-variant dark (&:is(.dark *));
 
@@ -50,6 +51,25 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+}
+
+.react-grid-item > .react-resizable-handle {
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+.react-grid-item:hover > .react-resizable-handle,
+.react-grid-item:focus-within > .react-resizable-handle,
+.react-grid-item.react-resizable-resizing > .react-resizable-handle {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .react-grid-item,
+  .react-grid-placeholder,
+  .react-grid-item > .react-resizable-handle {
+    transition: none !important;
+  }
 }
 
 * {

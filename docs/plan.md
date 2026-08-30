@@ -171,7 +171,7 @@ Dashboard document (stored as JSON in D1 with `schemaVersion`) holds name, timez
 
 Widget types kept: scorecard, gauge, line, bar, pie, table, control, date control, text. All cards get a `title`.
 
-Layout: fixed column grid, no overlap, compact flow. `addWidget` accepts only `width` and `height` and appends at the bottom. `moveWidget` sets x/y. Agents do not compute coordinates.
+Layout: fixed column grid, no overlap, free placement. Widgets stay where they are dropped and empty rows are allowed. `addWidget` accepts only `width` and `height` and appends at the bottom. `moveWidget` sets one placement; `updateLayout` stores every placement from an interactive rearrangement in one write. Agents do not compute coordinates when adding widgets.
 
 Controls publish values into dashboard control state. A filter control on a field applies across datasources by canonical name (decision 14). The date control applies to every widget.
 

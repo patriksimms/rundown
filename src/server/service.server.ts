@@ -22,7 +22,8 @@ import {
   type DashboardWidget,
   type WidgetDefinition,
 } from '#/domain/schema';
-import { appendPlacement, placementFits } from '#/domain/layout';
+import { appendPlacement, placementFits, validateLayoutUpdate } from '#/domain/layout';
+import { canUpdateFieldMetadata } from '#/domain/field-metadata';
 import { hashJson } from '#/domain/hash';
 import { comparisonDateRange, resolveDateRange } from '#/domain/dates';
 import { queryCacheState, widgetDependencyState } from '#/domain/cache';
@@ -92,6 +93,8 @@ async function dispatchRequest(request: ApiRequest): Promise<unknown> {
       return removeWidget(request);
     case 'moveWidget':
       return moveWidget(request);
+    case 'updateLayout':
+      return updateLayout(request);
     case 'copyWidget':
       return copyWidget(request);
     case 'previewWidget':
@@ -114,6 +117,8 @@ async function dispatchRequest(request: ApiRequest): Promise<unknown> {
       );
     case 'listDataSources':
       return listDataSources();
+    case 'listLibraryMetrics':
+      return listLibraryMetrics();
     case 'describeDatasource':
       return describeDatasource(request.dataSourceId, request.dashboardId, request.shareToken);
     case 'listR2Objects':
@@ -344,6 +349,29 @@ async function moveWidget(request: Extract<ApiRequest, { action: 'moveWidget' }>
   return updatedWidget;
 }
 
+async function updateLayout(request: Extract<ApiRequest, { action: 'updateLayout' }>) {
+  const access = await authorizeDashboard(request.dashboardId, 'editor');
+  if (!validateLayoutUpdate(access.document.widgets, request.placements, access.document.columns))
+    throw new ApiError(
+      400,
+      'invalid_layout',
+      'The layout must include every widget exactly once, stay inside the grid, and not overlap.',
+    );
+  const placements = new Map(
+    request.placements.map((update) => [update.widgetId, update.placement]),
+  );
+  const updated = {
+    ...access.document,
+    widgets: access.document.widgets.map((widget) => ({
+      ...widget,
+      layout: placements.get(widget.id)!,
+    })),
+    updatedAt: new Date().toISOString(),
+  };
+  await persistDashboard(updated);
+  return updated.widgets;
+}
+
 async function copyWidget(request: Extract<ApiRequest, { action: 'copyWidget' }>) {
   const target = await authorizeDashboard(request.dashboardId, 'editor');
   const source = await authorizeDashboard(request.fromDashboardId, 'viewer');
@@ -555,6 +583,14 @@ async function listDataSources() {
     .where(eq(dataSources.workspaceId, session.workspace.id));
 }
 
+async function listLibraryMetrics() {
+  const session = await requireSession();
+  return database()
+    .select()
+    .from(libraryMetrics)
+    .where(eq(libraryMetrics.workspaceId, session.workspace.id));
+}
+
 async function describeDatasource(dataSourceId: string, dashboardId?: string, shareToken?: string) {
   const workspaceId = shareToken
     ? await sharedDatasourceWorkspace(dataSourceId, dashboardId, shareToken)
@@ -654,8 +690,20 @@ async function updateFieldMetadata(
   request: Extract<ApiRequest, { action: 'updateFieldMetadata' }>,
 ) {
   const session = await requireSession();
-  requireAdmin(session);
   await loadDataSource(request.dataSourceId, session.workspace.id);
+  let hasEditorAccess = false;
+  let usesSource = false;
+  if (request.dashboardId) {
+    const access = await authorizeDashboard(request.dashboardId, 'editor');
+    hasEditorAccess = access.role === 'admin' || access.role === 'editor';
+    usesSource = dashboardUsesDataSource(access.document, request.dataSourceId);
+  }
+  if (!canUpdateFieldMetadata(session.isAdmin, hasEditorAccess, usesSource, request.patch))
+    throw new ApiError(
+      403,
+      'field_metadata_access_denied',
+      'Editors may update visible field metadata only for datasources used by their dashboard.',
+    );
   const row = await database().query.fields.findFirst({
     where: and(
       eq(fields.dataSourceId, request.dataSourceId),
@@ -698,6 +746,7 @@ async function upsertCalculatedField(
     expression: request.expression,
     role: request.role,
     semanticType: request.semanticType,
+    defaultAggregation: request.defaultAggregation ?? null,
     description: request.description ?? null,
     updatedAt: new Date().toISOString(),
   };
@@ -1022,27 +1071,61 @@ async function validateDefinition(dashboard: DashboardDocument, definition: Widg
 async function runDefinition(
   dashboard: DashboardDocument,
   definition: WidgetDefinition,
-  controlState: ControlState,
+  state: ControlState,
 ) {
-  if (!('dataSourceId' in definition)) return { rows: [] };
+  const defaults = defaultControlState(dashboard);
+  const controlState = validateControlState(dashboard, mergeControlState(defaults, state));
+  if (!('dataSourceId' in definition)) return { rows: [], controlState };
   const dataSource = await loadDataSource(definition.dataSourceId, dashboard.workspaceId);
   const metadata = await loadQueryMetadata(dataSource.id, dashboard.workspaceId);
-  const rows = await runIsolatedPreparedQuery<Record<string, unknown>>(
-    dataSource,
-    (sourceTableName) => {
+  const resolvedControls = await resolveControls(
+    dashboard,
+    definition,
+    [...metadata.fields, ...metadata.calculatedFields],
+    controlState,
+  );
+  const dateRange = controlState.dateRange ?? dashboard.defaultDateRange;
+  const resolvedDateRange = resolveDateRange(dateRange, dashboard.timezone);
+  const resolvedControlState: ControlState = {
+    ...controlState,
+    dateRange: {
+      startDate: { fixed: resolvedDateRange.start },
+      endDate: { fixed: resolvedDateRange.end },
+    },
+  };
+  const run = (queryControlState: ControlState) =>
+    runIsolatedPreparedQuery<Record<string, unknown>>(dataSource, (sourceTableName) => {
       const compiled = compileWidgetQuery({
         dashboard,
         definition,
         dataSource,
         ...metadata,
-        controlState,
+        controlState: queryControlState,
         bucketName: env.R2_BUCKET_NAME,
         sourceTableName,
+        resolvedControls,
       });
       return { sql: compiled.sql, parameters: compiled.parameters };
-    },
-  );
-  return { rows: normalize(rows) };
+    });
+  const comparison = widgetComparison(definition);
+  const [rows, comparisonRows] = await Promise.all([
+    run(resolvedControlState),
+    comparison
+      ? run({
+          ...resolvedControlState,
+          dateRange: comparisonDateRange(
+            resolvedControlState.dateRange!,
+            comparison,
+            dashboard.timezone,
+          ),
+        })
+      : Promise.resolve(undefined),
+  ]);
+  return {
+    rows: normalize(rows),
+    ...(comparisonRows ? { comparisonRows: normalize(comparisonRows) } : {}),
+    controlState,
+  };
 }
 
 async function compiledSql(dashboard: DashboardDocument, widget: DashboardWidget) {
@@ -1179,6 +1262,7 @@ function seedField(
     label: humanize(column.column_name),
     role: idLike ? 'id' : dateLike ? 'date' : numeric ? 'metric' : 'dimension',
     semanticType: idLike ? 'id' : dateLike ? 'date' : numeric ? 'count' : 'text',
+    defaultAggregation: numeric ? 'sum' : null,
     description: null,
     hidden: false,
     castTo: idLike ? 'VARCHAR' : null,

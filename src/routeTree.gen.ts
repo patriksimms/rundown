@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DatasourcesRouteImport } from './routes/datasources'
 import { Route as HealthRouteImport } from './routes/health'
+import { Route as MetricsRouteImport } from './routes/metrics'
 import { Route as ReadyRouteImport } from './routes/ready'
 import { Route as ApiRundownRouteImport } from './routes/api.rundown'
 import { Route as DashboardsDashboardIdRouteImport } from './routes/dashboards.$dashboardId'
@@ -32,6 +33,11 @@ const DatasourcesRoute = DatasourcesRouteImport.update({
 const HealthRoute = HealthRouteImport.update({
   id: '/health',
   path: '/health',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MetricsRoute = MetricsRouteImport.update({
+  id: '/metrics',
+  path: '/metrics',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ReadyRoute = ReadyRouteImport.update({
@@ -69,6 +75,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/datasources': typeof DatasourcesRoute
   '/health': typeof HealthRoute
+  '/metrics': typeof MetricsRoute
   '/ready': typeof ReadyRoute
   '/api/rundown': typeof ApiRundownRoute
   '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
@@ -80,6 +87,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/datasources': typeof DatasourcesRoute
   '/health': typeof HealthRoute
+  '/metrics': typeof MetricsRoute
   '/ready': typeof ReadyRoute
   '/api/rundown': typeof ApiRundownRoute
   '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
@@ -92,6 +100,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/datasources': typeof DatasourcesRoute
   '/health': typeof HealthRoute
+  '/metrics': typeof MetricsRoute
   '/ready': typeof ReadyRoute
   '/api/rundown': typeof ApiRundownRoute
   '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
@@ -105,6 +114,7 @@ export interface FileRouteTypes {
     | '/'
     | '/datasources'
     | '/health'
+    | '/metrics'
     | '/ready'
     | '/api/rundown'
     | '/dashboards/$dashboardId'
@@ -116,6 +126,7 @@ export interface FileRouteTypes {
     | '/'
     | '/datasources'
     | '/health'
+    | '/metrics'
     | '/ready'
     | '/api/rundown'
     | '/dashboards/$dashboardId'
@@ -127,6 +138,7 @@ export interface FileRouteTypes {
     | '/'
     | '/datasources'
     | '/health'
+    | '/metrics'
     | '/ready'
     | '/api/rundown'
     | '/dashboards/$dashboardId'
@@ -139,6 +151,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DatasourcesRoute: typeof DatasourcesRoute
   HealthRoute: typeof HealthRoute
+  MetricsRoute: typeof MetricsRoute
   ReadyRoute: typeof ReadyRoute
   ApiRundownRoute: typeof ApiRundownRoute
   DashboardsDashboardIdRoute: typeof DashboardsDashboardIdRoute
@@ -168,6 +181,13 @@ declare module '@tanstack/react-router' {
       path: '/health'
       fullPath: '/health'
       preLoaderRoute: typeof HealthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/metrics': {
+      id: '/metrics'
+      path: '/metrics'
+      fullPath: '/metrics'
+      preLoaderRoute: typeof MetricsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/ready': {
@@ -219,6 +239,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DatasourcesRoute: DatasourcesRoute,
   HealthRoute: HealthRoute,
+  MetricsRoute: MetricsRoute,
   ReadyRoute: ReadyRoute,
   ApiRundownRoute: ApiRundownRoute,
   DashboardsDashboardIdRoute: DashboardsDashboardIdRoute,

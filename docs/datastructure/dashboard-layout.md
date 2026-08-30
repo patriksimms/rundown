@@ -40,8 +40,9 @@ WidgetDefinition:
 
 - `x`, `y` are zero or greater; `width`, `height` are greater than zero; `x + width` is at most `columns`.
 - Widgets do not overlap. The server rejects placements that would.
+- Empty rows are allowed. Stored placements are never compacted automatically.
 - Widget IDs stay stable across moves and resizes.
-- `addWidget` accepts only `width` and `height` and appends at the bottom of the grid. `moveWidget` sets `x` and `y`. Agents never compute coordinates.
+- `addWidget` accepts only `width` and `height` and appends at the bottom of the grid. `moveWidget` sets one placement. `updateLayout` replaces every placement in one validated write after an interactive drag or resize. Agents never compute coordinates when adding widgets.
 - `definitionHash` is recomputed on every write and is the first component of the query cache key.
 - The grid describes the desktop layout only. On narrow screens the viewer stacks widgets in a single column in grid order; nothing mobile-specific is stored.
 

@@ -9,7 +9,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import type { ControlState, DashboardDocument, DashboardWidget } from '#/domain/schema';
 import { callApi } from '#/api/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '#/components/ui/card';
@@ -18,6 +18,7 @@ import { Field, FieldLabel } from '#/components/ui/field';
 import { Input } from '#/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '#/components/ui/native-select';
 import { Skeleton } from '#/components/ui/skeleton';
+import { widgetQueryRequest } from '#/domain/widget-query';
 import {
   Table,
   TableBody,
@@ -41,14 +42,17 @@ export function DashboardView({
     (left, right) => left.layout.y - right.layout.y || left.layout.x - right.layout.x,
   );
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
+    <div className="grid grid-cols-1 gap-4 md:auto-rows-[4rem] md:grid-cols-12">
       {ordered.map((widget) => (
         <div
           key={widget.id}
-          className="min-w-0"
-          style={{
-            gridColumn: `span ${Math.min(widget.layout.width, 12)} / span ${Math.min(widget.layout.width, 12)}`,
-          }}
+          className="min-w-0 md:[grid-column:var(--grid-column)] md:[grid-row:var(--grid-row)] [&>[data-slot=card]]:h-full"
+          style={
+            {
+              '--grid-column': `${widget.layout.x + 1} / span ${Math.min(widget.layout.width, 12)}`,
+              '--grid-row': `${widget.layout.y + 1} / span ${widget.layout.height}`,
+            } as CSSProperties
+          }
         >
           <Widget
             widget={widget}
@@ -67,12 +71,14 @@ function Widget({
   widget,
   dashboardId,
   shareToken,
+  preview,
   controlState,
   setControlState,
 }: {
   widget: DashboardWidget;
   dashboardId: string;
   shareToken?: string;
+  preview?: boolean;
   controlState: ControlState;
   setControlState: (state: ControlState) => void;
 }) {
@@ -85,11 +91,18 @@ function Widget({
       </Card>
     );
   if (widget.definition.type === 'dateControl')
-    return <DateControl controlState={controlState} setControlState={setControlState} />;
+    return (
+      <DateControl
+        widgetId={widget.id}
+        controlState={controlState}
+        setControlState={setControlState}
+      />
+    );
   if (widget.definition.type === 'control')
     return (
       <FilterControl
         widgetId={widget.id}
+        definitionHash={widget.definitionHash}
         definition={widget.definition}
         dashboardId={dashboardId}
         shareToken={shareToken}
@@ -102,15 +115,42 @@ function Widget({
       widget={widget}
       dashboardId={dashboardId}
       shareToken={shareToken}
+      preview={preview}
       controlState={controlState}
     />
   );
 }
 
-function DateControl({
+export function DashboardWidgetView({
+  dashboard,
+  widget,
+  preview = false,
   controlState,
   setControlState,
 }: {
+  dashboard: DashboardDocument;
+  widget: DashboardWidget;
+  preview?: boolean;
+  controlState: ControlState;
+  setControlState: (state: ControlState) => void;
+}) {
+  return (
+    <Widget
+      widget={widget}
+      dashboardId={dashboard.id}
+      preview={preview}
+      controlState={controlState}
+      setControlState={setControlState}
+    />
+  );
+}
+
+function DateControl({
+  widgetId,
+  controlState,
+  setControlState,
+}: {
+  widgetId: string;
   controlState: ControlState;
   setControlState: (state: ControlState) => void;
 }) {
@@ -122,9 +162,9 @@ function DateControl({
       </CardHeader>
       <CardContent className="grid grid-cols-2 gap-3">
         <Field>
-          <FieldLabel htmlFor="date-start">Start</FieldLabel>
+          <FieldLabel htmlFor={`date-start-${widgetId}`}>Start</FieldLabel>
           <Input
-            id="date-start"
+            id={`date-start-${widgetId}`}
             type="date"
             value={range && 'fixed' in range.startDate ? range.startDate.fixed : ''}
             onChange={(event) =>
@@ -139,9 +179,9 @@ function DateControl({
           />
         </Field>
         <Field>
-          <FieldLabel htmlFor="date-end">End</FieldLabel>
+          <FieldLabel htmlFor={`date-end-${widgetId}`}>End</FieldLabel>
           <Input
-            id="date-end"
+            id={`date-end-${widgetId}`}
             type="date"
             value={range && 'fixed' in range.endDate ? range.endDate.fixed : ''}
             onChange={(event) =>
@@ -162,6 +202,7 @@ function DateControl({
 
 function FilterControl({
   widgetId,
+  definitionHash,
   definition,
   dashboardId,
   shareToken,
@@ -169,6 +210,7 @@ function FilterControl({
   setControlState,
 }: {
   widgetId: string;
+  definitionHash: string;
   definition: Extract<DashboardWidget['definition'], { type: 'control' }>;
   dashboardId: string;
   shareToken?: string;
@@ -177,13 +219,21 @@ function FilterControl({
 }) {
   const [values, setValues] = useState<unknown[]>([]);
   useEffect(() => {
-    void callApi<{ values: unknown[] }>({
-      action: 'getControlOptions',
-      dashboardId,
-      controlId: widgetId,
-      shareToken,
-    }).then((result) => setValues(result.values));
-  }, [dashboardId, shareToken, widgetId]);
+    let current = true;
+    async function loadOptions() {
+      const result = await callApi<{ values: unknown[] }>({
+        action: 'getControlOptions',
+        dashboardId,
+        controlId: widgetId,
+        shareToken,
+      });
+      if (current) setValues(result.values);
+    }
+    void loadOptions();
+    return () => {
+      current = false;
+    };
+  }, [dashboardId, definitionHash, shareToken, widgetId]);
   const selected = controlState.values?.[widgetId]?.[0];
   return (
     <Card size="sm">
@@ -219,38 +269,47 @@ function QueryCard({
   widget,
   dashboardId,
   shareToken,
+  preview,
   controlState,
 }: {
   widget: DashboardWidget;
   dashboardId: string;
   shareToken?: string;
+  preview?: boolean;
   controlState: ControlState;
 }) {
   const [rows, setRows] = useState<Record<string, unknown>[]>();
   const [comparisonRows, setComparisonRows] = useState<Record<string, unknown>[]>();
   const [error, setError] = useState<string>();
-  const refresh = useCallback(async () => {
-    try {
-      const result = await callApi<{
-        rows: Record<string, unknown>[];
-        comparisonRows?: Record<string, unknown>[];
-      }>({
-        action: 'queryWidget',
-        dashboardId,
-        widgetId: widget.id,
-        shareToken,
-        controlState,
-      });
-      setRows(result.rows);
-      setComparisonRows(result.comparisonRows);
-      setError(undefined);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    }
-  }, [controlState, dashboardId, shareToken, widget.id]);
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    let current = true;
+    setRows(undefined);
+    setComparisonRows(undefined);
+    void callApi<{
+      rows: Record<string, unknown>[];
+      comparisonRows?: Record<string, unknown>[];
+    }>(
+      widgetQueryRequest({
+        dashboardId,
+        widget,
+        controlState,
+        preview: preview ?? false,
+        shareToken,
+      }),
+    )
+      .then((result) => {
+        if (!current) return;
+        setRows(result.rows);
+        setComparisonRows(result.comparisonRows);
+        setError(undefined);
+      })
+      .catch((caught: unknown) => {
+        if (current) setError(caught instanceof Error ? caught.message : String(caught));
+      });
+    return () => {
+      current = false;
+    };
+  }, [controlState, dashboardId, preview, shareToken, widget.definition, widget.id]);
   const definition = widget.definition;
   if (!('title' in definition)) return null;
   return (
@@ -387,7 +446,7 @@ function Result({
   );
 }
 
-function initialControlState(dashboard: DashboardDocument): ControlState {
+export function initialControlState(dashboard: DashboardDocument): ControlState {
   const dateControl = dashboard.widgets.find((widget) => widget.definition.type === 'dateControl');
   const values = Object.fromEntries(
     dashboard.widgets.flatMap((widget) =>

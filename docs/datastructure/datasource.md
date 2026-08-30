@@ -34,6 +34,7 @@ FieldMetadata:
   label: string              # display name, defaults to columnName
   role: FieldRole
   semanticType: SemanticType
+  defaultAggregation?: Aggregation # metric fields default to sum
   description?: string       # free text, read by agents
   hidden?: boolean           # excluded from describeDatasource and field pickers
   castTo?: string            # DuckDB type override, e.g. VARCHAR for 64-bit ids
@@ -66,6 +67,7 @@ CalculatedField:
   expression: string         # DuckDB scalar expression over columnNames of this datasource
   role: FieldRole
   semanticType: SemanticType
+  defaultAggregation?: Aggregation
   description?: string
   updatedAt: string
 ```
