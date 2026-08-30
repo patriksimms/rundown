@@ -145,6 +145,7 @@ export function DashboardBuilder({
   const [saving, setSaving] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [chartRevision, setChartRevision] = useState(0);
+  const [pendingWidgets, setPendingWidgets] = useState<Record<string, number>>({});
   const draggedType = useRef<BuilderType | undefined>(undefined);
   const { width, containerRef, mounted } = useContainerWidth({ measureBeforeMount: true });
 
@@ -231,25 +232,46 @@ export function DashboardBuilder({
   }
 
   async function updateWidget(widget: DashboardWidget, definition: WidgetDefinition) {
-    const previous = dashboard;
+    const previous = widget;
     const widgets = dashboard.widgets.map((item) =>
       item.id === widget.id ? { ...item, definition } : item,
     );
     setDashboard({ ...dashboard, widgets });
+    setPendingWidgets((current) => ({
+      ...current,
+      [widget.id]: (current[widget.id] ?? 0) + 1,
+    }));
     setSaving(true);
     setError(undefined);
     try {
-      await callApi({
+      const result = await callApi<{ widget: DashboardWidget }>({
         action: 'updateWidget',
         dashboardId: dashboard.id,
         widgetId: widget.id,
         definition,
       });
+      setDashboard((current) => ({
+        ...current,
+        widgets: current.widgets.map((item) =>
+          item.id === widget.id && item.definition === definition ? result.widget : item,
+        ),
+      }));
       await refresh();
     } catch (caught) {
-      setDashboard(previous);
+      setDashboard((current) => ({
+        ...current,
+        widgets: current.widgets.map((item) =>
+          item.id === widget.id && item.definition === definition ? previous : item,
+        ),
+      }));
       setError(message(caught));
     } finally {
+      setPendingWidgets((current) => {
+        const next = (current[widget.id] ?? 1) - 1;
+        if (next > 0) return { ...current, [widget.id]: next };
+        const { [widget.id]: _removed, ...rest } = current;
+        return rest;
+      });
       setSaving(false);
     }
   }
@@ -397,7 +419,7 @@ export function DashboardBuilder({
                         <DashboardWidgetView
                           dashboard={dashboard}
                           widget={widget}
-                          preview
+                          preview={Boolean(pendingWidgets[widget.id])}
                           controlState={controlState}
                           setControlState={setControlState}
                         />
@@ -429,7 +451,7 @@ export function DashboardBuilder({
                   <DashboardWidgetView
                     dashboard={dashboard}
                     widget={widget}
-                    preview
+                    preview={Boolean(pendingWidgets[widget.id])}
                     controlState={controlState}
                     setControlState={setControlState}
                   />
@@ -658,12 +680,7 @@ function WidgetSettings({
                 commit={commit}
               />
               <FilterSettings definition={definition} fields={fields} commit={commit} />
-              <TypeSettings
-                definition={definition}
-                fields={fields}
-                source={source}
-                commit={commit}
-              />
+              <TypeSettings definition={definition} fields={fields} commit={commit} />
               <div className="flex flex-wrap gap-2">
                 <Button variant="outline" size="sm" onClick={() => setFormulaOpen(true)}>
                   <PlusIcon data-icon="inline-start" /> Custom metric
@@ -1178,12 +1195,7 @@ function FilterValueInput({
   );
 }
 
-function TypeSettings({
-  definition,
-  fields,
-  source,
-  commit,
-}: QuerySettingsProps & { source?: SourceDescription }) {
+function TypeSettings({ definition, fields, commit }: QuerySettingsProps) {
   const dimensions = fields.filter((field) => field.role !== 'metric' && field.role !== 'date');
   switch (definition.type) {
     case 'scorecard':
@@ -1209,22 +1221,12 @@ function TypeSettings({
                 void commit({
                   ...definition,
                   upperLimit:
-                    event.target.value === 'manual'
-                      ? { kind: 'manual', value: 100 }
-                      : event.target.value === 'library' && source?.libraryMetrics[0]
-                        ? {
-                            kind: 'library',
-                            libraryMetricId: source.libraryMetrics[0].id,
-                          }
-                        : undefined,
+                    event.target.value === 'manual' ? { kind: 'manual', value: 100 } : undefined,
                 })
               }
             >
               <NativeSelectOption value="none">Automatic</NativeSelectOption>
               <NativeSelectOption value="manual">Manual</NativeSelectOption>
-              {source?.libraryMetrics.length ? (
-                <NativeSelectOption value="library">Library metric</NativeSelectOption>
-              ) : null}
             </NativeSelect>
           </Field>
           {definition.upperLimit?.kind === 'manual' ? (
@@ -1239,22 +1241,6 @@ function TypeSettings({
                 }
               />
             </Field>
-          ) : null}
-          {definition.upperLimit?.kind === 'library' ? (
-            <FieldPicker
-              label="Maximum metric"
-              value={definition.upperLimit.libraryMetricId}
-              fields={(source?.libraryMetrics ?? []).map((metric) => ({
-                id: metric.id,
-                label: metric.name,
-              }))}
-              onChange={(libraryMetricId) =>
-                void commit({
-                  ...definition,
-                  upperLimit: { kind: 'library', libraryMetricId },
-                })
-              }
-            />
           ) : null}
         </>
       );
@@ -1319,24 +1305,6 @@ function TypeSettings({
             value={definition.comparison?.mode ?? 'none'}
             onChange={(mode) => commit({ ...definition, comparison: { mode } })}
           />
-          <Field>
-            <FieldLabel>Result mode</FieldLabel>
-            <NativeSelect
-              value={definition.resultLimit.mode}
-              onChange={(event) =>
-                void commit({
-                  ...definition,
-                  resultLimit: {
-                    ...definition.resultLimit,
-                    mode: event.target.value as 'pagination' | 'top',
-                  },
-                })
-              }
-            >
-              <NativeSelectOption value="top">Top results</NativeSelectOption>
-              <NativeSelectOption value="pagination">Pagination</NativeSelectOption>
-            </NativeSelect>
-          </Field>
           <LimitSetting
             label="Result limit"
             value={definition.resultLimit.amount}
@@ -1344,16 +1312,6 @@ function TypeSettings({
               commit({ ...definition, resultLimit: { ...definition.resultLimit, amount } })
             }
           />
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={definition.showSummaryRow ?? false}
-              onChange={(event) =>
-                void commit({ ...definition, showSummaryRow: event.target.checked })
-              }
-            />
-            Show summary row
-          </label>
           <SortSetting
             value={definition.sort?.[0]?.direction ?? 'desc'}
             onChange={(direction) =>
@@ -1683,17 +1641,7 @@ function DatasourceFieldRow({
           }
         >
           <NativeSelectOption value="">None</NativeSelectOption>
-          {[
-            'sum',
-            'average',
-            'count',
-            'countDistinct',
-            'min',
-            'max',
-            'median',
-            'standardDeviation',
-            'variance',
-          ].map((item) => (
+          {aggregations.map((item) => (
             <NativeSelectOption key={item} value={item}>
               {item}
             </NativeSelectOption>

@@ -1071,27 +1071,61 @@ async function validateDefinition(dashboard: DashboardDocument, definition: Widg
 async function runDefinition(
   dashboard: DashboardDocument,
   definition: WidgetDefinition,
-  controlState: ControlState,
+  state: ControlState,
 ) {
-  if (!('dataSourceId' in definition)) return { rows: [] };
+  const defaults = defaultControlState(dashboard);
+  const controlState = validateControlState(dashboard, mergeControlState(defaults, state));
+  if (!('dataSourceId' in definition)) return { rows: [], controlState };
   const dataSource = await loadDataSource(definition.dataSourceId, dashboard.workspaceId);
   const metadata = await loadQueryMetadata(dataSource.id, dashboard.workspaceId);
-  const rows = await runIsolatedPreparedQuery<Record<string, unknown>>(
-    dataSource,
-    (sourceTableName) => {
+  const resolvedControls = await resolveControls(
+    dashboard,
+    definition,
+    [...metadata.fields, ...metadata.calculatedFields],
+    controlState,
+  );
+  const dateRange = controlState.dateRange ?? dashboard.defaultDateRange;
+  const resolvedDateRange = resolveDateRange(dateRange, dashboard.timezone);
+  const resolvedControlState: ControlState = {
+    ...controlState,
+    dateRange: {
+      startDate: { fixed: resolvedDateRange.start },
+      endDate: { fixed: resolvedDateRange.end },
+    },
+  };
+  const run = (queryControlState: ControlState) =>
+    runIsolatedPreparedQuery<Record<string, unknown>>(dataSource, (sourceTableName) => {
       const compiled = compileWidgetQuery({
         dashboard,
         definition,
         dataSource,
         ...metadata,
-        controlState,
+        controlState: queryControlState,
         bucketName: env.R2_BUCKET_NAME,
         sourceTableName,
+        resolvedControls,
       });
       return { sql: compiled.sql, parameters: compiled.parameters };
-    },
-  );
-  return { rows: normalize(rows) };
+    });
+  const comparison = widgetComparison(definition);
+  const [rows, comparisonRows] = await Promise.all([
+    run(resolvedControlState),
+    comparison
+      ? run({
+          ...resolvedControlState,
+          dateRange: comparisonDateRange(
+            resolvedControlState.dateRange!,
+            comparison,
+            dashboard.timezone,
+          ),
+        })
+      : Promise.resolve(undefined),
+  ]);
+  return {
+    rows: normalize(rows),
+    ...(comparisonRows ? { comparisonRows: normalize(comparisonRows) } : {}),
+    controlState,
+  };
 }
 
 async function compiledSql(dashboard: DashboardDocument, widget: DashboardWidget) {

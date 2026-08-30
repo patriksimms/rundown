@@ -96,6 +96,7 @@ function Widget({
     return (
       <FilterControl
         widgetId={widget.id}
+        definitionHash={widget.definitionHash}
         definition={widget.definition}
         dashboardId={dashboardId}
         shareToken={shareToken}
@@ -193,6 +194,7 @@ function DateControl({
 
 function FilterControl({
   widgetId,
+  definitionHash,
   definition,
   dashboardId,
   shareToken,
@@ -200,6 +202,7 @@ function FilterControl({
   setControlState,
 }: {
   widgetId: string;
+  definitionHash: string;
   definition: Extract<DashboardWidget['definition'], { type: 'control' }>;
   dashboardId: string;
   shareToken?: string;
@@ -208,13 +211,21 @@ function FilterControl({
 }) {
   const [values, setValues] = useState<unknown[]>([]);
   useEffect(() => {
-    void callApi<{ values: unknown[] }>({
-      action: 'getControlOptions',
-      dashboardId,
-      controlId: widgetId,
-      shareToken,
-    }).then((result) => setValues(result.values));
-  }, [dashboardId, shareToken, widgetId]);
+    let current = true;
+    async function loadOptions() {
+      const result = await callApi<{ values: unknown[] }>({
+        action: 'getControlOptions',
+        dashboardId,
+        controlId: widgetId,
+        shareToken,
+      });
+      if (current) setValues(result.values);
+    }
+    void loadOptions();
+    return () => {
+      current = false;
+    };
+  }, [dashboardId, definitionHash, shareToken, widgetId]);
   const selected = controlState.values?.[widgetId]?.[0];
   return (
     <Card size="sm">
