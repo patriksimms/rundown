@@ -171,3 +171,11 @@ export type ApiRequest = z.infer<typeof apiRequestSchema>;
 export type ApiResponse =
   | { ok: true; data: unknown }
   | { ok: false; error: { code: string; message: string; issues?: unknown } };
+
+export const apiResponseSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), data: z.unknown() }),
+  z.object({
+    ok: z.literal(false),
+    error: z.object({ code: z.string(), message: z.string(), issues: z.unknown().optional() }),
+  }),
+]);

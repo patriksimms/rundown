@@ -1,4 +1,4 @@
-import type { ApiRequest, ApiResponse } from './contracts';
+import { apiResponseSchema, type ApiRequest } from './contracts';
 
 export async function callApi<T>(request: ApiRequest): Promise<T> {
   const response = await fetch('/api/rundown', {
@@ -6,7 +6,7 @@ export async function callApi<T>(request: ApiRequest): Promise<T> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
   });
-  const body = (await response.json()) as ApiResponse;
+  const body = apiResponseSchema.parse(await response.json());
   if (!body.ok) throw new Error(body.error.message);
   return body.data as T;
 }

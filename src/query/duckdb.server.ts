@@ -3,6 +3,8 @@ import { env } from 'cloudflare:workers';
 import { resolveDataSource } from '#/data/source.server';
 import type { QueryEngineRequest, QueryEngineResponse } from './engine-contract';
 import type { DataSourceRecord } from './types';
+import { ApiError } from '#/server/errors';
+import { safeQueryMessage } from './errors';
 
 export async function runIsolatedPreparedQuery<T extends Record<string, unknown>>(
   dataSource: DataSourceRecord,
@@ -66,7 +68,10 @@ async function queryEngineRequest<T>(workspaceId: string, body: QueryEngineReque
   } catch {
     throw new Error(responseText || `Query engine returned HTTP ${response.status}.`);
   }
-  if (!response.ok || !result.ok)
+  if (!response.ok || !result.ok) {
+    if (!result.ok && response.status === 400)
+      throw new ApiError(400, 'invalid_query', safeQueryMessage(result.error));
     throw new Error(result.ok ? `Query engine returned HTTP ${response.status}.` : result.error);
+  }
   return result.data;
 }

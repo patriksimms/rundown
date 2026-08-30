@@ -179,22 +179,33 @@ function FieldRow({
   refresh: () => Promise<void>;
 }) {
   const [value, setValue] = useState(field);
+  const [error, setError] = useState<string>();
+  const [saving, setSaving] = useState(false);
   async function save() {
-    await callApi({
-      action: 'updateFieldMetadata',
-      dataSourceId: sourceId,
-      columnName: field.columnName,
-      patch: {
-        label: value.label,
-        canonicalName: value.canonicalName,
-        role: value.role,
-        semanticType: value.semanticType,
-        description: value.description,
-        hidden: value.hidden,
-        castTo: value.castTo,
-      },
-    });
-    await refresh();
+    if (saving) return;
+    setSaving(true);
+    setError(undefined);
+    try {
+      await callApi({
+        action: 'updateFieldMetadata',
+        dataSourceId: sourceId,
+        columnName: field.columnName,
+        patch: {
+          label: value.label,
+          canonicalName: value.canonicalName,
+          role: value.role,
+          semanticType: value.semanticType,
+          description: value.description,
+          hidden: value.hidden,
+          castTo: value.castTo,
+        },
+      });
+      await refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setSaving(false);
+    }
   }
   return (
     <TableRow>
@@ -251,9 +262,10 @@ function FieldRow({
         />
       </TableCell>
       <TableCell>
-        <Button variant="outline" size="sm" onClick={save}>
-          Save
+        <Button variant="outline" size="sm" disabled={saving} onClick={save}>
+          {saving ? 'Saving…' : 'Save'}
         </Button>
+        {error ? <p className="mt-1 text-xs text-destructive">{error}</p> : null}
       </TableCell>
     </TableRow>
   );
@@ -271,14 +283,25 @@ function RegisterForm({
   const [kind, setKind] = useState<'object' | 'prefix'>('object');
   const [format, setFormat] = useState<'csv' | 'parquet'>('csv');
   const [message, setMessage] = useState<string>();
+  const [error, setError] = useState<string>();
+  const [submitting, setSubmitting] = useState(false);
   useEffect(() => {
     if (!key && objects[0]) setKey(objects[0].key);
   }, [key, objects]);
   async function submit(event: FormEvent) {
     event.preventDefault();
-    await callApi({ action: 'registerDatasource', name, location: { kind, key, format } });
-    setMessage(`${name} registered.`);
-    await refresh();
+    if (submitting) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await callApi({ action: 'registerDatasource', name, location: { kind, key, format } });
+      setMessage(`${name} registered.`);
+      await refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setSubmitting(false);
+    }
   }
   return (
     <form className="max-w-xl" onSubmit={submit}>
@@ -323,7 +346,10 @@ function RegisterForm({
             <NativeSelectOption value="parquet">Parquet</NativeSelectOption>
           </NativeSelect>
         </Field>
-        <Button type="submit">Register datasource</Button>
+        <Button type="submit" disabled={submitting}>
+          {submitting ? 'Registering…' : 'Register datasource'}
+        </Button>
+        {error ? <p className="text-sm text-destructive">{error}</p> : null}
         {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
       </FieldGroup>
     </form>

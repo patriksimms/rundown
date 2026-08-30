@@ -2037,20 +2037,31 @@ function CalculatedFieldDialog({
   const [name, setName] = useState('');
   const [expression, setExpression] = useState('');
   const [role, setRole] = useState<'dimension' | 'metric'>('dimension');
+  const [error, setError] = useState<string>();
+  const [submitting, setSubmitting] = useState(false);
   async function submit(event: FormEvent) {
     event.preventDefault();
-    await callApi({
-      action: 'upsertCalculatedField',
-      dashboardId,
-      dataSourceId: sourceId,
-      name,
-      expression,
-      role,
-      semanticType: role === 'metric' ? 'count' : 'text',
-      defaultAggregation: role === 'metric' ? 'sum' : null,
-    });
-    await onSaved();
-    onOpenChange(false);
+    if (submitting) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await callApi({
+        action: 'upsertCalculatedField',
+        dashboardId,
+        dataSourceId: sourceId,
+        name,
+        expression,
+        role,
+        semanticType: role === 'metric' ? 'count' : 'text',
+        defaultAggregation: role === 'metric' ? 'sum' : null,
+      });
+      await onSaved();
+      onOpenChange(false);
+    } catch (caught) {
+      setError(message(caught));
+    } finally {
+      setSubmitting(false);
+    }
   }
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -2084,8 +2095,9 @@ function CalculatedFieldDialog({
                 <NativeSelectOption value="metric">Metric</NativeSelectOption>
               </NativeSelect>
             </Field>
-            <Button type="submit" disabled={!name.trim() || !expression.trim()}>
-              Create dimension
+            {error ? <p className="text-sm text-destructive">{error}</p> : null}
+            <Button type="submit" disabled={submitting || !name.trim() || !expression.trim()}>
+              {submitting ? 'Creating…' : 'Create dimension'}
             </Button>
           </FieldGroup>
         </form>

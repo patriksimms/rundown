@@ -13,12 +13,14 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import type { ControlState, DashboardDocument, DashboardWidget } from '#/domain/schema';
 import { callApi } from '#/api/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '#/components/ui/card';
+import { Button } from '#/components/ui/button';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '#/components/ui/chart';
 import { Field, FieldLabel } from '#/components/ui/field';
 import { Input } from '#/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '#/components/ui/native-select';
 import { Skeleton } from '#/components/ui/skeleton';
 import { widgetQueryRequest } from '#/domain/widget-query';
+import { queryResultState } from '#/domain/request-state';
 import {
   Table,
   TableBody,
@@ -281,6 +283,7 @@ function QueryCard({
   const [rows, setRows] = useState<Record<string, unknown>[]>();
   const [comparisonRows, setComparisonRows] = useState<Record<string, unknown>[]>();
   const [error, setError] = useState<string>();
+  const [retry, setRetry] = useState(0);
   useEffect(() => {
     let current = true;
     setRows(undefined);
@@ -309,9 +312,10 @@ function QueryCard({
     return () => {
       current = false;
     };
-  }, [controlState, dashboardId, preview, shareToken, widget.definition, widget.id]);
+  }, [controlState, dashboardId, preview, retry, shareToken, widget.definition, widget.id]);
   const definition = widget.definition;
   if (!('title' in definition)) return null;
+  const state = queryResultState(rows, error);
   return (
     <Card className="h-full">
       <CardHeader>
@@ -319,10 +323,19 @@ function QueryCard({
         {error ? <CardDescription>{error}</CardDescription> : null}
       </CardHeader>
       <CardContent>
-        {!rows ? (
+        {state === 'error' ? (
+          <div className="flex flex-col items-start gap-3">
+            <p className="text-sm text-destructive">{error}</p>
+            <Button variant="outline" size="sm" onClick={() => setRetry((value) => value + 1)}>
+              Retry
+            </Button>
+          </div>
+        ) : state === 'loading' ? (
           <Skeleton className="h-28 w-full" />
+        ) : state === 'empty' ? (
+          <p className="text-sm text-muted-foreground">No rows for this date range.</p>
         ) : (
-          <Result definition={definition} rows={rows} comparisonRows={comparisonRows} />
+          <Result definition={definition} rows={rows!} comparisonRows={comparisonRows} />
         )}
       </CardContent>
     </Card>
@@ -339,6 +352,8 @@ function Result({
   comparisonRows?: Record<string, unknown>[];
 }) {
   const columns = Object.keys(rows[0] ?? {});
+  if (!rows.length)
+    return <p className="text-sm text-muted-foreground">No rows for this date range.</p>;
   if (definition.type === 'scorecard' || definition.type === 'gauge') {
     const value = rows[0]?.[columns[0] ?? ''];
     const previous = comparisonRows?.[0]?.[Object.keys(comparisonRows[0] ?? {})[0] ?? ''];
@@ -398,7 +413,7 @@ function Result({
         </Table>
       </div>
     );
-  if (!rows.length || columns.length < 2)
+  if (columns.length < 2)
     return <p className="text-sm text-muted-foreground">No rows for this date range.</p>;
   const dimension = columns[0]!;
   const metrics = columns.slice(1);
