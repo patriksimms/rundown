@@ -371,7 +371,7 @@ export function Result({
   hasMore: boolean;
   setPage: (page: number) => void;
 }) {
-  const columns = Object.keys(rows[0] ?? {});
+  const columns = Object.keys(rows[0] ?? comparisonRows?.[0] ?? {});
   if (definition.type === 'scorecard' || definition.type === 'gauge') {
     const value = rows[0]?.[columns[0] ?? ''];
     const previous = comparisonRows?.[0]?.[Object.keys(comparisonRows[0] ?? {})[0] ?? ''];
@@ -511,12 +511,15 @@ export function Result({
   if (definition.type === 'bar' && definition.breakdownDimension) {
     const pivoted = pivotBreakdownRows(rows);
     const previous = comparisonRows?.length ? pivotBreakdownRows(comparisonRows) : undefined;
+    const breakdownSeries = previous
+      ? [...new Set([...pivoted.series, ...previous.series])]
+      : pivoted.series;
     chartRows = previous
-      ? withComparisonSeries(pivoted.rows, previous.rows, 'key', pivoted.series)
+      ? withComparisonSeries(pivoted.rows, previous.rows, 'key', breakdownSeries)
       : pivoted.rows;
     metrics = [
-      ...pivoted.series,
-      ...(previous ? pivoted.series.map((_, index) => `comparison_${index}`) : []),
+      ...breakdownSeries,
+      ...(previous ? breakdownSeries.map((_, index) => `comparison_${index}`) : []),
     ];
   }
   if (definition.type === 'pie' && definition.breakdownDimension) {

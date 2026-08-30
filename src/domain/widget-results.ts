@@ -1,3 +1,5 @@
+import type { WidgetDefinition } from './schema';
+
 export function pivotBreakdownRows(rows: Record<string, unknown>[]) {
   const [dimension, breakdown, metric] = Object.keys(rows[0] ?? {});
   if (!dimension || !breakdown || !metric) return { rows, series: metric ? [metric] : [] };
@@ -27,13 +29,27 @@ export function withComparisonSeries(
   alignment: 'key' | 'index' = 'index',
   metricNames?: string[],
 ) {
-  const [dimension, ...rowMetrics] = Object.keys(rows[0] ?? {});
-  const metrics = metricNames ?? rowMetrics;
+  const [dimension, ...rowMetrics] = Object.keys(rows[0] ?? comparisonRows[0] ?? {});
+  const metrics =
+    metricNames ?? (rowMetrics.length ? rowMetrics : Object.keys(comparisonRows[0] ?? {}).slice(1));
   if (!dimension) return rows;
   const comparisonsByDimension = new Map(
     comparisonRows.map((row) => [String(row[dimension]), row]),
   );
-  return rows.map((row, index) => ({
+  const currentDimensions = new Set(rows.map((row) => String(row[dimension])));
+  const alignedRows =
+    alignment === 'key'
+      ? [
+          ...rows,
+          ...comparisonRows
+            .filter((row) => !currentDimensions.has(String(row[dimension])))
+            .map((row) => ({
+              [dimension]: row[dimension],
+              ...Object.fromEntries(metrics.map((metric) => [metric, undefined])),
+            })),
+        ]
+      : rows;
+  return alignedRows.map((row, index) => ({
     ...row,
     ...Object.fromEntries(
       metrics.map((metric, metricIndex) => [
@@ -78,7 +94,10 @@ export function alignDateComparisonRows(
     }
     return {
       ...row,
-      [dimension]: value instanceof Date ? date : date.toISOString().slice(0, 10),
+      [dimension]:
+        value instanceof Date
+          ? date
+          : `${date.toISOString().slice(0, 10)}${typeof value === 'string' ? value.slice(10) : ''}`,
     };
   });
 }
@@ -87,4 +106,16 @@ export function seriesMetricIndex(series: string, currentMetrics: string[]) {
   return series.startsWith('comparison_')
     ? Number(series.slice('comparison_'.length))
     : currentMetrics.indexOf(series);
+}
+
+export function tableSummaryDefinition(definition: WidgetDefinition): WidgetDefinition | undefined {
+  if (definition.type !== 'table' || !definition.showSummaryRow || !definition.dimensions.length)
+    return undefined;
+  return {
+    ...definition,
+    dimensions: [],
+    resultLimit: { mode: 'top', amount: 1 },
+    sort: undefined,
+    showSummaryRow: false,
+  };
 }

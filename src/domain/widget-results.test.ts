@@ -4,6 +4,7 @@ import {
   pieBreakdownRows,
   pivotBreakdownRows,
   seriesMetricIndex,
+  tableSummaryDefinition,
   withComparisonSeries,
 } from './widget-results';
 
@@ -53,6 +54,22 @@ describe('widget result shaping', () => {
     ]);
   });
 
+  it('keeps dimensions that exist only in the comparison period', () => {
+    expect(
+      withComparisonSeries(
+        [{ campaign: 'A', spend: 100 }],
+        [
+          { campaign: 'A', spend: 50 },
+          { campaign: 'B', spend: 25 },
+        ],
+        'key',
+      ),
+    ).toEqual([
+      { campaign: 'A', spend: 100, comparison_0: 50 },
+      { campaign: 'B', spend: undefined, comparison_0: 25 },
+    ]);
+  });
+
   it('normalizes shifted date comparisons without moving sparse buckets', () => {
     expect(
       alignDateComparisonRows(
@@ -82,6 +99,15 @@ describe('widget result shaping', () => {
     ).toEqual([{ day: new Date('2026-02-28T00:00:00Z') }]);
   });
 
+  it('preserves timestamp precision while shifting comparison dates', () => {
+    expect(
+      alignDateComparisonRows([{ hour: '2026-01-01T14:30:00.000Z', spend: 5 }], 'previousPeriod', {
+        start: '2026-01-02',
+        end: '2026-01-02',
+      }),
+    ).toEqual([{ hour: '2026-01-02T14:30:00.000Z', spend: 5 }]);
+  });
+
   it('maps previous series back to their source metric', () => {
     expect(seriesMetricIndex('comparison_1', ['count', 'rate'])).toBe(1);
   });
@@ -99,5 +125,30 @@ describe('widget result shaping', () => {
       { month: 'Jan', Search: 10, comparison_0: 5, comparison_1: undefined },
       { month: 'Feb', Social: 20, comparison_0: undefined, comparison_1: 15 },
     ]);
+  });
+
+  it('builds an unpaged aggregate query for table summaries', () => {
+    const definition = {
+      type: 'table' as const,
+      title: 'Table',
+      dataSourceId: 'source',
+      dateRangeFieldId: 'date',
+      dimensions: [{ fieldId: 'campaign' }],
+      metrics: [
+        {
+          source: { kind: 'field' as const, fieldId: 'spend', aggregation: 'sum' as const },
+          dataType: 'number' as const,
+        },
+      ],
+      resultLimit: { mode: 'pagination' as const, amount: 20 },
+      showSummaryRow: true,
+      sort: [{ target: { kind: 'metric' as const, index: 0 }, direction: 'desc' as const }],
+    };
+    expect(tableSummaryDefinition(definition)).toMatchObject({
+      dimensions: [],
+      resultLimit: { mode: 'top', amount: 1 },
+      showSummaryRow: false,
+      sort: undefined,
+    });
   });
 });

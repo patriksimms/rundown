@@ -57,21 +57,22 @@ describe('widget result rendering', () => {
       metrics: [metric],
     };
     expect(render(line, [])).toContain('No rows');
-    expect(() => render(line, [{ month: 'Jan', metric_1: 10 }])).not.toThrow();
-    expect(() =>
-      render(
-        {
-          ...base,
-          type: 'bar',
-          metric,
-          dimension: { fieldId: 'month' },
-          breakdownDimension: { fieldId: 'channel' },
-        },
-        [{ month: 'Jan', channel: 'Search', metric_1: 10 }],
-        [{ month: 'Dec', channel: 'Search', metric_1: 5 }],
-      ),
-    ).not.toThrow();
-    expect(() =>
+    expect(render(line, [{ month: 'Jan', metric_1: 10 }])).toContain('--color-metric_1');
+    const barMarkup = render(
+      {
+        ...base,
+        type: 'bar',
+        metric,
+        dimension: { fieldId: 'month' },
+        breakdownDimension: { fieldId: 'channel' },
+      },
+      [{ month: 'Jan', channel: 'Search', metric_1: 10 }],
+      [{ month: 'Jan', channel: 'Affiliate', metric_1: 5 }],
+    );
+    expect(barMarkup).toContain('--color-Search');
+    expect(barMarkup).toContain('--color-Affiliate');
+    expect(barMarkup).toContain('--color-comparison_1');
+    expect(
       render(
         {
           ...base,
@@ -82,7 +83,23 @@ describe('widget result rendering', () => {
         },
         [{ month: 'Jan', channel: 'Search', metric_1: 10 }],
       ),
-    ).not.toThrow();
+    ).toContain('--color-metric_1');
+  });
+
+  it('renders current and previous mixed-unit series', () => {
+    const markup = render(
+      {
+        ...base,
+        type: 'line',
+        dimension: { fieldId: 'day' },
+        metrics: [metric, { ...metric, dataType: 'percent' }],
+      },
+      [{ day: '2026-01-02', metric_1: 10, metric_2: 0.2 }],
+      [{ day: '2026-01-02', metric_1: 8, metric_2: 0.1 }],
+    );
+    expect(markup).toContain('--color-metric_2');
+    expect(markup).toContain('--color-comparison_0');
+    expect(markup).toContain('--color-comparison_1');
   });
 
   it('renders table summary, comparison label, and empty range', () => {

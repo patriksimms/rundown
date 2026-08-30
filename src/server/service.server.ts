@@ -29,7 +29,7 @@ import { comparisonDateRange, resolveDateRange } from '#/domain/dates';
 import { queryCacheState, widgetDependencyState } from '#/domain/cache';
 import { remapWidgetDefinition } from '#/domain/remap';
 import { mergeControlState } from '#/domain/control-state';
-import { alignDateComparisonRows } from '#/domain/widget-results';
+import { alignDateComparisonRows, tableSummaryDefinition } from '#/domain/widget-results';
 import { isWorkspaceR2Key, scopedR2Prefix } from '#/domain/tenancy';
 import {
   assertSingleExpression,
@@ -457,6 +457,10 @@ async function queryWidget(
     },
   };
   const currentDefinitionHash = await hashJson(widgetDependencyState(widget.definition, metadata));
+  const pageSize =
+    widget.definition.type === 'table' && widget.definition.resultLimit.mode === 'pagination'
+      ? widget.definition.resultLimit.amount
+      : undefined;
   const cacheKey = await hashJson({
     ...queryCacheState({
       definitionHash: currentDefinitionHash,
@@ -466,7 +470,7 @@ async function queryWidget(
       dataSourceVersion: dataSource.version,
       timezone: access.document.timezone,
     }),
-    page,
+    page: pageSize === undefined ? 0 : page,
   });
   const cached = await env.QUERY_CACHE.get(cacheKey, 'json');
   if (cached) {
@@ -474,14 +478,10 @@ async function queryWidget(
     return { ...(cached as object), cache: 'hit' };
   }
   console.info('rundown.query_cache', { dashboardId, widgetId, outcome: 'miss' });
-  const pageSize =
-    widget.definition.type === 'table' && widget.definition.resultLimit.mode === 'pagination'
-      ? widget.definition.resultLimit.amount
-      : undefined;
   const run = (
     queryControlState: ControlState,
-    queryDefinition: WidgetDefinition = widget.definition,
-    offset = pageSize === undefined ? undefined : page * pageSize,
+    queryDefinition: WidgetDefinition,
+    offset?: number,
   ) =>
     runIsolatedPreparedQuery<Record<string, unknown>>(dataSource, (sourceTableName) => {
       const compiled = compileWidgetQuery({
@@ -499,19 +499,24 @@ async function queryWidget(
     });
   const comparison = widgetComparison(widget.definition);
   const summaryDefinition = tableSummaryDefinition(widget.definition);
+  const pageOffset = pageSize === undefined ? undefined : page * pageSize;
   const [rows, comparisonRows, summaryRows] = await Promise.all([
-    run(resolvedControlState),
+    run(resolvedControlState, widget.definition, pageOffset),
     comparison
-      ? run({
-          ...resolvedControlState,
-          dateRange: comparisonDateRange(
-            resolvedControlState.dateRange!,
-            comparison,
-            access.document.timezone,
-          ),
-        })
+      ? run(
+          {
+            ...resolvedControlState,
+            dateRange: comparisonDateRange(
+              resolvedControlState.dateRange!,
+              comparison,
+              access.document.timezone,
+            ),
+          },
+          widget.definition,
+          pageOffset,
+        )
       : Promise.resolve(undefined),
-    summaryDefinition ? run(resolvedControlState, summaryDefinition, undefined) : undefined,
+    summaryDefinition ? run(resolvedControlState, summaryDefinition) : undefined,
   ]);
   const alignedComparisonRows =
     comparisonRows && comparison && hasDateDimension(widget.definition, metadata)
@@ -1207,18 +1212,6 @@ function validateControlState(dashboard: DashboardDocument, input: ControlState)
 function widgetComparison(definition: WidgetDefinition) {
   if (!('comparison' in definition) || !definition.comparison) return undefined;
   return definition.comparison.mode === 'none' ? undefined : definition.comparison.mode;
-}
-
-function tableSummaryDefinition(definition: WidgetDefinition): WidgetDefinition | undefined {
-  if (definition.type !== 'table' || !definition.showSummaryRow || !definition.dimensions.length)
-    return undefined;
-  return {
-    ...definition,
-    dimensions: [],
-    resultLimit: { mode: 'top', amount: 1 },
-    sort: undefined,
-    showSummaryRow: false,
-  };
 }
 
 function hasDateDimension(
