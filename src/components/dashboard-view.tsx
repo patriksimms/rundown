@@ -9,7 +9,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties, type KeyboardEvent } from 'react';
 import { ChevronsUpDown, X } from 'lucide-react';
 import type { ControlState, DashboardDocument, DashboardWidget } from '#/domain/schema';
 import { callApi } from '#/api/client';
@@ -320,6 +320,7 @@ function FilterControl({
                           key={option}
                           aria-selected={checked}
                           className="flex min-h-10 w-full items-center rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+                          onKeyDown={handleFilterOptionKeyDown}
                           onClick={() => select(option)}
                         >
                           {option}
@@ -360,6 +361,21 @@ function FilterControl({
       </CardContent>
     </Card>
   );
+}
+
+function handleFilterOptionKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+  if (!['Enter', ' ', 'ArrowDown', 'ArrowUp'].includes(event.key)) return;
+  event.stopPropagation();
+  if (event.key === 'Enter' || event.key === ' ') return;
+  event.preventDefault();
+  const options = [
+    ...(event.currentTarget
+      .closest('[role="listbox"]')
+      ?.querySelectorAll<HTMLElement>('[role="option"]') ?? []),
+  ];
+  const index = options.indexOf(event.currentTarget);
+  const direction = event.key === 'ArrowDown' ? 1 : -1;
+  options[(index + direction + options.length) % options.length]?.focus();
 }
 
 function QueryCard({
