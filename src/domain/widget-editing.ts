@@ -1,4 +1,4 @@
-import type { WidgetDefinition } from '#/domain/schema';
+import type { ControlState, WidgetDefinition } from '#/domain/schema';
 
 export type WidgetFilter = NonNullable<Extract<WidgetDefinition, { type: 'scorecard' }>['filter']>;
 type FilterCondition = WidgetFilter['conditions'][number];
@@ -13,5 +13,14 @@ export function patchFilterCondition(
     conditions: filter.conditions.map((condition, itemIndex) =>
       itemIndex === index ? { ...condition, ...patch } : condition,
     ),
+  };
+}
+
+export function clearControlValue(state: ControlState, controlId: string): ControlState {
+  const values = { ...state.values };
+  delete values[controlId];
+  return {
+    ...state,
+    values: Object.keys(values).length ? values : undefined,
   };
 }

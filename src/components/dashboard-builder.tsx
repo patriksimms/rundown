@@ -56,7 +56,7 @@ import {
 } from '#/components/ui/sheet';
 import { Textarea } from '#/components/ui/textarea';
 import { cn } from '#/lib/utils';
-import { patchFilterCondition } from '#/domain/widget-editing';
+import { clearControlValue, patchFilterCondition } from '#/domain/widget-editing';
 import type {
   ControlState,
   Aggregation,
@@ -233,6 +233,13 @@ export function DashboardBuilder({
 
   async function updateWidget(widget: DashboardWidget, definition: WidgetDefinition) {
     const previous = widget;
+    const controlFieldChanged =
+      widget.definition.type === 'control' &&
+      definition.type === 'control' &&
+      (widget.definition.dataSourceId !== definition.dataSourceId ||
+        widget.definition.fieldId !== definition.fieldId);
+    const previousControlValues = controlState.values?.[widget.id];
+    if (controlFieldChanged) setControlState((current) => clearControlValue(current, widget.id));
     const widgets = dashboard.widgets.map((item) =>
       item.id === widget.id ? { ...item, definition } : item,
     );
@@ -258,6 +265,15 @@ export function DashboardBuilder({
       }));
       await refresh();
     } catch (caught) {
+      if (controlFieldChanged && previousControlValues)
+        setControlState((current) =>
+          current.values?.[widget.id]
+            ? current
+            : {
+                ...current,
+                values: { ...current.values, [widget.id]: previousControlValues },
+              },
+        );
       setDashboard((current) => ({
         ...current,
         widgets: current.widgets.map((item) =>

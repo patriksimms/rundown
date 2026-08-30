@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { patchFilterCondition, type WidgetFilter } from '#/domain/widget-editing';
+import {
+  clearControlValue,
+  patchFilterCondition,
+  type WidgetFilter,
+} from '#/domain/widget-editing';
 
 describe('widget filter editing', () => {
   it('preserves untouched conditions and the connector', () => {
@@ -18,5 +22,11 @@ describe('widget filter editing', () => {
         { fieldId: 'spend', operator: 'greaterThan', value: 100 },
       ],
     });
+  });
+
+  it('clears only the edited control value', () => {
+    expect(
+      clearControlValue({ values: { country: ['DE'], channel: ['Social'] } }, 'country'),
+    ).toEqual({ values: { channel: ['Social'] } });
   });
 });
