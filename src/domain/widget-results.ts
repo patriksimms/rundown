@@ -1,14 +1,38 @@
 import type { WidgetDefinition } from './schema';
 
-export function pivotBreakdownRows(rows: Record<string, unknown>[]) {
+interface BreakdownSeries {
+  key: string;
+  label: string;
+  value: string;
+}
+
+export function pivotBreakdownRows(
+  rows: Record<string, unknown>[],
+  providedSeries?: BreakdownSeries[],
+) {
   const [dimension, breakdown, metric] = Object.keys(rows[0] ?? {});
-  if (!dimension || !breakdown || !metric) return { rows, series: metric ? [metric] : [] };
-  const series = [...new Set(rows.map((row) => String(row[breakdown])))];
+  if (!dimension || !breakdown || !metric)
+    return {
+      rows,
+      series:
+        providedSeries ?? (metric ? [{ key: metric, label: metric, value: valueKey(metric) }] : []),
+    };
+  const breakdownValues = new Map<string, unknown>();
+  for (const row of rows) breakdownValues.set(valueKey(row[breakdown]), row[breakdown]);
+  const series =
+    providedSeries ??
+    [...breakdownValues.entries()].map(([value, label], index) => ({
+      key: `breakdown_${index}`,
+      label: String(label),
+      value,
+    }));
+  const seriesByValue = new Map(series.map((item) => [item.value, item]));
   const pivoted = new Map<string, Record<string, unknown>>();
   for (const row of rows) {
-    const key = String(row[dimension]);
+    const key = valueKey(row[dimension]);
     const target = pivoted.get(key) ?? { [dimension]: row[dimension] };
-    target[String(row[breakdown])] = row[metric];
+    const breakdownSeries = seriesByValue.get(valueKey(row[breakdown]));
+    if (breakdownSeries) target[breakdownSeries.key] = row[metric];
     pivoted.set(key, target);
   }
   return { rows: [...pivoted.values()], series };
@@ -44,15 +68,15 @@ export function withComparisonSeries(
     return key;
   });
   const comparisonsByDimension = new Map(
-    comparisonRows.map((row) => [String(row[dimension]), row]),
+    comparisonRows.map((row) => [valueKey(row[dimension]), row]),
   );
-  const currentDimensions = new Set(rows.map((row) => String(row[dimension])));
+  const currentDimensions = new Set(rows.map((row) => valueKey(row[dimension])));
   const alignedRows =
     alignment === 'key'
       ? [
           ...rows,
           ...comparisonRows
-            .filter((row) => !currentDimensions.has(String(row[dimension])))
+            .filter((row) => !currentDimensions.has(valueKey(row[dimension])))
             .map((row) => ({
               [dimension]: row[dimension],
               ...Object.fromEntries(metrics.map((metric) => [metric, undefined])),
@@ -66,7 +90,7 @@ export function withComparisonSeries(
         metrics.map((metric, metricIndex) => [
           comparisonSeries[metricIndex],
           (alignment === 'key'
-            ? comparisonsByDimension.get(String(row[dimension]))
+            ? comparisonsByDimension.get(valueKey(row[dimension]))
             : comparisonRows[index])?.[metric],
         ]),
       ),
@@ -99,7 +123,14 @@ export function alignDateComparisonRows(
     if (!sourceDate) return row;
     const date = new Date(sourceDate);
     if (mode === 'previousPeriod') date.setUTCDate(date.getUTCDate() + periodDays);
-    else {
+    else if (
+      currentRange.start === currentRange.end &&
+      currentRange.start.endsWith('-02-29') &&
+      ((sourceDate.getUTCMonth() === 1 && sourceDate.getUTCDate() === 28) ||
+        (sourceDate.getUTCMonth() === 2 && sourceDate.getUTCDate() === 1))
+    ) {
+      date.setUTCFullYear(Number(currentRange.start.slice(0, 4)), 1, 29);
+    } else {
       const month = date.getUTCMonth();
       date.setUTCFullYear(date.getUTCFullYear() + 1, month, 1);
       const lastDay = new Date(Date.UTC(date.getUTCFullYear(), month + 1, 0)).getUTCDate();
@@ -113,6 +144,12 @@ export function alignDateComparisonRows(
           : `${date.toISOString().slice(0, 10)}${typeof value === 'string' ? value.slice(10) : ''}`,
     };
   });
+}
+
+function valueKey(value: unknown) {
+  if (value === null) return 'null:';
+  if (value instanceof Date) return `date:${value.toISOString()}`;
+  return `${typeof value}:${String(value)}`;
 }
 
 export function tableSummaryDefinition(definition: WidgetDefinition): WidgetDefinition | undefined {

@@ -17,10 +17,13 @@ describe('widget result shaping', () => {
   it('pivots breakdown text into bar series', () => {
     expect(pivotBreakdownRows(breakdown)).toEqual({
       rows: [
-        { month: 'Jan', Search: 10, Social: 20 },
-        { month: 'Feb', Search: 30 },
+        { month: 'Jan', breakdown_0: 10, breakdown_1: 20 },
+        { month: 'Feb', breakdown_0: 30 },
       ],
-      series: ['Search', 'Social'],
+      series: [
+        { key: 'breakdown_0', label: 'Search', value: 'string:Search' },
+        { key: 'breakdown_1', label: 'Social', value: 'string:Social' },
+      ],
     });
   });
 
@@ -116,6 +119,28 @@ describe('widget result shaping', () => {
     ).toEqual([{ hour: '2026-01-02T14:30:00.000Z', spend: 5 }]);
   });
 
+  it('aligns a previous-year leap-day comparison to February 29', () => {
+    expect(
+      alignDateComparisonRows([{ day: '2023-03-01', spend: 5 }], 'previousYear', {
+        start: '2024-02-29',
+        end: '2024-02-29',
+      }),
+    ).toEqual([{ day: '2024-02-29', spend: 5 }]);
+  });
+
+  it('keeps null, string null, and prototype-like breakdown values distinct', () => {
+    const result = pivotBreakdownRows([
+      { month: null, channel: null, spend: 10 },
+      { month: 'null', channel: 'null', spend: 20 },
+      { month: 'Jan', channel: '__proto__', spend: 30 },
+    ]);
+    expect(result.rows).toEqual([
+      { month: null, breakdown_0: 10 },
+      { month: 'null', breakdown_1: 20 },
+      { month: 'Jan', breakdown_2: 30 },
+    ]);
+  });
+
   it('keeps comparison series for sparse breakdowns', () => {
     const current = pivotBreakdownRows([
       { month: 'Jan', channel: 'Search', spend: 10 },
@@ -125,10 +150,17 @@ describe('widget result shaping', () => {
       { month: 'Jan', channel: 'Search', spend: 5 },
       { month: 'Feb', channel: 'Social', spend: 15 },
     ]);
-    expect(withComparisonSeries(current.rows, previous.rows, 'key', current.series)).toEqual({
+    expect(
+      withComparisonSeries(
+        current.rows,
+        previous.rows,
+        'key',
+        current.series.map((item) => item.key),
+      ),
+    ).toEqual({
       rows: [
-        { month: 'Jan', Search: 10, comparison_0: 5, comparison_1: undefined },
-        { month: 'Feb', Social: 20, comparison_0: undefined, comparison_1: 15 },
+        { month: 'Jan', breakdown_0: 10, comparison_0: 5, comparison_1: undefined },
+        { month: 'Feb', breakdown_1: 20, comparison_0: undefined, comparison_1: 15 },
       ],
       series: ['comparison_0', 'comparison_1'],
     });

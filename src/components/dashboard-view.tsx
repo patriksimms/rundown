@@ -442,7 +442,7 @@ export function Result({
               <TableRow className="font-medium">
                 {columns.map((column, columnIndex) => (
                   <TableCell key={column}>
-                    {columnIndex === 0
+                    {columnIndex === 0 && definition.dimensions.length > 0
                       ? 'Summary'
                       : columnIndex < definition.dimensions.length
                         ? ''
@@ -509,20 +509,23 @@ export function Result({
     : undefined;
   let chartRows = comparison?.rows ?? rows;
   let comparisonMetrics = comparison?.series ?? [];
+  let metricLabels = new Map<string, string>();
   let dimension = columns[0]!;
   let metrics = Object.keys(chartRows[0] ?? {}).slice(1);
   if (definition.type === 'bar' && definition.breakdownDimension) {
-    const pivoted = pivotBreakdownRows(rows);
-    const previous = comparisonRows?.length ? pivotBreakdownRows(comparisonRows) : undefined;
-    const breakdownSeries = previous
-      ? [...new Set([...pivoted.series, ...previous.series])]
-      : pivoted.series;
+    const breakdownSeries = pivotBreakdownRows([...rows, ...(comparisonRows ?? [])]).series;
+    const pivoted = pivotBreakdownRows(rows, breakdownSeries);
+    const previous = comparisonRows?.length
+      ? pivotBreakdownRows(comparisonRows, breakdownSeries)
+      : undefined;
+    const breakdownKeys = breakdownSeries.map((item) => item.key);
+    metricLabels = new Map(breakdownSeries.map((item) => [item.key, item.label]));
     const shaped = previous
-      ? withComparisonSeries(pivoted.rows, previous.rows, 'key', breakdownSeries)
+      ? withComparisonSeries(pivoted.rows, previous.rows, 'key', breakdownKeys)
       : undefined;
     chartRows = shaped?.rows ?? pivoted.rows;
     comparisonMetrics = shaped?.series ?? [];
-    metrics = [...breakdownSeries, ...comparisonMetrics];
+    metrics = [...breakdownKeys, ...comparisonMetrics];
   }
   if (definition.type === 'pie' && definition.breakdownDimension) {
     chartRows = pieBreakdownRows(rows);
@@ -543,7 +546,9 @@ export function Result({
       metricIndex,
       isComparison: comparisonIndex !== -1,
       label:
-        comparisonIndex === -1 ? metric : `Previous ${currentMetrics[comparisonIndex] ?? metric}`,
+        comparisonIndex === -1
+          ? (metricLabels.get(metric) ?? metric)
+          : `Previous ${metricLabels.get(currentMetrics[comparisonIndex] ?? '') ?? currentMetrics[comparisonIndex] ?? metric}`,
     };
   });
   chartRows = chartRows.map((row) => ({
