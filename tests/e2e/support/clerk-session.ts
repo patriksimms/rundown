@@ -1,3 +1,4 @@
+import type { EmailCodeFactor } from '@clerk/shared/types';
 import { clerk, setupClerkTestingToken } from '@clerk/testing/playwright';
 import type { Page } from '@playwright/test';
 import type { ClerkCredentials } from './clerk-credentials';
@@ -9,36 +10,6 @@ import type { ClerkCredentials } from './clerk-credentials';
  */
 const CLERK_TEST_CODE = '424242';
 
-interface EmailCodeFactor {
-  strategy: string;
-  emailAddressId?: string;
-}
-
-interface BrowserSignIn {
-  status: string;
-  createdSessionId: string | null;
-  supportedFirstFactors: EmailCodeFactor[] | null;
-  prepareFirstFactor(params: {
-    strategy: 'email_code';
-    emailAddressId: string;
-  }): Promise<BrowserSignIn>;
-  attemptFirstFactor(params: { strategy: 'email_code'; code: string }): Promise<BrowserSignIn>;
-}
-
-interface BrowserClerk {
-  loaded?: boolean;
-  client: {
-    signIn: {
-      create(params: {
-        strategy: 'password';
-        identifier: string;
-        password: string;
-      }): Promise<BrowserSignIn>;
-    };
-  };
-  setActive(params: { session: string }): Promise<void>;
-}
-
 /** Signs the Clerk test user in and leaves the browser on the application root. */
 export async function signInWithClerk(page: Page, credentials: ClerkCredentials) {
   await setupClerkTestingToken({ page });
@@ -47,22 +18,18 @@ export async function signInWithClerk(page: Page, credentials: ClerkCredentials)
 
   const status = await page.evaluate(
     async ([identifier, password, code]) => {
-      const emailCodeFactor = (factors: EmailCodeFactor[] | null) =>
-        factors?.find((factor) => factor.strategy === 'email_code' && factor.emailAddressId);
+      const client = window.Clerk.client;
+      if (!client) return 'the Clerk client never became available';
 
-      // Clerk's own window typing describes the full SDK; this suite needs only these calls.
-      const instance = (window as unknown as { Clerk: BrowserClerk }).Clerk;
-      let attempt = await instance.client.signIn.create({
-        strategy: 'password',
-        identifier,
-        password,
-      });
+      let attempt = await client.signIn.create({ strategy: 'password', identifier, password });
 
       // Clerk keeps `supportedFirstFactors` populated after the password verifies, so the factor
-      // list is only meaningful for the status that actually asked for it.
+      // list is only read for the status that actually asked for another factor.
       if (attempt.status === 'needs_client_trust') {
-        const factor = emailCodeFactor(attempt.supportedFirstFactors);
-        if (factor?.emailAddressId) {
+        const factor = attempt.supportedFirstFactors?.find(
+          (candidate): candidate is EmailCodeFactor => candidate.strategy === 'email_code',
+        );
+        if (factor) {
           const prepared = await attempt.prepareFirstFactor({
             strategy: 'email_code',
             emailAddressId: factor.emailAddressId,
@@ -72,7 +39,7 @@ export async function signInWithClerk(page: Page, credentials: ClerkCredentials)
       }
 
       if (attempt.status !== 'complete' || !attempt.createdSessionId) return attempt.status;
-      await instance.setActive({ session: attempt.createdSessionId });
+      await window.Clerk.setActive({ session: attempt.createdSessionId });
       return 'complete';
     },
     [credentials.identifier, credentials.password, CLERK_TEST_CODE] as const,

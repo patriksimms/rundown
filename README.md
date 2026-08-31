@@ -70,8 +70,8 @@ refuses to start when the port does not answer as Rundown.
 
 The `authenticated` Playwright project signs a real Clerk user in with
 [Clerk testing tokens](https://clerk.com/docs/testing/overview). It is skipped unless the
-environment provides `CLERK_SECRET_KEY`, `E2E_CLERK_USER_USERNAME`, and `E2E_CLERK_USER_PASSWORD`
-for a Clerk development instance. The test user needs:
+environment provides `VITE_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `E2E_CLERK_USER_USERNAME`,
+and `E2E_CLERK_USER_PASSWORD` for a Clerk development instance. The test user needs:
 
 - an email address using Clerk's `+clerk_test` convention, so the sign-in settles the new-device
   check with Clerk's fixed test code instead of a real inbox
