@@ -33,6 +33,7 @@ import { canUpdateFieldMetadata } from '#/domain/field-metadata';
 import { hashJson } from '#/domain/hash';
 import { comparisonDateRange, resolveDateRange } from '#/domain/dates';
 import { queryCacheState, widgetDependencyState } from '#/domain/cache';
+import { queryResultColumns } from '#/domain/query-result';
 import { remapWidgetDefinition } from '#/domain/remap';
 import { mergeControlState } from '#/domain/control-state';
 import { isWorkspaceR2Key, scopedR2Prefix } from '#/domain/tenancy';
@@ -459,6 +460,7 @@ async function queryWidget(
     access.document.workspaceId,
   );
   const metadata = await loadQueryMetadata(dataSource.id, access.document.workspaceId);
+  const columns = queryResultColumns(widget.definition, metadata);
   const resolvedControls = await resolveControls(
     access.document,
     widget.definition,
@@ -521,6 +523,7 @@ async function queryWidget(
   ]);
   const result = {
     rows: normalize(rows),
+    columns,
     ...(comparisonRows ? { comparisonRows: normalize(comparisonRows) } : {}),
     controlState,
     cache: 'miss',
@@ -1355,6 +1358,7 @@ async function runDefinition(
   if (!('dataSourceId' in definition)) return { rows: [], controlState };
   const dataSource = await loadDataSource(definition.dataSourceId, dashboard.workspaceId);
   const metadata = await loadQueryMetadata(dataSource.id, dashboard.workspaceId);
+  const columns = queryResultColumns(definition, metadata);
   const resolvedControls = await resolveControls(
     dashboard,
     definition,
@@ -1400,6 +1404,7 @@ async function runDefinition(
   ]);
   return {
     rows: normalize(rows),
+    columns,
     ...(comparisonRows ? { comparisonRows: normalize(comparisonRows) } : {}),
     controlState,
   };

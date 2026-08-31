@@ -29,6 +29,7 @@ export function widgetDependencyState(definition: WidgetDefinition, metadata: Qu
     ),
   );
   return {
+    queryResultVersion: 2,
     definition,
     fields: metadata.fields
       .map(({ id, columnName, canonicalName, label, castTo }) => ({
