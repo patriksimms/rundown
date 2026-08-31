@@ -69,6 +69,14 @@ interface FieldRecord {
 }
 
 function DatasourcesPage() {
+  return (
+    <AppShell requireWorkspace>
+      <DatasourcesContent />
+    </AppShell>
+  );
+}
+
+function DatasourcesContent() {
   const [bootstrap, setBootstrap] = useState<Bootstrap>();
   const [selected, setSelected] = useState<string>();
   const [description, setDescription] = useState<Description>();
@@ -98,52 +106,50 @@ function DatasourcesPage() {
     onMutation: refresh,
   });
   return (
-    <AppShell>
-      <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6">
-        {error ? (
-          <ErrorState error={error} />
-        ) : !bootstrap ? (
-          <LoadingState />
-        ) : (
-          <div className="flex flex-col gap-6">
-            <div>
-              <h1 className="text-3xl font-semibold tracking-tight">Datasources</h1>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Upload a CSV or Parquet file, or register data already in this workspace.
-              </p>
-            </div>
-            <Tabs defaultValue={bootstrap.isAdmin ? 'fields' : 'register'}>
-              <TabsList>
-                {bootstrap.isAdmin ? <TabsTrigger value="fields">Fields</TabsTrigger> : null}
-                <TabsTrigger value="register">Register</TabsTrigger>
-              </TabsList>
-              {bootstrap.isAdmin ? (
-                <TabsContent value="fields" className="pt-5">
-                  <Field className="mb-5 max-w-sm">
-                    <FieldLabel htmlFor="source-picker">Datasource</FieldLabel>
-                    <NativeSelect
-                      id="source-picker"
-                      value={selected ?? ''}
-                      onChange={(event) => setSelected(event.target.value)}
-                    >
-                      {bootstrap.dataSources.map((source) => (
-                        <NativeSelectOption key={source.id} value={source.id}>
-                          {source.name}
-                        </NativeSelectOption>
-                      ))}
-                    </NativeSelect>
-                  </Field>
-                  {description ? <FieldTable source={description} refresh={refresh} /> : null}
-                </TabsContent>
-              ) : null}
-              <TabsContent value="register" className="pt-5">
-                <RegisterForm refresh={refresh} />
-              </TabsContent>
-            </Tabs>
+    <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6">
+      {error ? (
+        <ErrorState error={error} />
+      ) : !bootstrap ? (
+        <LoadingState />
+      ) : (
+        <div className="flex flex-col gap-6">
+          <div>
+            <h1 className="text-3xl font-semibold tracking-tight">Datasources</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Upload a CSV or Parquet file, or register data already in this workspace.
+            </p>
           </div>
-        )}
-      </main>
-    </AppShell>
+          <Tabs defaultValue={bootstrap.isAdmin ? 'fields' : 'register'}>
+            <TabsList>
+              {bootstrap.isAdmin ? <TabsTrigger value="fields">Fields</TabsTrigger> : null}
+              <TabsTrigger value="register">Register</TabsTrigger>
+            </TabsList>
+            {bootstrap.isAdmin ? (
+              <TabsContent value="fields" className="pt-5">
+                <Field className="mb-5 max-w-sm">
+                  <FieldLabel htmlFor="source-picker">Datasource</FieldLabel>
+                  <NativeSelect
+                    id="source-picker"
+                    value={selected ?? ''}
+                    onChange={(event) => setSelected(event.target.value)}
+                  >
+                    {bootstrap.dataSources.map((source) => (
+                      <NativeSelectOption key={source.id} value={source.id}>
+                        {source.name}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </Field>
+                {description ? <FieldTable source={description} refresh={refresh} /> : null}
+              </TabsContent>
+            ) : null}
+            <TabsContent value="register" className="pt-5">
+              <RegisterForm refresh={refresh} />
+            </TabsContent>
+          </Tabs>
+        </div>
+      )}
+    </main>
   );
 }
 
