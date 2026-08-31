@@ -71,7 +71,12 @@ refuses to start when the port does not answer as Rundown.
 The `authenticated` Playwright project signs a real Clerk user in with
 [Clerk testing tokens](https://clerk.com/docs/testing/overview). It is skipped unless the
 environment provides `CLERK_SECRET_KEY`, `E2E_CLERK_USER_USERNAME`, and `E2E_CLERK_USER_PASSWORD`
-for a Clerk development instance, and that test user belongs to a Clerk organization.
+for a Clerk development instance. The test user needs:
+
+- an email address using Clerk's `+clerk_test` convention, so the sign-in settles the new-device
+  check with Clerk's fixed test code instead of a real inbox
+- a password
+- membership in a Clerk organization, because the app shows nothing until one is active
 
 ## Database
 
@@ -127,8 +132,8 @@ missing until it is configured:
 | `E2E_CLERK_USER_USERNAME`     | Repository secret   | Identifier of the Clerk test user         |
 | `E2E_CLERK_USER_PASSWORD`     | Repository secret   | Password of the Clerk test user           |
 
-The test user must belong to a Clerk organization; the app requires an active organization before it
-shows any dashboard.
+The test user needs a `+clerk_test` email address, a password, and membership in a Clerk
+organization. The tests section above explains why.
 
 Each environment needs `CLERK_SECRET_KEY`, `R2_ACCESS_KEY_ID`, and `R2_SECRET_ACCESS_KEY`. The R2
 credentials come from an API token that can read the configured bucket and are passed to the private

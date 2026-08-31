@@ -59,7 +59,7 @@ jobs:
           if [ ${#missing[@]} -ne 0 ]; then
             echo "The browser suite needs a Clerk development instance. Configure:"
             printf '  - %s\n' "${missing[@]}"
-            echo "The test user must belong to a Clerk organization."
+            echo "The test user needs a +clerk_test email address and a Clerk organization."
             exit 1
           fi
           # The dev server reads Worker secrets from .env.local, which is never committed.

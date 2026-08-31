@@ -1,9 +1,13 @@
-import { clerk, setupClerkTestingToken } from '@clerk/testing/playwright';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { clerkCredentials, missingClerkCredentials } from './support/clerk-credentials';
+import { signInWithClerk } from './support/clerk-session';
 import { callApi, seedDashboard, seedDataSource } from './support/seed';
 
 const credentials = clerkCredentials();
+
+// The seeded CSV totals 445 across both regions and 320 in the north.
+const TOTAL_REVENUE = '445';
+const NORTH_REVENUE = '320';
 
 test.describe('signed-in dashboard flow', () => {
   test.skip(!credentials, missingClerkCredentials);
@@ -24,39 +28,36 @@ test.describe('signed-in dashboard flow', () => {
     await expect(
       page.getByRole('heading', { level: 1, name: `E2E dashboard ${suffix}` }),
     ).toBeVisible();
-    const scorecard = page.getByText('Revenue', { exact: true }).first();
-    await expect(scorecard).toBeVisible();
+    await expect(widget(page, 'Revenue')).toContainText(TOTAL_REVENUE);
 
-    // Edit the widget through the builder sidebar.
-    await scorecard.click();
+    // Rename the widget through the builder sidebar.
+    await selectWidget(page, 'Revenue');
     const title = page.getByLabel('Title');
     await expect(title).toHaveValue('Revenue');
     await title.fill('Revenue, verified');
     await title.blur();
-    await expect(page.getByRole('heading', { name: 'Revenue, verified' })).toBeVisible();
+    await expect(widget(page, 'Revenue, verified')).toBeVisible();
 
-    // Narrow the dashboard with its filter control.
+    // Narrow the dashboard with its filter control and let the widget requery.
     await page.getByRole('button', { name: 'Choose Region values' }).click();
     await page.getByRole('option', { name: 'north' }).click();
     await page.keyboard.press('Escape');
-    await expect(page.getByRole('button', { name: 'Choose Region values' })).toHaveText(
-      /1 selected/,
-    );
     await expect(page.getByRole('button', { name: 'Remove north' })).toBeVisible();
+    await expect(widget(page, 'Revenue, verified')).toContainText(NORTH_REVENUE);
 
-    // The edit survives a reload; control selections are per visit.
+    // The edit survives a reload; control selections last for one visit.
     await page.reload();
-    await expect(page.getByRole('heading', { name: 'Revenue, verified' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Choose Region values' })).toHaveText(
-      /All values/,
+    await expect(widget(page, 'Revenue, verified')).toContainText(TOTAL_REVENUE);
+    await expect(page.getByRole('button', { name: 'Choose Region values' })).toContainText(
+      'All values',
     );
 
     // Share the dashboard and open the link without a session.
     await page.getByRole('button', { name: 'Share' }).click();
-    await page.getByRole('button', { name: 'Create unlisted link' }).click();
     const shareLink = page.getByRole('link', { name: /^\/share\// });
+    await page.getByRole('button', { name: 'Create unlisted link' }).click();
     await expect(shareLink).toBeVisible();
-    const sharePath = (await shareLink.getAttribute('href')) ?? '';
+    const sharePath = await shareLink.innerText();
     expect(sharePath).toMatch(/^\/share\/.+/);
 
     const viewer = await browser.newContext();
@@ -66,15 +67,18 @@ test.describe('signed-in dashboard flow', () => {
       await expect(
         viewerPage.getByRole('heading', { level: 1, name: `E2E dashboard ${suffix}` }),
       ).toBeVisible();
-      await expect(viewerPage.getByRole('heading', { name: 'Revenue, verified' })).toBeVisible();
+      await expect(viewerPage.getByText(TOTAL_REVENUE)).toBeVisible();
+      await expect(viewerPage.getByText('Revenue, verified')).toBeVisible();
       // Viewers get the stored dashboard, never the builder.
       await expect(viewerPage.getByRole('button', { name: 'Share' })).toHaveCount(0);
+      await expect(viewerPage.getByRole('button', { name: /^Move / })).toHaveCount(0);
     } finally {
       await viewer.close();
     }
   });
 
   test('the dashboard index lists what the signed-in workspace owns', async ({ page }) => {
+    test.slow();
     await signIn(page);
     const suffix = Date.now().toString(36);
     const source = await seedDataSource(page, `e2e-index-${suffix}`);
@@ -89,16 +93,22 @@ test.describe('signed-in dashboard flow', () => {
   });
 });
 
+/** The builder grid item holding the widget with this title. */
+function widget(page: Page, title: string): Locator {
+  return page
+    .locator('.react-grid-item')
+    .filter({ has: page.getByRole('button', { name: `Move ${title}` }) });
+}
+
+/** Opens a widget in the builder sidebar without catching its drag handle. */
+async function selectWidget(page: Page, title: string) {
+  await widget(page, title).click({ position: { x: 24, y: 64 } });
+}
+
 /** Signs the Clerk test user in and makes sure an organization is active. */
 async function signIn(page: Page) {
   if (!credentials) throw new Error(missingClerkCredentials);
-  await setupClerkTestingToken({ page });
-  await page.goto('/');
-  await clerk.signIn({
-    page,
-    signInParams: { strategy: 'password', ...credentials },
-  });
-  await page.goto('/');
+  await signInWithClerk(page, credentials);
   await activateWorkspace(page);
 }
 
@@ -109,7 +119,7 @@ async function signIn(page: Page) {
 async function activateWorkspace(page: Page) {
   const index = page.getByRole('heading', { level: 1, name: 'Dashboards' });
   const gate = page.getByRole('heading', { level: 1, name: 'Choose where to continue' });
-  await expect(index.or(gate)).toBeVisible();
+  await expect(index.or(gate)).toBeVisible({ timeout: 20_000 });
   if (await index.isVisible()) return;
 
   const membership = page.getByRole('button', { name: 'Continue' }).first();
