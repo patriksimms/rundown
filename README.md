@@ -88,7 +88,8 @@ Non-production deploy command: bun run deploy:dry-run
 Set the `BUN_VERSION` build variable to `1.3.10`. Enable non-production branch builds to validate pull requests without uploading a Worker version.
 
 The named preview environment remains available for deliberate preview deployments with
-`bun run deploy:preview`, but is not used by pull-request checks.
+`bun run deploy` or `bun run deploy:preview`, but is not used by pull-request checks. Production
+deployments normally come from pushes to `main`.
 
 Each environment needs `CLERK_SECRET_KEY`, `R2_ACCESS_KEY_ID`, and `R2_SECRET_ACCESS_KEY`. The R2
 credentials come from an API token that can read the configured bucket and are passed to the private
@@ -111,10 +112,10 @@ origin before testing uploads there.
 ]
 ```
 
-To deploy from a local authenticated shell instead:
+For an explicit production deployment from a local authenticated shell:
 
 ```sh
-bun run deploy
+bun run deploy:production
 ```
 
 The Worker expects these private resources:
