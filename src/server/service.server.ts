@@ -568,8 +568,7 @@ async function getControlOptions(
     'columnName' in field ? quoteIdentifier(field.columnName) : `(${field.expression})`;
   const direction = controlDefinition.optionsSortDirection?.toUpperCase() ?? 'ASC';
   const rows = await runIsolatedPreparedQuery<{ value: unknown }>(dataSource, (sourceTableName) => {
-    const query = controlOptionsQuery(expression, search, direction);
-    return { ...query, sql: query.sql.replace('rundown_source', quoteIdentifier(sourceTableName)) };
+    return controlOptionsQuery(expression, search, direction, quoteIdentifier(sourceTableName));
   });
   return { values: rows.map((row) => normalize(row.value)) };
 }

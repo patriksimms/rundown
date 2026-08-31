@@ -14,4 +14,15 @@ describe('control option search', () => {
       'WHERE "Region" IS NOT NULL',
     );
   });
+
+  it('treats search wildcard characters as literals', () => {
+    const query = controlOptionsQuery('"Region"', '100%_!', 'ASC');
+    expect(query.sql).toContain("ILIKE ? ESCAPE '!'");
+    expect(query.parameters).toEqual(['%100!%!_!!%', '100%_!']);
+  });
+
+  it('uses the supplied source without rewriting the field expression', () => {
+    const query = controlOptionsQuery("'rundown_source'", undefined, 'ASC', '"source_1"');
+    expect(query.sql).toContain('SELECT \'rundown_source\' AS value FROM "source_1"');
+  });
 });
