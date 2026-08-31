@@ -328,6 +328,7 @@ function RegisterForm({ refresh }: { refresh: () => Promise<void> }) {
         action: 'listR2Objects',
         cursor: objectsCursor,
       });
+      setFormError(undefined);
       setObjects((current) => [...current, ...listing.objects]);
       setObjectsCursor(listing.cursor);
     } catch (caught) {
