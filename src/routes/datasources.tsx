@@ -282,6 +282,7 @@ function FieldRow({
 function RegisterForm({ refresh }: { refresh: () => Promise<void> }) {
   const [useExistingData, setUseExistingData] = useState(false);
   const [objects, setObjects] = useState<Array<{ key: string }>>([]);
+  const [objectsCursor, setObjectsCursor] = useState<string>();
   const [name, setName] = useState('');
   const [key, setKey] = useState('');
   const [kind, setKind] = useState<'object' | 'prefix'>('object');
@@ -306,8 +307,13 @@ function RegisterForm({ refresh }: { refresh: () => Promise<void> }) {
 
   useEffect(() => {
     if (!useExistingData || objects.length) return;
-    void callApi<{ objects: Array<{ key: string }> }>({ action: 'listR2Objects' })
-      .then((listing) => setObjects(listing.objects))
+    void callApi<{ objects: Array<{ key: string }>; cursor?: string }>({
+      action: 'listR2Objects',
+    })
+      .then((listing) => {
+        setObjects(listing.objects);
+        setObjectsCursor(listing.cursor);
+      })
       .catch((caught: unknown) =>
         setFormError(caught instanceof Error ? caught.message : String(caught)),
       );
@@ -315,6 +321,20 @@ function RegisterForm({ refresh }: { refresh: () => Promise<void> }) {
 
   const inferredExistingFormat = kind === 'object' ? datasourceUploadFormat(key) : undefined;
 
+  async function loadMoreObjects() {
+    if (!objectsCursor) return;
+    try {
+      const listing = await callApi<{ objects: Array<{ key: string }>; cursor?: string }>({
+        action: 'listR2Objects',
+        cursor: objectsCursor,
+      });
+      setFormError(undefined);
+      setObjects((current) => [...current, ...listing.objects]);
+      setObjectsCursor(listing.cursor);
+    } catch (caught) {
+      setFormError(caught instanceof Error ? caught.message : String(caught));
+    }
+  }
   async function submit(event: FormEvent) {
     event.preventDefault();
     setFormError(undefined);
@@ -522,6 +542,16 @@ function RegisterForm({ refresh }: { refresh: () => Promise<void> }) {
                   <option key={object.key} value={object.key} />
                 ))}
               </datalist>
+              {objectsCursor ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => void loadMoreObjects()}
+                >
+                  Load more objects
+                </Button>
+              ) : null}
             </Field>
             <Field>
               <FieldLabel htmlFor="source-kind">Location</FieldLabel>

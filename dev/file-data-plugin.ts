@@ -3,6 +3,7 @@ import { mkdir, readdir, rename, stat, unlink } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type { Plugin } from 'vite';
+import { paginateObjects } from '../src/data/listing.ts';
 import { MAX_DATASOURCE_FILE_BYTES } from '../src/domain/datasource-upload.ts';
 
 const route = '/__dev-data';
@@ -26,16 +27,18 @@ export function fileDataPlugin(directory = 'dev-data'): Plugin {
             const prefix = url.searchParams.get('prefix') ?? '';
             const workspace = workspacePath(prefix);
             const files = await listFiles(root, workspace.localPrefix);
+            const page = paginateObjects(files, url.searchParams.get('cursor') ?? undefined);
             response.setHeader('content-type', 'application/json');
             response.end(
               JSON.stringify({
-                objects: files.slice(0, 1000).map((file) => ({
+                objects: page.objects.map((file) => ({
                   key: `${workspace.keyPrefix}${file.key}`,
                   size: file.size,
                   etag: file.etag,
                   uploaded: file.uploaded.toISOString(),
                 })),
-                truncated: files.length > 1000,
+                truncated: page.truncated,
+                cursor: page.cursor,
               }),
             );
             return;
