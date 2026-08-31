@@ -59,8 +59,8 @@ describe('dashboard result rendering', () => {
           },
         }}
         rows={[
-          { dimension_1: 'A', dimension_2: 'Paid Search', metric_1: '10' },
-          { dimension_1: 'A', dimension_2: 'Social', metric_1: '20' },
+          { dimension_1: 'A', dimension_2: null, metric_1: '10' },
+          { dimension_1: 'A', dimension_2: 'null', metric_1: '20' },
         ]}
         columns={[
           dimension,
@@ -71,7 +71,6 @@ describe('dashboard result rendering', () => {
     );
     expect(html).toContain('--color-breakdown_1');
     expect(html).toContain('--color-breakdown_2');
-    expect(html).not.toContain('--color-Paid Search');
   });
 
   it('formats metric strings while preserving dimension strings', () => {

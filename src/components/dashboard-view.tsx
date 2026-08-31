@@ -573,18 +573,18 @@ function pivotBreakdownRows(
   breakdownKey: string,
   metric: QueryResultColumn,
 ) {
-  const labels = [...new Set(rows.map((row) => String(row[breakdownKey])))];
-  const metrics = labels.map((label, index) => ({
+  const values = [...new Set(rows.map((row) => row[breakdownKey]))];
+  const metrics = values.map((value, index) => ({
     ...metric,
     key: `breakdown_${index + 1}`,
-    label,
+    label: String(value),
   }));
-  const metricByLabel = new Map(metrics.map((item) => [item.label, item]));
+  const metricByValue = new Map(values.map((value, index) => [value, metrics[index]!]));
   const pivoted = new Map<unknown, Record<string, unknown>>();
   for (const row of rows) {
     const dimension = row[dimensionKey];
     const target = pivoted.get(dimension) ?? { [dimensionKey]: dimension };
-    const series = metricByLabel.get(String(row[breakdownKey]));
+    const series = metricByValue.get(row[breakdownKey]);
     if (series) target[series.key] = row[metric.key];
     pivoted.set(dimension, target);
   }
