@@ -19,7 +19,6 @@ import {
   TableHeader,
   TableRow,
 } from '#/components/ui/table';
-import { cn } from '#/lib/utils';
 
 /** Sorting plus a single search box is all either datasource table needs. */
 export const dataTableFeatures = tableFeatures({
@@ -81,7 +80,18 @@ export function DataTable<TData extends RowData>({
               const definition = header.column.columnDef.header;
               const name = typeof definition === 'string' ? definition : header.column.id;
               return (
-                <TableHead key={header.id}>
+                <TableHead
+                  key={header.id}
+                  aria-sort={
+                    !header.column.getCanSort()
+                      ? undefined
+                      : sorted === 'asc'
+                        ? 'ascending'
+                        : sorted === 'desc'
+                          ? 'descending'
+                          : 'none'
+                  }
+                >
                   {header.isPlaceholder ? null : header.column.getCanSort() ? (
                     <button
                       type="button"
@@ -115,18 +125,15 @@ export function DataTable<TData extends RowData>({
             </TableCell>
           </TableRow>
         ) : (
-          rows.map((row) => {
-            const { className, ...extra } = rowProps?.(row.original) ?? {};
-            return (
-              <TableRow key={row.id} className={cn(className)} {...extra}>
-                {row.getAllCells().map((cell) => (
-                  <TableCell key={cell.id}>
-                    <table.FlexRender cell={cell} />
-                  </TableCell>
-                ))}
-              </TableRow>
-            );
-          })
+          rows.map((row) => (
+            <TableRow key={row.id} {...rowProps?.(row.original)}>
+              {row.getAllCells().map((cell) => (
+                <TableCell key={cell.id}>
+                  <table.FlexRender cell={cell} />
+                </TableCell>
+              ))}
+            </TableRow>
+          ))
         )}
       </TableBody>
     </Table>

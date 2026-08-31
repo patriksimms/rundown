@@ -639,10 +639,11 @@ async function listDataSources() {
   const workspace = eq(dataSources.workspaceId, session.workspace.id);
   const [sourceRows, rawCounts, calculatedCounts] = await Promise.all([
     db.select().from(dataSources).where(workspace),
+    // Hidden fields are excluded so the count matches what the detail page lists.
     db
       .select({ dataSourceId: fields.dataSourceId, total: count() })
       .from(fields)
-      .where(eq(fields.workspaceId, session.workspace.id))
+      .where(and(eq(fields.workspaceId, session.workspace.id), eq(fields.hidden, false)))
       .groupBy(fields.dataSourceId),
     db
       .select({ dataSourceId: calculatedFields.dataSourceId, total: count() })
