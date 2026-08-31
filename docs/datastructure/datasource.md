@@ -1,6 +1,8 @@
 # Datasource
 
-A datasource is one parquet or CSV object in R2, or a prefix of partitioned files. Files are already in R2; the app never ingests or transforms data.
+A datasource is one Parquet or CSV object in R2, or a prefix of partitioned files. Editors can
+upload one file up to 100 MB from the registration UI or select data already in the workspace. The
+app does not transform data.
 
 ```yaml
 DataSource:
@@ -20,7 +22,10 @@ DataSourceLocation:
   format: parquet | csv
 ```
 
-Registration runs `DESCRIBE` on the file, seeds `fields` (see defaults below), and stores `version`. `version` is part of every query cache key, so a replaced file invalidates cached results without any invalidation code.
+Browser uploads use a generated key below the workspace prefix, then follow the same registration
+path as existing objects. Registration runs `DESCRIBE` on the file, seeds `fields` (see defaults
+below), and stores `version`. `version` is part of every query cache key, so a replaced file
+invalidates cached results without any invalidation code.
 
 ## Field metadata
 

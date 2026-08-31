@@ -1,5 +1,7 @@
 import { env } from 'cloudflare:workers';
+import { AwsClient } from 'aws4fetch';
 import { z } from 'zod';
+import { datasourceUploadKey, type DatasourceUploadFormat } from '#/domain/datasource-upload';
 import { compileSourceSqlFromBaseUrl } from '#/query/compiler';
 import type { DataSourceRecord } from '#/query/types';
 
@@ -59,6 +61,39 @@ export async function headSourceObject(key: string): Promise<SourceObject | null
     etag: response.headers.get('etag'),
     uploaded: response.headers.get('last-modified'),
   });
+}
+
+export async function prepareSourceUpload(workspacePrefix: string, format: DatasourceUploadFormat) {
+  const key = datasourceUploadKey(workspacePrefix, format);
+  if (!usesR2()) {
+    return { key, uploadUrl: sourceUrl(key) };
+  }
+
+  const signer = new AwsClient({
+    accessKeyId: env.R2_ACCESS_KEY_ID,
+    secretAccessKey: env.R2_SECRET_ACCESS_KEY,
+  });
+  const objectUrl = new URL(
+    `https://${env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com/${encodeURIComponent(env.R2_BUCKET_NAME)}/${key
+      .split('/')
+      .map(encodeURIComponent)
+      .join('/')}`,
+  );
+  objectUrl.searchParams.set('X-Amz-Expires', '900');
+  const signed = await signer.sign(new Request(objectUrl, { method: 'PUT' }), {
+    aws: { signQuery: true },
+  });
+  return { key, uploadUrl: signed.url };
+}
+
+export async function deleteSourceObject(key: string) {
+  if (usesR2()) {
+    await env.DATA.delete(key);
+    return;
+  }
+  const response = await fetch(sourceUrl(key), { method: 'DELETE' });
+  if (response.status !== 404 && !response.ok)
+    throw new Error(`Local data deletion returned HTTP ${response.status}.`);
 }
 
 export async function resolveDataSource(dataSource: DataSourceRecord) {

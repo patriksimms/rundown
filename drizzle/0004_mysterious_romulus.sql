@@ -1,0 +1,1 @@
+ALTER TABLE `datasource_uploads` ADD `claim_id` text;

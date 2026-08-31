@@ -26,6 +26,7 @@ interface WebMcpOptions {
   shareToken?: string;
   canCreate?: boolean;
   canEdit?: boolean;
+  canManageDataSources?: boolean;
   isAdmin?: boolean;
   onMutation?: () => void | Promise<void>;
 }
@@ -102,7 +103,7 @@ export function useWebMcpTools(options: WebMcpOptions) {
             },
           ] satisfies ToolSpec[])
         : []),
-      ...(options.isAdmin
+      ...(options.canManageDataSources
         ? ([
             {
               action: 'listDataSources',
@@ -208,7 +209,7 @@ export function useWebMcpTools(options: WebMcpOptions) {
           },
         ]
       : [];
-    const adminTools: ToolSpec[] = options.isAdmin
+    const dataSourceTools: ToolSpec[] = options.canManageDataSources
       ? [
           {
             action: 'listR2Objects',
@@ -221,6 +222,10 @@ export function useWebMcpTools(options: WebMcpOptions) {
               'Register an existing R2 CSV or parquet object or prefix. This runs DESCRIBE and seeds field metadata.',
             readOnly: false,
           },
+        ]
+      : [];
+    const adminTools: ToolSpec[] = options.isAdmin
+      ? [
           ...(!options.dashboardId
             ? ([
                 {
@@ -239,7 +244,13 @@ export function useWebMcpTools(options: WebMcpOptions) {
             : []),
         ]
       : [];
-    for (const spec of [...viewTools, ...createTools, ...editTools, ...adminTools]) {
+    for (const spec of [
+      ...viewTools,
+      ...createTools,
+      ...editTools,
+      ...dataSourceTools,
+      ...adminTools,
+    ]) {
       const registration = document.modelContext.registerTool(
         {
           name: spec.action,
@@ -269,6 +280,7 @@ export function useWebMcpTools(options: WebMcpOptions) {
     options.shareToken,
     options.canCreate,
     options.canEdit,
+    options.canManageDataSources,
     options.isAdmin,
     options.onMutation,
   ]);
