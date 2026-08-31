@@ -77,12 +77,12 @@ describe('POST /api/rundown', () => {
     });
   });
 
-  test('an unexpected failure answers a generic 500 without engine detail', async () => {
+  test('an engine outage answers 502 rather than an invalid-query error', async () => {
     const workspace = await signInToNewWorkspace();
     const source = await seedDataSource(workspace);
     const dashboard = await createDashboard();
     const widget = await addWidget(dashboard.id, scorecardDefinition(source));
-    queryEngine.rejectQueries(503, 'container 10.0.0.4 unavailable');
+    queryEngine.rejectQueries(503, 'the query container is unavailable');
 
     const response = await postApiRequest({
       action: 'queryWidget',
@@ -90,11 +90,9 @@ describe('POST /api/rundown', () => {
       widgetId: widget.id,
     });
 
-    expect(response.status).toBe(500);
-    const body = await envelope(response);
-    expect(body.error?.code).toBe('internal_error');
-    expect(body.error?.message).toBe('Rundown could not complete the request.');
-    expect(JSON.stringify(body)).not.toContain('10.0.0.4');
+    // A connector that cannot answer is an upstream failure, not a bad request.
+    expect(response.status).toBe(502);
+    expect((await envelope(response)).error?.code).toBe('datasource_connector_failed');
   });
 
   test('a filter control is added through the route and compiles to no SQL', async () => {

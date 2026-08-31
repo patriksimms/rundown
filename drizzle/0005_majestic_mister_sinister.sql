@@ -1,0 +1,1 @@
+ALTER TABLE `data_sources` ADD `connector_type` text DEFAULT 'duckdb-file' NOT NULL;

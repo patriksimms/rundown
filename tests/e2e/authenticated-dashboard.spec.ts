@@ -31,11 +31,13 @@ test.describe('signed-in dashboard flow', () => {
     await expect(widget(page, 'Revenue')).toContainText(TOTAL_REVENUE);
 
     // Rename the widget through the builder sidebar.
-    await selectWidget(page, 'Revenue');
-    const title = page.getByLabel('Title');
+    await page.getByRole('button', { name: 'Edit Revenue' }).click();
+    const settings = page.getByRole('complementary');
+    const title = settings.getByLabel('Title');
     await expect(title).toHaveValue('Revenue');
     await title.fill('Revenue, verified');
     await title.blur();
+    await expect(settings.getByRole('heading', { name: 'Revenue, verified' })).toBeVisible();
     await expect(widget(page, 'Revenue, verified')).toBeVisible();
 
     // Narrow the dashboard with its filter control and let the widget requery.
@@ -71,7 +73,7 @@ test.describe('signed-in dashboard flow', () => {
       await expect(viewerPage.getByText('Revenue, verified')).toBeVisible();
       // Viewers get the stored dashboard, never the builder.
       await expect(viewerPage.getByRole('button', { name: 'Share' })).toHaveCount(0);
-      await expect(viewerPage.getByRole('button', { name: /^Move / })).toHaveCount(0);
+      await expect(viewerPage.getByRole('button', { name: /^Edit / })).toHaveCount(0);
     } finally {
       await viewer.close();
     }
@@ -97,12 +99,7 @@ test.describe('signed-in dashboard flow', () => {
 function widget(page: Page, title: string): Locator {
   return page
     .locator('.react-grid-item')
-    .filter({ has: page.getByRole('button', { name: `Move ${title}` }) });
-}
-
-/** Opens a widget in the builder sidebar without catching its drag handle. */
-async function selectWidget(page: Page, title: string) {
-  await widget(page, title).click({ position: { x: 24, y: 64 } });
+    .filter({ has: page.getByRole('button', { name: `Edit ${title}` }) });
 }
 
 /** Signs the Clerk test user in and makes sure an organization is active. */

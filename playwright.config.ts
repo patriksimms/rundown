@@ -19,6 +19,9 @@ const authenticatedTests = '**/authenticated-*.spec.ts';
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: true,
+  // Every worker shares one dev server and one Clerk development instance, and Clerk development
+  // instances rate-limit hard: above two workers the app stalls before Clerk reports as loaded.
+  workers: 2,
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? 'github' : 'line',
   globalSetup: './tests/e2e/global-setup.ts',
