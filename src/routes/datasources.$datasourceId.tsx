@@ -111,8 +111,14 @@ function DatasourcePage() {
 
 function DatasourceContent() {
   const { datasourceId } = Route.useParams();
-  const [description, setDescription] = useState<Description>();
-  const [isAdmin, setIsAdmin] = useState(false);
+  // The loaded payload carries the datasource it describes, so a response that
+  // arrives after the route moved on is never rendered and never reaches the
+  // edit dialog, whichever load or in-flight save produced it.
+  const [loaded, setLoaded] = useState<{
+    datasourceId: string;
+    description: Description;
+    isAdmin: boolean;
+  }>();
   const [error, setError] = useState<string>();
   const [search, setSearch] = useState('');
   // The session counter remounts the dialog per opening without swapping its
@@ -125,9 +131,8 @@ function DatasourceContent() {
     setDialog((current) => ({ session: current.session + 1, field }));
     setDialogOpen(true);
   }, []);
-  // Only the newest load may write state. Otherwise a slow response for one
-  // datasource can land after the route moved to another and leave the table
-  // describing the old source while edits target the new one.
+  // Two loads for the same datasource can still settle out of order, so only
+  // the newest one writes.
   const load = useRef(0);
   const refresh = useCallback(async () => {
     const current = ++load.current;
@@ -137,20 +142,16 @@ function DatasourceContent() {
         callApi<{ isAdmin: boolean }>({ action: 'bootstrap' }),
       ]);
       if (load.current !== current) return;
-      setDescription(source);
-      setIsAdmin(bootstrap.isAdmin);
+      setLoaded({ datasourceId, description: source, isAdmin: bootstrap.isAdmin });
       setError(undefined);
     } catch (caught) {
       if (load.current !== current) return;
       setError(caught instanceof Error ? caught.message : String(caught));
     }
   }, [datasourceId]);
-  useEffect(() => {
-    // refresh only changes identity with the route param, so this also clears
-    // the previous datasource while the new one loads.
-    setDescription(undefined);
-    void refresh();
-  }, [refresh]);
+  useEffect(() => void refresh(), [refresh]);
+  const description = loaded?.datasourceId === datasourceId ? loaded.description : undefined;
+  const isAdmin = loaded?.datasourceId === datasourceId ? loaded.isAdmin : false;
   useWebMcpTools({
     canManageDataSources: Boolean(description),
     isAdmin,
@@ -217,16 +218,18 @@ function DatasourceContent() {
             </Link>
             .
           </p>
+          {/* Inside the loaded branch so a route change unmounts the dialog
+              instead of leaving one datasource's field over another's page. */}
+          <FieldDialog
+            key={dialog.session}
+            dataSourceId={datasourceId}
+            field={dialog.field}
+            open={dialogOpen}
+            onOpenChange={setDialogOpen}
+            onSaved={refresh}
+          />
         </div>
       )}
-      <FieldDialog
-        key={dialog.session}
-        dataSourceId={datasourceId}
-        field={dialog.field}
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        onSaved={refresh}
-      />
     </main>
   );
 }
