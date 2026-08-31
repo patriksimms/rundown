@@ -7,6 +7,7 @@ import {
   fieldRoleSchema,
   gridPlacementSchema,
   semanticTypeSchema,
+  timezoneSchema,
   widgetDefinitionSchema,
 } from '#/domain/schema';
 import {
@@ -25,14 +26,14 @@ export const apiRequestSchema = z.discriminatedUnion('action', [
     action: z.literal('createDashboard'),
     name: z.string().trim().min(1),
     dataSourceIds: z.array(z.string()).default([]),
-    timezone: z.string().default('Europe/Berlin'),
+    timezone: timezoneSchema.default('Europe/Berlin'),
     defaultDateRange: dateRangeSchema.optional(),
   }),
   z.object({
     action: z.literal('updateDashboard'),
     dashboardId: z.string().min(1),
     name: z.string().trim().min(1).optional(),
-    timezone: z.string().min(1).optional(),
+    timezone: timezoneSchema.optional(),
     defaultDateRange: dateRangeSchema.optional(),
   }),
   z.object({
