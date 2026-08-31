@@ -10,14 +10,6 @@ import { Input } from '#/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '#/components/ui/native-select';
 import { Progress, ProgressLabel, ProgressValue } from '#/components/ui/progress';
 import { Switch } from '#/components/ui/switch';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '#/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '#/components/ui/tabs';
 import {
   datasourceNameFromFileName,
@@ -154,26 +146,41 @@ function DatasourcesContent() {
 }
 
 function FieldTable({ source, refresh }: { source: Description; refresh: () => Promise<void> }) {
+  const [search, setSearch] = useState('');
+  const needle = search.trim().toLowerCase();
+  const matches = needle
+    ? source.fields.filter((field) =>
+        [field.columnName, field.label, field.canonicalName, field.description ?? ''].some(
+          (value) => value.toLowerCase().includes(needle),
+        ),
+      )
+    : source.fields;
   return (
-    <div className="overflow-x-auto">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Column</TableHead>
-            <TableHead>Label</TableHead>
-            <TableHead>Canonical name</TableHead>
-            <TableHead>Role</TableHead>
-            <TableHead>Type</TableHead>
-            <TableHead>Description</TableHead>
-            <TableHead />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {source.fields.map((field) => (
-            <FieldRow key={field.id} sourceId={source.id} field={field} refresh={refresh} />
+    <div className="flex flex-col gap-4">
+      <Field className="max-w-sm">
+        <FieldLabel htmlFor="field-search">Find a field</FieldLabel>
+        <Input
+          id="field-search"
+          type="search"
+          placeholder="Column, label, canonical name, or description"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+        />
+        <FieldDescription aria-live="polite">
+          {matches.length} of {source.fields.length} fields
+        </FieldDescription>
+      </Field>
+      {matches.length ? (
+        <ul className="flex flex-col gap-3">
+          {matches.map((field) => (
+            <li key={field.id}>
+              <FieldRow sourceId={source.id} field={field} refresh={refresh} />
+            </li>
           ))}
-        </TableBody>
-      </Table>
+        </ul>
+      ) : (
+        <p className="text-sm text-muted-foreground">No field matches that search.</p>
+      )}
     </div>
   );
 }
@@ -216,66 +223,84 @@ function FieldRow({
     }
   }
   return (
-    <TableRow>
-      <TableCell className="font-mono text-xs">{field.columnName}</TableCell>
-      <TableCell>
-        <Input
-          aria-label={`${field.columnName} label`}
-          value={value.label}
-          onChange={(event) => setValue({ ...value, label: event.target.value })}
-        />
-      </TableCell>
-      <TableCell>
-        <Input
-          aria-label={`${field.columnName} canonical name`}
-          value={value.canonicalName}
-          onChange={(event) => setValue({ ...value, canonicalName: event.target.value })}
-        />
-      </TableCell>
-      <TableCell>
-        <NativeSelect
-          aria-label={`${field.columnName} role`}
-          value={value.role}
-          onChange={(event) =>
-            setValue({ ...value, role: event.target.value as FieldRecord['role'] })
-          }
+    /*
+      One card per field. The inputs stack on a phone and only fan out into columns from lg up,
+      so editing never depends on scrolling a very wide row sideways.
+    */
+    <div className="rounded-lg bg-muted/60 p-3">
+      <p className="font-mono text-xs break-all text-muted-foreground">{field.columnName}</p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(8rem,1fr)_minmax(8rem,1fr)_9rem_9rem_minmax(10rem,2fr)_auto] lg:items-end">
+        <Field>
+          <FieldLabel htmlFor={`${field.id}-label`}>Label</FieldLabel>
+          <Input
+            id={`${field.id}-label`}
+            value={value.label}
+            onChange={(event) => setValue({ ...value, label: event.target.value })}
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor={`${field.id}-canonical`}>Canonical name</FieldLabel>
+          <Input
+            id={`${field.id}-canonical`}
+            value={value.canonicalName}
+            onChange={(event) => setValue({ ...value, canonicalName: event.target.value })}
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor={`${field.id}-role`}>Role</FieldLabel>
+          <NativeSelect
+            id={`${field.id}-role`}
+            value={value.role}
+            onChange={(event) =>
+              setValue({ ...value, role: event.target.value as FieldRecord['role'] })
+            }
+          >
+            {['dimension', 'metric', 'date', 'id'].map((item) => (
+              <NativeSelectOption key={item} value={item}>
+                {item}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </Field>
+        <Field>
+          <FieldLabel htmlFor={`${field.id}-type`}>Type</FieldLabel>
+          <NativeSelect
+            id={`${field.id}-type`}
+            value={value.semanticType}
+            onChange={(event) =>
+              setValue({
+                ...value,
+                semanticType: event.target.value as FieldRecord['semanticType'],
+              })
+            }
+          >
+            {['currency', 'count', 'ratio', 'text', 'date', 'id'].map((item) => (
+              <NativeSelectOption key={item} value={item}>
+                {item}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </Field>
+        <Field>
+          <FieldLabel htmlFor={`${field.id}-description`}>Description</FieldLabel>
+          <Input
+            id={`${field.id}-description`}
+            value={value.description ?? ''}
+            onChange={(event) => setValue({ ...value, description: event.target.value })}
+          />
+        </Field>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={saving}
+          aria-label={`Save ${field.columnName}`}
+          onClick={save}
         >
-          {['dimension', 'metric', 'date', 'id'].map((item) => (
-            <NativeSelectOption key={item} value={item}>
-              {item}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-      </TableCell>
-      <TableCell>
-        <NativeSelect
-          aria-label={`${field.columnName} semantic type`}
-          value={value.semanticType}
-          onChange={(event) =>
-            setValue({ ...value, semanticType: event.target.value as FieldRecord['semanticType'] })
-          }
-        >
-          {['currency', 'count', 'ratio', 'text', 'date', 'id'].map((item) => (
-            <NativeSelectOption key={item} value={item}>
-              {item}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-      </TableCell>
-      <TableCell>
-        <Input
-          aria-label={`${field.columnName} description`}
-          value={value.description ?? ''}
-          onChange={(event) => setValue({ ...value, description: event.target.value })}
-        />
-      </TableCell>
-      <TableCell>
-        <Button variant="outline" size="sm" disabled={saving} onClick={save}>
           {saving ? 'Saving…' : 'Save'}
         </Button>
-        {error ? <p className="mt-1 text-xs text-destructive">{error}</p> : null}
-      </TableCell>
-    </TableRow>
+      </div>
+      {error ? <p className="mt-2 text-sm text-destructive">{error}</p> : null}
+    </div>
   );
 }
 

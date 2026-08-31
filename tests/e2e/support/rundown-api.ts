@@ -1,0 +1,243 @@
+import type { Page, Route } from '@playwright/test';
+import type { DashboardDocument, DashboardWidget } from '#/domain/schema';
+
+const fixedRange = {
+  startDate: { fixed: '2026-08-01' },
+  endDate: { fixed: '2026-08-31' },
+};
+
+function widget(
+  id: string,
+  layout: DashboardWidget['layout'],
+  definition: DashboardWidget['definition'],
+): DashboardWidget {
+  return { id, layout, definition, definitionHash: `hash_${id}` };
+}
+
+export const dataSourceId = 'src_reporting';
+
+export function buildDashboard(): DashboardDocument {
+  return {
+    id: 'dash_demo',
+    workspaceId: 'ws_demo',
+    name: 'Client weekly',
+    schemaVersion: 2,
+    timezone: 'Europe/Berlin',
+    defaultDateRange: fixedRange,
+    columns: 12,
+    createdBy: 'user_demo',
+    createdAt: '2026-08-01T00:00:00.000Z',
+    updatedAt: '2026-08-01T00:00:00.000Z',
+    widgets: [
+      widget('w_date', { x: 0, y: 0, width: 4, height: 2 }, { type: 'dateControl' }),
+      widget(
+        'w_platform',
+        { x: 4, y: 0, width: 4, height: 2 },
+        {
+          type: 'control',
+          dataSourceId,
+          fieldId: 'f_platform',
+          userDefinedName: 'Platform',
+          allowMultiple: true,
+        },
+      ),
+      widget(
+        'w_spend',
+        { x: 0, y: 2, width: 4, height: 3 },
+        {
+          type: 'scorecard',
+          title: 'Media spend',
+          dataSourceId,
+          dateRangeFieldId: 'f_date',
+          metric: {
+            source: { kind: 'field', fieldId: 'f_spend', aggregation: 'sum' },
+            dataType: 'currency',
+          },
+        },
+      ),
+      widget(
+        'w_campaigns',
+        { x: 4, y: 2, width: 8, height: 5 },
+        {
+          type: 'table',
+          title: 'Campaigns',
+          dataSourceId,
+          dateRangeFieldId: 'f_date',
+          dimensions: [{ fieldId: 'f_campaign' }],
+          metrics: [
+            {
+              source: { kind: 'field', fieldId: 'f_spend', aggregation: 'sum' },
+              dataType: 'currency',
+            },
+          ],
+          resultLimit: { mode: 'top', amount: 10 },
+        },
+      ),
+    ],
+  };
+}
+
+const fields = [
+  {
+    id: 'f_campaign',
+    label: 'Campaign',
+    canonicalName: 'campaign',
+    role: 'dimension',
+    semanticType: 'text',
+    columnName: 'Campaign',
+  },
+  {
+    id: 'f_platform',
+    label: 'Platform',
+    canonicalName: 'platform',
+    role: 'dimension',
+    semanticType: 'text',
+    columnName: 'Platform',
+  },
+  {
+    id: 'f_date',
+    label: 'Date start',
+    canonicalName: 'date_start',
+    role: 'date',
+    semanticType: 'date',
+    columnName: 'DateStart',
+  },
+  {
+    id: 'f_spend',
+    label: 'Media cost',
+    canonicalName: 'media_cost',
+    role: 'metric',
+    semanticType: 'currency',
+    columnName: 'MediaCost',
+    defaultAggregation: 'sum',
+  },
+  {
+    id: 'f_impressions',
+    label: 'Impressions',
+    canonicalName: 'impressions',
+    role: 'metric',
+    semanticType: 'count',
+    columnName: 'Impressions',
+    defaultAggregation: 'sum',
+  },
+];
+
+const description = {
+  id: dataSourceId,
+  name: 'Reporting example',
+  fields,
+  calculatedFields: [],
+  libraryMetrics: [],
+};
+
+interface MockOptions {
+  role?: 'admin' | 'editor' | 'viewer';
+  isAdmin?: boolean;
+}
+
+/**
+ * Serves the signed-in API surface from an in-memory dashboard so mobile and keyboard
+ * behaviour can be exercised against the real routes without a Clerk session.
+ */
+export async function mockRundownApi(page: Page, options: MockOptions = {}) {
+  const state = { dashboard: buildDashboard(), nextWidget: 0 };
+  const ok = (route: Route, data: unknown) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, data }),
+    });
+
+  await page.route('**/api/rundown', async (route) => {
+    const request = route.request().postDataJSON() as Record<string, string> & {
+      definition?: DashboardWidget['definition'];
+      width?: number;
+      height?: number;
+      placements?: Array<{ widgetId: string; placement: DashboardWidget['layout'] }>;
+    };
+    switch (request.action) {
+      case 'bootstrap':
+        return ok(route, {
+          isAdmin: options.isAdmin ?? true,
+          dataSources: [{ id: dataSourceId, name: description.name }],
+        });
+      case 'listDashboards':
+        return ok(route, [{ id: state.dashboard.id, name: state.dashboard.name }]);
+      case 'getDashboard':
+        return ok(route, {
+          dashboard: state.dashboard,
+          role: options.role ?? 'editor',
+          dataSources: [{ id: dataSourceId, name: description.name }],
+          sharing: { links: [], grants: [] },
+        });
+      case 'describeDatasource':
+        return ok(route, description);
+      case 'getControlOptions':
+        return ok(route, { values: ['FB', 'IG', 'TikTok'] });
+      case 'queryWidget':
+        return ok(route, {
+          rows: [
+            { dimension_1: 'Spring sale', metric_1: 1234.5 },
+            { dimension_1: 'Always on', metric_1: 987.25 },
+          ],
+          columns: [
+            { key: 'dimension_1', label: 'Campaign', kind: 'dimension', dataType: 'text' },
+            { key: 'metric_1', label: 'Media cost', kind: 'metric', dataType: 'currency' },
+          ],
+          hasMore: false,
+        });
+      case 'addWidget': {
+        state.nextWidget += 1;
+        const added = widget(
+          `w_added_${state.nextWidget}`,
+          { x: 0, y: 20, width: request.width ?? 4, height: request.height ?? 3 },
+          request.definition!,
+        );
+        state.dashboard = {
+          ...state.dashboard,
+          widgets: [...state.dashboard.widgets, added],
+        };
+        return ok(route, { widget: added });
+      }
+      case 'updateWidget': {
+        state.dashboard = {
+          ...state.dashboard,
+          widgets: state.dashboard.widgets.map((item) =>
+            item.id === request.widgetId
+              ? { ...item, definition: request.definition!, definitionHash: `hash_${Date.now()}` }
+              : item,
+          ),
+        };
+        return ok(route, {
+          widget: state.dashboard.widgets.find((i) => i.id === request.widgetId),
+        });
+      }
+      case 'updateLayout': {
+        const byId = new Map(
+          (request.placements ?? []).map((entry) => [entry.widgetId, entry.placement]),
+        );
+        state.dashboard = {
+          ...state.dashboard,
+          widgets: state.dashboard.widgets.map((item) =>
+            byId.has(item.id) ? { ...item, layout: byId.get(item.id)! } : item,
+          ),
+        };
+        return ok(route, { ok: true });
+      }
+      case 'removeWidget':
+        state.dashboard = {
+          ...state.dashboard,
+          widgets: state.dashboard.widgets.filter((item) => item.id !== request.widgetId),
+        };
+        return ok(route, { ok: true });
+      case 'listLibraryMetrics':
+        return ok(route, []);
+      case 'listR2Objects':
+        return ok(route, { objects: [] });
+      default:
+        return ok(route, {});
+    }
+  });
+
+  return state;
+}
