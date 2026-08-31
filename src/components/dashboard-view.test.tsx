@@ -43,6 +43,37 @@ describe('dashboard result rendering', () => {
     expect(html).not.toContain('body { color: red');
   });
 
+  it('renders breakdown dimensions as separate stable bar series', () => {
+    const html = renderToStaticMarkup(
+      <Result
+        definition={{
+          type: 'bar',
+          title: 'Spend by channel',
+          dataSourceId: 'source',
+          dateRangeFieldId: 'date',
+          dimension: { fieldId: 'account' },
+          breakdownDimension: { fieldId: 'channel' },
+          metric: {
+            source: { kind: 'field', fieldId: 'spend', aggregation: 'sum' },
+            dataType: 'currency',
+          },
+        }}
+        rows={[
+          { dimension_1: 'A', dimension_2: 'Paid Search', metric_1: '10' },
+          { dimension_1: 'A', dimension_2: 'Social', metric_1: '20' },
+        ]}
+        columns={[
+          dimension,
+          { ...dimension, key: 'dimension_2', label: 'Channel', dataType: 'text' },
+          currency,
+        ]}
+      />,
+    );
+    expect(html).toContain('--color-breakdown_1');
+    expect(html).toContain('--color-breakdown_2');
+    expect(html).not.toContain('--color-Paid Search');
+  });
+
   it('formats metric strings while preserving dimension strings', () => {
     const html = renderToStaticMarkup(
       <Result
@@ -115,5 +146,6 @@ describe('dashboard result rendering', () => {
       }),
     ).toMatch(/1[,.]234[,.]57/u);
     expect(formatValue('9223372036854775807', dimension)).toBe('9223372036854775807');
+    expect(formatValue('9223372036854775807', currency)).toBe('9223372036854775807');
   });
 });

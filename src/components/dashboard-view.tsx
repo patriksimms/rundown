@@ -405,10 +405,28 @@ export function Result({
     );
   if (!rows.length || !dimensionColumns.length || !metricColumns.length)
     return <p className="text-sm text-muted-foreground">No rows for this date range.</p>;
-  const dimension = dimensionColumns[0]!;
-  const chartRows = normalizeMetricValues(rows, metricColumns);
+  let dimension = dimensionColumns[0]!;
+  let chartRows = normalizeMetricValues(rows, metricColumns);
+  let chartMetrics = metricColumns;
+  if (definition.type === 'bar' && definition.breakdownDimension && dimensionColumns[1]) {
+    const shaped = pivotBreakdownRows(
+      chartRows,
+      dimension.key,
+      dimensionColumns[1].key,
+      metricColumns[0]!,
+    );
+    chartRows = shaped.rows;
+    chartMetrics = shaped.metrics;
+  }
+  if (definition.type === 'pie' && definition.breakdownDimension && dimensionColumns[1]) {
+    chartRows = chartRows.map((row) => ({
+      ...row,
+      breakdown_label: `${String(row[dimension.key])} · ${String(row[dimensionColumns[1]!.key])}`,
+    }));
+    dimension = { ...dimension, key: 'breakdown_label' };
+  }
   const config = Object.fromEntries(
-    metricColumns.map((metric, index) => [
+    chartMetrics.map((metric, index) => [
       metric.key,
       { label: metric.label, color: `var(--chart-${(index % 5) + 1})` },
     ]),
@@ -449,7 +467,7 @@ export function Result({
           />
           <YAxis tickFormatter={(value) => formatAxisValue(value, metricColumns[0]!)} />
           {tooltip}
-          {metricColumns.map((metric) => (
+          {chartMetrics.map((metric) => (
             <Bar key={metric.key} dataKey={metric.key} fill={`var(--color-${metric.key})`} />
           ))}
         </BarChart>
@@ -463,12 +481,30 @@ export function Result({
           dataKey={dimension.key}
           tickFormatter={(value) => formatAxisValue(value, dimension)}
         />
-        <YAxis tickFormatter={(value) => formatAxisValue(value, metricColumns[0]!)} />
+        {metricColumns.some((metric) => metric.dataType !== 'percent') ? (
+          <YAxis yAxisId="number" />
+        ) : null}
+        {metricColumns.some((metric) => metric.dataType === 'percent') ? (
+          <YAxis
+            yAxisId="percent"
+            orientation={
+              metricColumns.some((metric) => metric.dataType !== 'percent') ? 'right' : 'left'
+            }
+            tickFormatter={(value) =>
+              new Intl.NumberFormat(undefined, {
+                style: 'percent',
+                notation: 'compact',
+                maximumFractionDigits: 1,
+              }).format(Number(value))
+            }
+          />
+        ) : null}
         {tooltip}
         {metricColumns.map((metric) => (
           <Line
             key={metric.key}
             dataKey={metric.key}
+            yAxisId={metric.dataType === 'percent' ? 'percent' : 'number'}
             stroke={`var(--color-${metric.key})`}
             dot={false}
           />
@@ -527,7 +563,32 @@ function numericMetricValue(value: unknown, column: QueryResultColumn) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
   if (typeof value !== 'string' || !value.trim()) return undefined;
   const number = Number(value);
+  if (/^[+-]?\d+$/u.test(value.trim()) && !Number.isSafeInteger(number)) return undefined;
   return Number.isFinite(number) ? number : undefined;
+}
+
+function pivotBreakdownRows(
+  rows: Record<string, unknown>[],
+  dimensionKey: string,
+  breakdownKey: string,
+  metric: QueryResultColumn,
+) {
+  const labels = [...new Set(rows.map((row) => String(row[breakdownKey])))];
+  const metrics = labels.map((label, index) => ({
+    ...metric,
+    key: `breakdown_${index + 1}`,
+    label,
+  }));
+  const metricByLabel = new Map(metrics.map((item) => [item.label, item]));
+  const pivoted = new Map<unknown, Record<string, unknown>>();
+  for (const row of rows) {
+    const dimension = row[dimensionKey];
+    const target = pivoted.get(dimension) ?? { [dimensionKey]: dimension };
+    const series = metricByLabel.get(String(row[breakdownKey]));
+    if (series) target[series.key] = row[metric.key];
+    pivoted.set(dimension, target);
+  }
+  return { rows: [...pivoted.values()], metrics };
 }
 
 function normalizeMetricValues(rows: Record<string, unknown>[], metrics: QueryResultColumn[]) {
