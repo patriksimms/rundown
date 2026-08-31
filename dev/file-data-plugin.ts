@@ -2,6 +2,7 @@ import { createReadStream } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { Plugin } from 'vite';
+import { paginateObjects } from '../src/data/listing';
 
 const route = '/__dev-data';
 const supportedExtensions = new Set(['.csv', '.parquet']);
@@ -24,16 +25,18 @@ export function fileDataPlugin(directory = 'dev-data'): Plugin {
             const prefix = url.searchParams.get('prefix') ?? '';
             const workspace = workspacePath(prefix);
             const files = await listFiles(root, workspace.localPrefix);
+            const page = paginateObjects(files, url.searchParams.get('cursor') ?? undefined);
             response.setHeader('content-type', 'application/json');
             response.end(
               JSON.stringify({
-                objects: files.slice(0, 1000).map((file) => ({
+                objects: page.objects.map((file) => ({
                   key: `${workspace.keyPrefix}${file.key}`,
                   size: file.size,
                   etag: file.etag,
                   uploaded: file.uploaded.toISOString(),
                 })),
-                truncated: files.length > 1000,
+                truncated: page.truncated,
+                cursor: page.cursor,
               }),
             );
             return;

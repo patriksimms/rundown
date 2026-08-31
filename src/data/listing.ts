@@ -4,6 +4,19 @@ export interface ObjectPage<T> {
   cursor?: string;
 }
 
+export function paginateObjects<T>(objects: T[], cursor?: string, limit = 1_000): ObjectPage<T> {
+  const offset = cursor === undefined ? 0 : Number(cursor);
+  if (!Number.isSafeInteger(offset) || offset < 0)
+    throw new Error('Invalid object listing cursor.');
+  const nextOffset = offset + limit;
+  const truncated = nextOffset < objects.length;
+  return {
+    objects: objects.slice(offset, nextOffset),
+    truncated,
+    cursor: truncated ? String(nextOffset) : undefined,
+  };
+}
+
 export async function collectObjectPages<T>(load: (cursor?: string) => Promise<ObjectPage<T>>) {
   const objects: T[] = [];
   let cursor: string | undefined;
