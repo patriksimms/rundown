@@ -407,10 +407,7 @@ function QueryCard({
   useEffect(() => setPage(0), [controlState, dashboardId, widget.definition, widget.id]);
   useEffect(() => {
     let current = true;
-    setRows(undefined);
-    setColumns(undefined);
-    setComparisonRows(undefined);
-    setSummaryRow(undefined);
+    // Keep the last result usable if loading a new page fails.
     void callApi<{
       rows: Record<string, unknown>[];
       columns: QueryResultColumn[];
