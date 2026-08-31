@@ -28,6 +28,7 @@ export const dataSources = sqliteTable(
     id: text().primaryKey(),
     workspaceId: text('workspace_id').notNull(),
     name: text().notNull(),
+    connectorType: text('connector_type').notNull().default('duckdb-file'),
     location: text({ mode: 'json' }).notNull(),
     version: text().notNull(),
     createdAt: text('created_at').notNull(),
