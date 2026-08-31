@@ -5,6 +5,12 @@ import { SignInAction, SignUpAction } from '#/components/auth-actions';
 import { Button } from '#/components/ui/button';
 import { WorkspaceGate } from '#/components/workspace-gate';
 
+// Active sections are marked with foreground text and a bottom border that meets
+// the header rule. Inactive styling is kept separate so the two never both apply.
+const navLink = 'flex h-full items-center border-b-2 transition-colors hover:text-foreground';
+const navLinkActive = { className: 'border-foreground text-foreground' };
+const navLinkInactive = { className: 'border-transparent text-muted-foreground' };
+
 export function AppShell({
   children,
   requireWorkspace = false,
@@ -19,15 +25,32 @@ export function AppShell({
           <Link className="font-semibold tracking-tight" to="/">
             Rundown
           </Link>
-          <nav aria-label="Main" className="flex flex-1 items-center gap-4 text-sm">
+          <nav aria-label="Main" className="flex h-full flex-1 items-center gap-4 text-sm">
             <Show when="signed-in">
-              <Link className="text-muted-foreground hover:text-foreground" to="/">
+              <Link
+                className={navLink}
+                activeProps={navLinkActive}
+                inactiveProps={navLinkInactive}
+                // Dashboards live at the root, so only an exact match may light it up.
+                activeOptions={{ exact: true }}
+                to="/"
+              >
                 Dashboards
               </Link>
-              <Link className="text-muted-foreground hover:text-foreground" to="/datasources">
+              <Link
+                className={navLink}
+                activeProps={navLinkActive}
+                inactiveProps={navLinkInactive}
+                to="/datasources"
+              >
                 Datasources
               </Link>
-              <Link className="text-muted-foreground hover:text-foreground" to="/metrics">
+              <Link
+                className={navLink}
+                activeProps={navLinkActive}
+                inactiveProps={navLinkInactive}
+                to="/metrics"
+              >
                 Metrics
               </Link>
             </Show>
