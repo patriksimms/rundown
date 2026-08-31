@@ -3,8 +3,12 @@
     "src/**/*.ts",
     "src/**/*.tsx",
     "container/**/*.ts",
+    "dev/**/*.ts",
+    "tests/**/*.ts",
     "vite.config.ts",
-    "vitest.config.ts"
+    "vitest.config.ts",
+    "vitest.integration.config.ts",
+    "playwright.config.ts"
   ],
   "compilerOptions": {
     "target": "ES2022",
@@ -21,7 +25,12 @@
     "noUncheckedSideEffectImports": true,
     "skipLibCheck": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["./worker-configuration.d.ts", "node", "vite/client"],
+    "types": [
+      "./worker-configuration.d.ts",
+      "node",
+      "vite/client",
+      "@cloudflare/vitest-pool-workers/types"
+    ],
     "paths": {
       "#/*": ["./src/*"]
     }

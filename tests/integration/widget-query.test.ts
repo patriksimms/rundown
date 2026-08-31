@@ -1,0 +1,293 @@
+import { env } from 'cloudflare:workers';
+import { describe, expect, test } from 'vitest';
+import { signOut } from './doubles/clerk';
+import { queryEngine } from './doubles/query-engine';
+import {
+  addWidget,
+  callService,
+  createDashboard,
+  expectApiError,
+  regionControlDefinition,
+  scorecardDefinition,
+  seedDataSource,
+  signInToNewWorkspace,
+  type SeededDataSource,
+  type TestWorkspace,
+} from './fixtures';
+
+interface QueryResult {
+  rows: Array<Record<string, unknown>>;
+  columns: unknown[];
+  cache: 'hit' | 'miss';
+  controlState: { values?: Record<string, unknown[]> };
+  page?: number;
+  hasMore?: boolean;
+}
+
+async function seedScorecardDashboard() {
+  const workspace = await signInToNewWorkspace();
+  const source = await seedDataSource(workspace);
+  const dashboard = await createDashboard();
+  const widget = await addWidget(dashboard.id, scorecardDefinition(source));
+  return { workspace, source, dashboardId: dashboard.id, widgetId: widget.id };
+}
+
+async function addRegionControl(
+  dashboardId: string,
+  source: SeededDataSource,
+  options?: { allowMultiple?: boolean },
+) {
+  return addWidget(dashboardId, regionControlDefinition(source, options));
+}
+
+describe('widget queries', () => {
+  test('the compiled query reaches the engine and its rows come back', async () => {
+    const { dashboardId, widgetId } = await seedScorecardDashboard();
+    queryEngine.returnRows([{ revenue: 4200 }]);
+
+    const result = (await callService({
+      action: 'queryWidget',
+      dashboardId,
+      widgetId,
+    })) as QueryResult;
+
+    expect(result.rows).toEqual([{ revenue: 4200 }]);
+    expect(queryEngine.queryCalls).toHaveLength(1);
+    const [call] = queryEngine.queryCalls;
+    expect(call.sql).toContain('rundown_source');
+    // Local mode resolves the file itself, so the engine never receives R2 credentials.
+    expect(call.requiresR2Credentials).toBe(false);
+  });
+
+  test('an identical query is served from KV and a changed control is not', async () => {
+    const { source, dashboardId, widgetId } = await seedScorecardDashboard();
+    const control = await addRegionControl(dashboardId, source);
+    queryEngine.returnRows([{ revenue: 1 }]);
+
+    const first = (await callService({
+      action: 'queryWidget',
+      dashboardId,
+      widgetId,
+      controlState: { values: { [control.id]: ['north'] } },
+    })) as QueryResult;
+    expect(first.cache).toBe('miss');
+    expect(queryEngine.queryCalls).toHaveLength(1);
+
+    const second = (await callService({
+      action: 'queryWidget',
+      dashboardId,
+      widgetId,
+      controlState: { values: { [control.id]: ['north'] } },
+    })) as QueryResult;
+    expect(second.cache).toBe('hit');
+    expect(second.rows).toEqual([{ revenue: 1 }]);
+    // A hit must not reach the engine again.
+    expect(queryEngine.queryCalls).toHaveLength(1);
+
+    const narrowed = (await callService({
+      action: 'queryWidget',
+      dashboardId,
+      widgetId,
+      controlState: { values: { [control.id]: ['south'] } },
+    })) as QueryResult;
+    expect(narrowed.cache).toBe('miss');
+    expect(queryEngine.queryCalls).toHaveLength(2);
+
+    // One cached entry per distinct control selection.
+    expect((await env.QUERY_CACHE.list()).keys).toHaveLength(2);
+  });
+
+  test('a datasource version change invalidates the cached result', async () => {
+    const { source, dashboardId, widgetId } = await seedScorecardDashboard();
+    queryEngine.returnRows([{ revenue: 1 }]);
+    await callService({ action: 'queryWidget', dashboardId, widgetId });
+    expect(
+      ((await callService({ action: 'queryWidget', dashboardId, widgetId })) as QueryResult).cache,
+    ).toBe('hit');
+
+    const { createDatabase } = await import('#/db/client');
+    const { dataSources } = await import('#/db/schema');
+    const { eq } = await import('drizzle-orm');
+    await createDatabase(env.DB)
+      .update(dataSources)
+      .set({ version: 'source-v2' })
+      .where(eq(dataSources.id, source.id));
+
+    expect(
+      ((await callService({ action: 'queryWidget', dashboardId, widgetId })) as QueryResult).cache,
+    ).toBe('miss');
+  });
+
+  test('a share link can run the widget query without a session', async () => {
+    const { dashboardId, widgetId } = await seedScorecardDashboard();
+    const link = (await callService({
+      action: 'shareDashboard',
+      dashboardId,
+      operation: { kind: 'createLink' },
+    })) as { token: string };
+    queryEngine.returnRows([{ revenue: 7 }]);
+
+    signOut();
+    const result = (await callService({
+      action: 'queryWidget',
+      dashboardId,
+      widgetId,
+      shareToken: link.token,
+    })) as QueryResult;
+    expect(result.rows).toEqual([{ revenue: 7 }]);
+  });
+});
+
+describe('control validation', () => {
+  test('a control the dashboard does not have is rejected', async () => {
+    const { dashboardId, widgetId } = await seedScorecardDashboard();
+
+    await expectApiError(
+      callService({
+        action: 'queryWidget',
+        dashboardId,
+        widgetId,
+        controlState: { values: { widget_does_not_exist: ['north'] } },
+      }),
+      { status: 400, code: 'unknown_control' },
+    );
+    expect(queryEngine.queryCalls).toHaveLength(0);
+  });
+
+  test('a single-select control refuses several selections', async () => {
+    const { source, dashboardId, widgetId } = await seedScorecardDashboard();
+    const control = await addRegionControl(dashboardId, source, { allowMultiple: false });
+
+    await expectApiError(
+      callService({
+        action: 'queryWidget',
+        dashboardId,
+        widgetId,
+        controlState: { values: { [control.id]: ['north', 'south'] } },
+      }),
+      { status: 400, code: 'multiple_values_not_allowed' },
+    );
+
+    const accepted = (await callService({
+      action: 'queryWidget',
+      dashboardId,
+      widgetId,
+      controlState: { values: { [control.id]: ['north'] } },
+    })) as QueryResult;
+    expect(accepted.controlState.values?.[control.id]).toEqual(['north']);
+  });
+
+  test('a single-select control refuses several default values', async () => {
+    const { source, dashboardId } = await seedScorecardDashboard();
+
+    await expectApiError(
+      callService({
+        action: 'addWidget',
+        dashboardId,
+        definition: regionControlDefinition(source, {
+          allowMultiple: false,
+          defaultValues: ['north', 'south'],
+        }),
+        width: 3,
+        height: 1,
+      }),
+      { status: 400, code: 'multiple_default_values_not_allowed' },
+    );
+  });
+
+  test('control defaults seed the state the query runs with', async () => {
+    const { source, dashboardId, widgetId } = await seedScorecardDashboard();
+    const control = await addWidget(
+      dashboardId,
+      regionControlDefinition(source, { defaultValues: ['north'] }),
+    );
+
+    const opened = (await callService({ action: 'getDashboard', dashboardId })) as {
+      controlState: { values?: Record<string, unknown[]> };
+    };
+    expect(opened.controlState.values?.[control.id]).toEqual(['north']);
+
+    const result = (await callService({
+      action: 'queryWidget',
+      dashboardId,
+      widgetId,
+    })) as QueryResult;
+    expect(result.controlState.values?.[control.id]).toEqual(['north']);
+  });
+});
+
+describe('query engine failures', () => {
+  test('a rejected query surfaces as an invalid query error', async () => {
+    const { dashboardId, widgetId } = await seedScorecardDashboard();
+    queryEngine.rejectQueries(400, 'Binder Error: Referenced column "missing" not found');
+
+    const error = await expectApiError(
+      callService({ action: 'queryWidget', dashboardId, widgetId }),
+      { status: 400, code: 'invalid_query' },
+    );
+    expect(error.message).toContain('Binder Error');
+    // A failed query must not be cached.
+    expect((await env.QUERY_CACHE.list()).keys).toEqual([]);
+    expect(queryEngine.queryCalls).toHaveLength(1);
+  });
+
+  test('an engine outage stays an internal error rather than a query error', async () => {
+    const { dashboardId, widgetId } = await seedScorecardDashboard();
+    queryEngine.rejectQueries(503, 'container unavailable');
+
+    await expect(callService({ action: 'queryWidget', dashboardId, widgetId })).rejects.toThrow(
+      'container unavailable',
+    );
+  });
+
+  test('a widget definition that the engine cannot explain is not persisted', async () => {
+    const workspace = await signInToNewWorkspace();
+    const source = await seedDataSource(workspace);
+    const dashboard = await createDashboard();
+    queryEngine.answerWith(() => ({
+      status: 400,
+      body: { ok: false, error: 'Binder Error: unknown aggregate' },
+    }));
+
+    await expect(
+      callService({
+        action: 'addWidget',
+        dashboardId: dashboard.id,
+        definition: scorecardDefinition(source),
+        width: 4,
+        height: 3,
+      }),
+    ).rejects.toThrow('Binder Error: unknown aggregate');
+
+    queryEngine.reset();
+    queryEngine.install();
+    const opened = (await callService({ action: 'getDashboard', dashboardId: dashboard.id })) as {
+      dashboard: { widgets: unknown[] };
+    };
+    expect(opened.dashboard.widgets).toEqual([]);
+  });
+
+  test('a widget cannot reference a field from another datasource', async () => {
+    const workspace: TestWorkspace = await signInToNewWorkspace();
+    const source = await seedDataSource(workspace);
+    const other = await seedDataSource(workspace);
+    const dashboard = await createDashboard();
+
+    await expectApiError(
+      callService({
+        action: 'addWidget',
+        dashboardId: dashboard.id,
+        definition: {
+          ...scorecardDefinition(source),
+          metric: {
+            source: { kind: 'field', fieldId: other.fieldIds.revenue, aggregation: 'sum' },
+            dataType: 'currency',
+          },
+        },
+        width: 4,
+        height: 3,
+      }),
+      { status: 400, code: 'unknown_field' },
+    );
+  });
+});

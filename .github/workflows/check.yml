@@ -8,6 +8,7 @@ on:
 
 jobs:
   check:
+    name: Lint, types, and unit tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,3 +24,62 @@ jobs:
             exit 1
           fi
       - run: bun run check
+
+  integration:
+    name: Worker integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
+      - run: bun install --frozen-lockfile
+      - run: bun run test:integration
+
+  browser:
+    name: Browser tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
+      - name: Collect the Clerk development instance configuration
+        env:
+          VITE_CLERK_PUBLISHABLE_KEY: ${{ vars.VITE_CLERK_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          E2E_CLERK_USER_USERNAME: ${{ secrets.E2E_CLERK_USER_USERNAME }}
+          E2E_CLERK_USER_PASSWORD: ${{ secrets.E2E_CLERK_USER_PASSWORD }}
+        run: |
+          missing=()
+          [ -n "$VITE_CLERK_PUBLISHABLE_KEY" ] || missing+=("repository variable VITE_CLERK_PUBLISHABLE_KEY")
+          [ -n "$CLERK_SECRET_KEY" ] || missing+=("repository secret CLERK_SECRET_KEY")
+          [ -n "$E2E_CLERK_USER_USERNAME" ] || missing+=("repository secret E2E_CLERK_USER_USERNAME")
+          [ -n "$E2E_CLERK_USER_PASSWORD" ] || missing+=("repository secret E2E_CLERK_USER_PASSWORD")
+          if [ ${#missing[@]} -ne 0 ]; then
+            echo "The browser suite needs a Clerk development instance. Configure:"
+            printf '  - %s\n' "${missing[@]}"
+            echo "The test user must belong to a Clerk organization."
+            exit 1
+          fi
+          # The dev server reads Worker secrets from .env.local, which is never committed.
+          {
+            echo "VITE_CLERK_PUBLISHABLE_KEY=$VITE_CLERK_PUBLISHABLE_KEY"
+            echo "CLERK_SECRET_KEY=$CLERK_SECRET_KEY"
+            echo "CLERK_TELEMETRY_DISABLED=1"
+          } > .env.local
+      - run: bun install --frozen-lockfile
+      - run: bun run db:migrate:local
+      - run: bunx playwright install --with-deps chromium
+      - run: bun run test:e2e
+        env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          E2E_CLERK_USER_USERNAME: ${{ secrets.E2E_CLERK_USER_USERNAME }}
+          E2E_CLERK_USER_PASSWORD: ${{ secrets.E2E_CLERK_USER_PASSWORD }}
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore

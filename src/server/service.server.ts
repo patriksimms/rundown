@@ -1383,6 +1383,8 @@ async function validateDefinition(dashboard: DashboardDocument, definition: Widg
       'unknown_field',
       'The widget references a field that does not belong to its datasource.',
     );
+  // Filter controls read a datasource but never compile to a query of their own.
+  if (!compilesToQuery(definition)) return;
   const compiled = compileWidgetQuery({
     dashboard,
     definition,
@@ -1465,7 +1467,7 @@ async function runDefinition(
 }
 
 async function compiledSql(dashboard: DashboardDocument, widget: DashboardWidget) {
-  if (!('dataSourceId' in widget.definition)) return null;
+  if (!compilesToQuery(widget.definition)) return null;
   const dataSource = await loadDataSource(widget.definition.dataSourceId, dashboard.workspaceId);
   const metadata = await loadQueryMetadata(dataSource.id, dashboard.workspaceId);
   return compileWidgetQuery({
@@ -1558,6 +1560,10 @@ async function resolveControls(
 
 function compatibleSemanticTypes(left: string, right: string) {
   return left === right || (left === 'text' && right === 'text');
+}
+
+function compilesToQuery(definition: WidgetDefinition) {
+  return 'dataSourceId' in definition && 'dateRangeFieldId' in definition;
 }
 
 function definitionFieldIds(definition: WidgetDefinition) {
