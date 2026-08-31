@@ -898,7 +898,12 @@ function WidgetSettings({
                 commit={commit}
               />
               <FilterSettings definition={definition} fields={fields} commit={commit} />
-              <TypeSettings definition={definition} fields={fields} commit={commit} />
+              <TypeSettings
+                definition={definition}
+                fields={fields}
+                source={source}
+                commit={commit}
+              />
               <div className="flex flex-wrap gap-2">
                 <Button variant="outline" size="sm" onClick={() => setFormulaOpen(true)}>
                   <PlusIcon data-icon="inline-start" /> Custom metric
@@ -1424,7 +1429,12 @@ function FilterValueInput({
   );
 }
 
-function TypeSettings({ definition, fields, commit }: QuerySettingsProps) {
+function TypeSettings({
+  definition,
+  fields,
+  source,
+  commit,
+}: QuerySettingsProps & { source?: SourceDescription }) {
   const dimensions = fields.filter((field) => field.role !== 'metric' && field.role !== 'date');
   switch (definition.type) {
     case 'scorecard':
@@ -1446,16 +1456,26 @@ function TypeSettings({ definition, fields, commit }: QuerySettingsProps) {
             <FieldLabel>Upper limit</FieldLabel>
             <NativeSelect
               value={definition.upperLimit?.kind ?? 'none'}
-              onChange={(event) =>
-                void commit({
-                  ...definition,
-                  upperLimit:
-                    event.target.value === 'manual' ? { kind: 'manual', value: 100 } : undefined,
-                })
-              }
+              onChange={(event) => {
+                const kind = event.target.value;
+                if (kind === 'manual') {
+                  void commit({ ...definition, upperLimit: { kind, value: 100 } });
+                  return;
+                }
+                if (kind === 'library') {
+                  const libraryMetricId = source?.libraryMetrics[0]?.id;
+                  if (!libraryMetricId) return;
+                  void commit({ ...definition, upperLimit: { kind, libraryMetricId } });
+                  return;
+                }
+                void commit({ ...definition, upperLimit: undefined });
+              }}
             >
               <NativeSelectOption value="none">Automatic</NativeSelectOption>
               <NativeSelectOption value="manual">Manual</NativeSelectOption>
+              {source?.libraryMetrics.length || definition.upperLimit?.kind === 'library' ? (
+                <NativeSelectOption value="library">Library metric</NativeSelectOption>
+              ) : null}
             </NativeSelect>
           </Field>
           {definition.upperLimit?.kind === 'manual' ? (
@@ -1469,6 +1489,30 @@ function TypeSettings({ definition, fields, commit }: QuerySettingsProps) {
                   commit({ ...definition, upperLimit: { kind: 'manual', value } })
                 }
               />
+            </Field>
+          ) : null}
+          {definition.upperLimit?.kind === 'library' ? (
+            <Field>
+              <FieldLabel htmlFor="gauge-upper-limit-metric">Maximum metric</FieldLabel>
+              <NativeSelect
+                id="gauge-upper-limit-metric"
+                value={definition.upperLimit.libraryMetricId}
+                onChange={(event) =>
+                  void commit({
+                    ...definition,
+                    upperLimit: {
+                      kind: 'library',
+                      libraryMetricId: event.target.value,
+                    },
+                  })
+                }
+              >
+                {source?.libraryMetrics.map((metric) => (
+                  <NativeSelectOption key={metric.id} value={metric.id}>
+                    {metric.name}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
             </Field>
           ) : null}
         </>
@@ -2037,20 +2081,31 @@ function CalculatedFieldDialog({
   const [name, setName] = useState('');
   const [expression, setExpression] = useState('');
   const [role, setRole] = useState<'dimension' | 'metric'>('dimension');
+  const [error, setError] = useState<string>();
+  const [submitting, setSubmitting] = useState(false);
   async function submit(event: FormEvent) {
     event.preventDefault();
-    await callApi({
-      action: 'upsertCalculatedField',
-      dashboardId,
-      dataSourceId: sourceId,
-      name,
-      expression,
-      role,
-      semanticType: role === 'metric' ? 'count' : 'text',
-      defaultAggregation: role === 'metric' ? 'sum' : null,
-    });
-    await onSaved();
-    onOpenChange(false);
+    if (submitting) return;
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await callApi({
+        action: 'upsertCalculatedField',
+        dashboardId,
+        dataSourceId: sourceId,
+        name,
+        expression,
+        role,
+        semanticType: role === 'metric' ? 'count' : 'text',
+        defaultAggregation: role === 'metric' ? 'sum' : null,
+      });
+      onOpenChange(false);
+      await onSaved();
+    } catch (caught) {
+      setError(message(caught));
+    } finally {
+      setSubmitting(false);
+    }
   }
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -2084,8 +2139,9 @@ function CalculatedFieldDialog({
                 <NativeSelectOption value="metric">Metric</NativeSelectOption>
               </NativeSelect>
             </Field>
-            <Button type="submit" disabled={!name.trim() || !expression.trim()}>
-              Create dimension
+            {error ? <p className="text-sm text-destructive">{error}</p> : null}
+            <Button type="submit" disabled={submitting || !name.trim() || !expression.trim()}>
+              {submitting ? 'Creating…' : 'Create dimension'}
             </Button>
           </FieldGroup>
         </form>

@@ -1,8 +1,10 @@
-import { createReadStream } from 'node:fs';
-import { readdir, stat } from 'node:fs/promises';
-import { extname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { mkdir, readdir, rename, stat, unlink } from 'node:fs/promises';
+import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import type { Plugin } from 'vite';
-import { paginateObjects } from '../src/data/listing';
+import { paginateObjects } from '../src/data/listing.ts';
+import { MAX_DATASOURCE_FILE_BYTES } from '../src/domain/datasource-upload.ts';
 
 const route = '/__dev-data';
 const supportedExtensions = new Set(['.csv', '.parquet']);
@@ -42,12 +44,47 @@ export function fileDataPlugin(directory = 'dev-data'): Plugin {
             return;
           }
 
-          if (request.method !== 'GET' && request.method !== 'HEAD')
-            return methodNotAllowed(response);
           const key = decodeURIComponent(url.pathname.slice(route.length + 1));
           const file = safeFilePath(root, workspacePath(key).localPrefix);
           if (!file || !supportedExtensions.has(extname(file).toLowerCase()))
             return notFound(response);
+          if (request.method === 'PUT') {
+            const contentLength = Number(request.headers['content-length']);
+            if (
+              !Number.isSafeInteger(contentLength) ||
+              contentLength < 1 ||
+              contentLength > MAX_DATASOURCE_FILE_BYTES
+            ) {
+              response.statusCode = 413;
+              response.end();
+              return;
+            }
+            await mkdir(dirname(file), { recursive: true });
+            const temporaryFile = resolve(
+              dirname(file),
+              `.${basename(file)}.${crypto.randomUUID()}.upload`,
+            );
+            try {
+              await pipeline(request, createWriteStream(temporaryFile));
+              await rename(temporaryFile, file);
+            } catch (error) {
+              await unlink(temporaryFile).catch(() => undefined);
+              throw error;
+            }
+            response.statusCode = 201;
+            response.end();
+            return;
+          }
+          if (request.method === 'DELETE') {
+            await unlink(file).catch((error: NodeJS.ErrnoException) => {
+              if (error.code !== 'ENOENT') throw error;
+            });
+            response.statusCode = 204;
+            response.end();
+            return;
+          }
+          if (request.method !== 'GET' && request.method !== 'HEAD')
+            return methodNotAllowed(response);
           const metadata = await stat(file).catch(() => undefined);
           if (!metadata?.isFile()) return notFound(response);
 
@@ -164,6 +201,6 @@ function notFound(response: import('node:http').ServerResponse) {
 
 function methodNotAllowed(response: import('node:http').ServerResponse) {
   response.statusCode = 405;
-  response.setHeader('allow', 'GET, HEAD');
+  response.setHeader('allow', 'GET, HEAD, PUT, DELETE');
   response.end();
 }

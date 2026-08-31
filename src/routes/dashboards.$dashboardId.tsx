@@ -20,6 +20,14 @@ interface DashboardPayload {
 }
 
 function DashboardPage() {
+  return (
+    <AppShell requireWorkspace>
+      <DashboardContent />
+    </AppShell>
+  );
+}
+
+function DashboardContent() {
   const { dashboardId } = Route.useParams();
   const [payload, setPayload] = useState<DashboardPayload>();
   const [error, setError] = useState<string>();
@@ -41,46 +49,42 @@ function DashboardPage() {
     onMutation: refresh,
   });
   return (
-    <AppShell>
-      <main className="mx-auto w-full max-w-[100rem] px-4 py-6 sm:px-6">
-        {error ? (
-          <ErrorState error={error} />
-        ) : !payload ? (
-          <LoadingState />
-        ) : (
-          <div className="flex flex-col gap-5">
-            <header className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-3xl font-semibold tracking-tight">
-                    {payload.dashboard.name}
-                  </h1>
-                  <Badge variant="secondary">{payload.role}</Badge>
-                </div>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {payload.dashboard.timezone} · {payload.dashboard.widgets.length} widgets
-                </p>
+    <main className="mx-auto w-full max-w-[100rem] px-4 py-6 sm:px-6">
+      {error ? (
+        <ErrorState error={error} />
+      ) : !payload ? (
+        <LoadingState />
+      ) : (
+        <div className="flex flex-col gap-5">
+          <header className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-3xl font-semibold tracking-tight">{payload.dashboard.name}</h1>
+                <Badge variant="secondary">{payload.role}</Badge>
               </div>
-              {canEdit ? (
-                <DashboardSharing
-                  dashboardId={dashboardId}
-                  sharing={payload.sharing ?? { links: [], grants: [] }}
-                  refresh={refresh}
-                />
-              ) : null}
-            </header>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {payload.dashboard.timezone} · {payload.dashboard.widgets.length} widgets
+              </p>
+            </div>
             {canEdit ? (
-              <DashboardBuilder
-                dashboard={payload.dashboard}
-                dataSources={payload.dataSources}
+              <DashboardSharing
+                dashboardId={dashboardId}
+                sharing={payload.sharing ?? { links: [], grants: [] }}
                 refresh={refresh}
               />
-            ) : (
-              <DashboardView dashboard={payload.dashboard} />
-            )}
-          </div>
-        )}
-      </main>
-    </AppShell>
+            ) : null}
+          </header>
+          {canEdit ? (
+            <DashboardBuilder
+              dashboard={payload.dashboard}
+              dataSources={payload.dataSources}
+              refresh={refresh}
+            />
+          ) : (
+            <DashboardView dashboard={payload.dashboard} />
+          )}
+        </div>
+      )}
+    </main>
   );
 }

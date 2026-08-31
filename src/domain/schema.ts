@@ -1,5 +1,22 @@
 import { z } from 'zod';
 
+export const timezoneSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .refine(
+    (timezone) => {
+      if (/^[+-]/.test(timezone)) return false;
+      try {
+        new Intl.DateTimeFormat('en', { timeZone: timezone });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { message: 'Use a valid IANA timezone name.' },
+  );
+
 export const fieldRoleSchema = z.enum(['dimension', 'metric', 'date', 'id']);
 export const semanticTypeSchema = z.enum(['currency', 'count', 'ratio', 'text', 'date', 'id']);
 export const aggregationSchema = z.enum([
@@ -203,6 +220,7 @@ export const dashboardDocumentSchema = z.object({
   workspaceId: z.string().min(1),
   name: z.string().trim().min(1),
   schemaVersion: z.literal(2),
+  // Persisted documents predate strict timezone validation. Requests validate new values.
   timezone: z.string().min(1).default('Europe/Berlin'),
   defaultDateRange: dateRangeSchema,
   columns: z.number().int().positive().default(12),

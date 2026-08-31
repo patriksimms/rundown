@@ -37,7 +37,7 @@ interface Bootstrap {
 
 function Home() {
   return (
-    <AppShell>
+    <AppShell requireWorkspace>
       <Show when="signed-out">
         <LandingPage />
       </Show>

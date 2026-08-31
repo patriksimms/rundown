@@ -39,6 +39,20 @@ export const dataSources = sqliteTable(
   ],
 );
 
+export const datasourceUploads = sqliteTable(
+  'datasource_uploads',
+  {
+    key: text().primaryKey(),
+    workspaceId: text('workspace_id').notNull(),
+    clerkUserId: text('clerk_user_id').notNull(),
+    status: text({ enum: ['pending', 'registering', 'removing'] }).notNull(),
+    claimId: text('claim_id'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [index('datasource_uploads_workspace_id_idx').on(table.workspaceId)],
+);
+
 export const fields = sqliteTable(
   'fields',
   {

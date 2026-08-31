@@ -20,6 +20,26 @@ test('the signed-out product shell is usable', async ({ page }) => {
   await expect(page.getByText('Client reporting without the rebuild')).toBeVisible();
 });
 
+test('authentication opens in place and closing it preserves the URL', async ({ page }) => {
+  await page.goto('/?entry=landing');
+  const initialUrl = page.url();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        Boolean((window as Window & { Clerk?: { loaded?: boolean } }).Clerk?.loaded),
+      ),
+    )
+    .toBe(true);
+
+  await page.getByRole('main').getByRole('button', { name: 'Sign in' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  expect(page.url()).toBe(initialUrl);
+
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).not.toBeVisible();
+  expect(page.url()).toBe(initialUrl);
+});
+
 test('the landing page serves both product screenshots', async ({ page }) => {
   await page.goto('/');
 
