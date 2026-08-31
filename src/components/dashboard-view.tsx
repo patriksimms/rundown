@@ -55,34 +55,77 @@ export function DashboardView({
   const [controlState, setControlState] = useState<ControlState>(() =>
     initialControlState(dashboard),
   );
+  const [controlsOpen, setControlsOpen] = useState(true);
   const ordered = [...dashboard.widgets].sort(
     (left, right) => left.layout.y - right.layout.y || left.layout.x - right.layout.x,
   );
-  return (
-    <div className="grid grid-cols-1 gap-4 md:auto-rows-[4rem] md:grid-cols-12">
-      {ordered.map((widget) => (
-        <div
-          key={widget.id}
-          className="min-w-0 md:[grid-column:var(--grid-column)] md:[grid-row:var(--grid-row)] [&>[data-slot=card]]:h-full"
-          style={
-            {
-              '--grid-column': `${widget.layout.x + 1} / span ${Math.min(widget.layout.width, 12)}`,
-              '--grid-row': `${widget.layout.y + 1} / span ${widget.layout.height}`,
-            } as CSSProperties
-          }
-        >
-          <Widget
-            widget={widget}
-            dashboardId={dashboard.id}
-            timezone={dashboard.timezone}
-            shareToken={shareToken}
-            controlState={controlState}
-            setControlState={setControlState}
-          />
-        </div>
-      ))}
+  const controls = ordered.filter((widget) => isControlWidget(widget));
+  const cards = ordered.filter((widget) => !isControlWidget(widget));
+  const renderWidget = (widget: DashboardWidget) => (
+    <div
+      key={widget.id}
+      className="min-w-0 md:[grid-column:var(--grid-column)] md:[grid-row:var(--grid-row)] [&>[data-slot=card]]:h-full"
+      style={
+        {
+          '--grid-column': `${widget.layout.x + 1} / span ${Math.min(widget.layout.width, 12)}`,
+          '--grid-row': `${widget.layout.y + 1} / span ${widget.layout.height}`,
+        } as CSSProperties
+      }
+    >
+      <Widget
+        widget={widget}
+        dashboardId={dashboard.id}
+        timezone={dashboard.timezone}
+        shareToken={shareToken}
+        controlState={controlState}
+        setControlState={setControlState}
+      />
     </div>
   );
+  return (
+    <div className="grid grid-cols-1 gap-4 md:auto-rows-[4rem] md:grid-cols-12">
+      {/*
+        Below md the controls sit in a sticky bar above the widgets. `md:contents` dissolves both
+        wrappers on larger screens so each control keeps its stored grid placement, and each control
+        stays mounted exactly once either way.
+      */}
+      {controls.length ? (
+        <div
+          className="sticky top-0 z-30 -mx-4 border-b bg-background/95 px-4 py-3 backdrop-blur-sm sm:-mx-6 sm:px-6 md:contents"
+          role="region"
+          aria-label="Dashboard controls"
+        >
+          <div className="flex items-center justify-between gap-2 md:hidden">
+            <h2 className="text-sm font-medium">Controls</h2>
+            <Button
+              variant="outline"
+              size="sm"
+              aria-expanded={controlsOpen}
+              aria-controls="dashboard-controls"
+              onClick={() => setControlsOpen((open) => !open)}
+            >
+              {controlsOpen ? 'Hide controls' : 'Show controls'}
+            </Button>
+          </div>
+          <div
+            id="dashboard-controls"
+            className={
+              controlsOpen
+                ? 'mt-3 flex max-h-[45vh] flex-col gap-3 overflow-y-auto md:contents'
+                : 'hidden md:contents'
+            }
+          >
+            {controls.map(renderWidget)}
+          </div>
+        </div>
+      ) : null}
+      {cards.map(renderWidget)}
+    </div>
+  );
+}
+
+function isControlWidget(widget: DashboardWidget) {
+  return widget.definition.type === 'control' || widget.definition.type === 'dateControl';
 }
 
 function Widget({

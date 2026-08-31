@@ -1,0 +1,60 @@
+import { expect, test } from '@playwright/test';
+import { mockRundownApi } from './support/rundown-api';
+
+test.use({ viewport: { width: 375, height: 780 } });
+
+const documentOverflow = () =>
+  document.documentElement.scrollWidth - document.documentElement.clientWidth;
+
+test('a phone viewer reaches the controls from a sticky bar and never scrolls sideways', async ({
+  page,
+}) => {
+  await mockRundownApi(page, { role: 'viewer' });
+  await page.goto('/dashboards/dash_demo');
+  await expect(page.getByRole('heading', { name: 'Client weekly' })).toBeVisible();
+
+  const controls = page.getByRole('region', { name: 'Dashboard controls' });
+  await expect(controls.getByText('Date range')).toBeVisible();
+  await expect(controls.getByRole('button', { name: 'Choose Platform values' })).toBeVisible();
+  // Data widgets stay out of the control bar.
+  await expect(controls.getByText('Media spend')).toHaveCount(0);
+  await expect(page.getByText('Media spend')).toBeVisible();
+
+  for (const width of [320, 375]) {
+    await page.setViewportSize({ width, height: 780 });
+    expect(await page.evaluate(documentOverflow)).toBeLessThanOrEqual(0);
+  }
+
+  // The bar stays reachable after scrolling down to the widgets.
+  await page.mouse.wheel(0, 2000);
+  await expect(page.getByRole('button', { name: 'Hide controls' })).toBeInViewport();
+
+  // The filter popover is portalled, so the scrollable bar must not clip it.
+  await page.getByRole('button', { name: 'Choose Platform values' }).click();
+  await page.getByRole('option', { name: 'TikTok' }).click();
+  await page.keyboard.press('Escape');
+  await expect(controls.getByRole('button', { name: 'Remove TikTok' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Hide controls' }).click();
+  await expect(page.getByText('Date range')).toBeHidden();
+  await page.getByRole('button', { name: 'Show controls' }).click();
+  await expect(page.getByText('Date range')).toBeVisible();
+});
+
+test('a phone editor edits a widget in a sheet that closes on Escape', async ({ page }) => {
+  await mockRundownApi(page, { role: 'editor' });
+  await page.goto('/dashboards/dash_demo');
+  await expect(page.getByRole('heading', { name: 'Client weekly' })).toBeVisible();
+
+  const edit = page.getByRole('button', { name: 'Edit Media spend' });
+  await edit.click();
+  const sheet = page.getByRole('dialog');
+  await expect(sheet.getByRole('heading', { name: 'Media spend' })).toBeVisible();
+  await expect(sheet.getByLabel('Title')).toHaveValue('Media spend');
+
+  await page.keyboard.press('Escape');
+  await expect(sheet).toBeHidden();
+  await expect(edit).toBeFocused();
+
+  expect(await page.evaluate(documentOverflow)).toBeLessThanOrEqual(0);
+});
