@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  controlDefaultValues,
   mergeControlState,
   singleValueControlWithMultipleSelections,
   toggleControlValue,
@@ -126,6 +127,22 @@ describe('dashboard control defaults', () => {
     expect(
       singleValueControlWithMultipleSelections(dashboard, { values: { region: ['EMEA'] } }),
     ).toBeUndefined();
+  });
+
+  it('limits persisted single-select defaults to one value', () => {
+    const widget = {
+      id: 'region',
+      definition: {
+        type: 'control' as const,
+        dataSourceId: 'source',
+        fieldId: 'region',
+        allowMultiple: false,
+        defaultValues: ['EMEA', 'APAC'],
+      },
+      layout: { x: 0, y: 0, width: 3, height: 1 },
+      definitionHash: 'hash',
+    };
+    expect(controlDefaultValues(widget)).toEqual(['EMEA']);
   });
 
   it('replaces a single selection and toggles multiple selections', () => {

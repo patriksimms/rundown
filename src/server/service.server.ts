@@ -29,6 +29,7 @@ import { comparisonDateRange, resolveDateRange } from '#/domain/dates';
 import { queryCacheState, widgetDependencyState } from '#/domain/cache';
 import { remapWidgetDefinition } from '#/domain/remap';
 import {
+  controlDefaultValues,
   mergeControlState,
   singleValueControlWithMultipleSelections,
 } from '#/domain/control-state';
@@ -1013,8 +1014,8 @@ function defaultControlState(dashboard: DashboardDocument): ControlState {
   const dateControl = dashboard.widgets.find((widget) => widget.definition.type === 'dateControl');
   const values = Object.fromEntries(
     dashboard.widgets.flatMap((widget) =>
-      widget.definition.type === 'control' && widget.definition.defaultValues?.length
-        ? [[widget.id, widget.definition.defaultValues]]
+      widget.definition.type === 'control' && controlDefaultValues(widget)?.length
+        ? [[widget.id, controlDefaultValues(widget)]]
         : [],
     ),
   );
@@ -1041,6 +1042,16 @@ function widgetById(document: DashboardDocument, widgetId: string) {
 }
 
 async function validateDefinition(dashboard: DashboardDocument, definition: WidgetDefinition) {
+  if (
+    definition.type === 'control' &&
+    !definition.allowMultiple &&
+    (definition.defaultValues?.length ?? 0) > 1
+  )
+    throw new ApiError(
+      400,
+      'multiple_default_values_not_allowed',
+      'A single-select filter accepts only one default value.',
+    );
   if (!('dataSourceId' in definition)) return;
   const dataSource = await loadDataSource(definition.dataSourceId, dashboard.workspaceId);
   const metadata = await loadQueryMetadata(dataSource.id, dashboard.workspaceId);

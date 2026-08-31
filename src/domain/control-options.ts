@@ -7,7 +7,7 @@ export function controlOptionsQuery(
   const where = search ? ` WHERE CAST(${expression} AS VARCHAR) ILIKE ?` : '';
   if (search) parameters.push(`%${search}%`);
   const exactFirst = search
-    ? `CASE WHEN CAST(${expression} AS VARCHAR) = ? THEN 0 ELSE 1 END, `
+    ? `MIN(CASE WHEN CAST(${expression} AS VARCHAR) = ? THEN 0 ELSE 1 END), `
     : '';
   if (search) parameters.push(search);
   return {

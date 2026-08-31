@@ -8,6 +8,12 @@ export function mergeControlState(defaults: ControlState, input?: ControlState):
   };
 }
 
+export function controlDefaultValues(widget: DashboardWidget) {
+  if (widget.definition.type !== 'control') return [];
+  const values = widget.definition.defaultValues ?? [];
+  return widget.definition.allowMultiple ? values : values?.slice(0, 1);
+}
+
 export function withDefaultDateRange(
   state: ControlState,
   dateRange: NonNullable<ControlState['dateRange']>,

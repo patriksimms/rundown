@@ -23,7 +23,7 @@ import { Input } from '#/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '#/components/ui/popover';
 import { Skeleton } from '#/components/ui/skeleton';
 import { widgetQueryRequest } from '#/domain/widget-query';
-import { toggleControlValue } from '#/domain/control-state';
+import { controlDefaultValues, toggleControlValue } from '#/domain/control-state';
 import {
   Table,
   TableBody,
@@ -563,8 +563,8 @@ export function initialControlState(dashboard: DashboardDocument): ControlState 
   const dateControl = dashboard.widgets.find((widget) => widget.definition.type === 'dateControl');
   const values = Object.fromEntries(
     dashboard.widgets.flatMap((widget) =>
-      widget.definition.type === 'control' && widget.definition.defaultValues?.length
-        ? [[widget.id, widget.definition.defaultValues]]
+      widget.definition.type === 'control' && controlDefaultValues(widget)?.length
+        ? [[widget.id, controlDefaultValues(widget)]]
         : [],
     ),
   );
