@@ -256,8 +256,20 @@ export async function mockRundownApi(page: Page, options: MockOptions = {}) {
         return ok(route, []);
       case 'listR2Objects':
         return ok(route, { objects: [] });
+      // A blanket success would let a test pass against an action the mock never
+      // implemented. Failing loudly points at the missing case instead.
       default:
-        return ok(route, {});
+        return route.fulfill({
+          status: 501,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            ok: false,
+            error: {
+              code: 'mock_action_not_implemented',
+              message: `The Rundown API mock does not implement ${request.action}.`,
+            },
+          }),
+        });
     }
   });
 
