@@ -63,6 +63,7 @@ export function queryCacheState(input: {
   requestedDateRange: unknown;
   resolvedDateRange: { start: string; end: string };
   resolvedControls: unknown;
+  dataSourceConnector: string;
   dataSourceVersion: string;
   timezone: string;
 }) {
@@ -76,7 +77,10 @@ export function queryCacheState(input: {
       },
       values: input.resolvedControls,
     },
-    dataSourceVersion: input.dataSourceVersion,
+    dataSource: {
+      connector: input.dataSourceConnector,
+      version: input.dataSourceVersion,
+    },
     timezone: input.timezone,
   };
 }

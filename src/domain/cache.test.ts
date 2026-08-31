@@ -108,6 +108,7 @@ describe('widget dependency cache state', () => {
       },
       resolvedDateRange: { start: '2026-08-01', end: '2026-08-29' },
       resolvedControls: [],
+      dataSourceConnector: 'duckdb-file',
       dataSourceVersion: 'version',
       timezone: 'Europe/Berlin',
     };
@@ -123,6 +124,25 @@ describe('widget dependency cache state', () => {
     );
     expect(nextDay).not.toBe(before);
     expect(otherTimezone).not.toBe(before);
+  });
+
+  it('separates datasource connectors even when their source version matches', async () => {
+    const state = {
+      definitionHash: 'definition',
+      requestedDateRange: {},
+      resolvedDateRange: { start: '2026-08-01', end: '2026-08-29' },
+      resolvedControls: [],
+      dataSourceConnector: 'duckdb-file',
+      dataSourceVersion: 'version',
+      timezone: 'Europe/Berlin',
+    };
+
+    const before = await hashJson(queryCacheState(state));
+    const after = await hashJson(
+      queryCacheState({ ...state, dataSourceConnector: 'another-connector' }),
+    );
+
+    expect(after).not.toBe(before);
   });
 });
 

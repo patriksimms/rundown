@@ -453,6 +453,7 @@ async function queryWidget(
     widget.definition.dataSourceId,
     access.document.workspaceId,
   );
+  const connector = connectorFor(dataSource);
   const metadata = await loadQueryMetadata(dataSource.id, access.document.workspaceId);
   const columns = queryResultColumns(widget.definition, metadata);
   const resolvedControls = await resolveControls(
@@ -481,6 +482,7 @@ async function queryWidget(
       requestedDateRange: dateRange,
       resolvedDateRange,
       resolvedControls: normalize(resolvedControls),
+      dataSourceConnector: connector.type,
       dataSourceVersion: dataSource.version,
       timezone: access.document.timezone,
     }),
@@ -498,7 +500,7 @@ async function queryWidget(
     offset?: number,
   ) =>
     datasourceOperation(() =>
-      connectorFor(dataSource).executeQuery<Record<string, unknown>>(dataSource, {
+      connector.executeQuery<Record<string, unknown>>(dataSource, {
         kind: 'widget',
         dashboard: access.document,
         definition: queryDefinition,
