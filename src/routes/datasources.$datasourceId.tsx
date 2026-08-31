@@ -1,7 +1,7 @@
 import { createColumnHelper, useTable } from '@tanstack/react-table';
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { ArrowLeftIcon, PlusIcon } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { callApi } from '#/api/client';
 import { AppShell } from '#/components/app-shell';
 import {
@@ -125,20 +125,32 @@ function DatasourceContent() {
     setDialog((current) => ({ session: current.session + 1, field }));
     setDialogOpen(true);
   }, []);
+  // Only the newest load may write state. Otherwise a slow response for one
+  // datasource can land after the route moved to another and leave the table
+  // describing the old source while edits target the new one.
+  const load = useRef(0);
   const refresh = useCallback(async () => {
+    const current = ++load.current;
     try {
       const [source, bootstrap] = await Promise.all([
         callApi<Description>({ action: 'describeDatasource', dataSourceId: datasourceId }),
         callApi<{ isAdmin: boolean }>({ action: 'bootstrap' }),
       ]);
+      if (load.current !== current) return;
       setDescription(source);
       setIsAdmin(bootstrap.isAdmin);
       setError(undefined);
     } catch (caught) {
+      if (load.current !== current) return;
       setError(caught instanceof Error ? caught.message : String(caught));
     }
   }, [datasourceId]);
-  useEffect(() => void refresh(), [refresh]);
+  useEffect(() => {
+    // refresh only changes identity with the route param, so this also clears
+    // the previous datasource while the new one loads.
+    setDescription(undefined);
+    void refresh();
+  }, [refresh]);
   useWebMcpTools({
     canManageDataSources: Boolean(description),
     isAdmin,

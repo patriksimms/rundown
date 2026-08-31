@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { canUpdateFieldMetadata, detectFieldSemantics } from './field-metadata';
+import { fieldRoleSchema } from './schema';
 
 describe('field metadata permissions', () => {
   it('lets dashboard editors update visible metadata for a datasource their dashboard uses', () => {
@@ -51,5 +52,13 @@ describe('field auto-detection', () => {
       semanticType: 'text',
       defaultAggregation: null,
     });
+  });
+});
+
+describe('field roles', () => {
+  it('offers dimension and metric only', () => {
+    // Every role selector renders these options. A hardcoded list that drifted
+    // from this set would offer roles the API rejects.
+    expect(fieldRoleSchema.options).toEqual(['dimension', 'metric']);
   });
 });

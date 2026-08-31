@@ -68,6 +68,7 @@ import { withDefaultDateRange, withoutWidgetControlState } from '#/domain/contro
 import { canonicalMetricExpression } from '#/domain/library-metric';
 import { createSerialQueue } from '#/domain/serial-queue';
 import { rollbackFailedLayout } from '#/domain/layout';
+import { fieldRoleSchema } from '#/domain/schema';
 import type {
   ControlState,
   Aggregation,
@@ -1897,7 +1898,7 @@ function DatasourceFieldRow({
           value={value.role}
           onChange={(event) => setValue({ ...value, role: event.target.value as FieldRole })}
         >
-          {['dimension', 'metric', 'date', 'id'].map((item) => (
+          {fieldRoleSchema.options.map((item) => (
             <NativeSelectOption key={item} value={item}>
               {item}
             </NativeSelectOption>
