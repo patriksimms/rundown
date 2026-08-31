@@ -21,11 +21,16 @@ export function resolveDateRange(
 
 export function tryResolveDateRange(range: DateRange, timezone: string, now = new Date()) {
   try {
-    return resolveDateRange(range, timezone, now);
+    const resolved = resolveDateRange(range, timezone, now);
+    return isHtmlDate(resolved.start) && isHtmlDate(resolved.end) ? resolved : undefined;
   } catch (caught) {
     if (caught instanceof RangeError) return undefined;
     throw caught;
   }
+}
+
+function isHtmlDate(value: string) {
+  return /^(?!0000)\d{4,}-\d{2}-\d{2}$/u.test(value);
 }
 
 export function comparisonDateRange(

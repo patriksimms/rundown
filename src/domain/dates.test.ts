@@ -104,6 +104,22 @@ describe('date range resolution', () => {
       },
     };
     expect(tryResolveDateRange({ startDate: value, endDate: value }, 'UTC')).toBeUndefined();
+
+    const negativeYear = {
+      relative: {
+        amount: 2_027,
+        unit: 'year' as const,
+        direction: 'past' as const,
+        anchor: 'now' as const,
+      },
+    };
+    expect(
+      tryResolveDateRange(
+        { startDate: negativeYear, endDate: negativeYear },
+        'UTC',
+        new Date('2026-08-31T00:00:00Z'),
+      ),
+    ).toBeUndefined();
   });
 
   it('turns a relative range into valid fixed values when edited', () => {
