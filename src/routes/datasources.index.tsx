@@ -122,11 +122,27 @@ function DatasourcesContent() {
           />
           <DataTable
             table={table}
+            sortLabel="Sort datasources by"
             emptyMessage={
               entries.length
                 ? 'No datasource matches this search.'
                 : 'No datasources yet. Register one to get started.'
             }
+            renderCard={(row) => (
+              <div className="flex flex-col gap-1">
+                <Link
+                  className="font-medium"
+                  to="/datasources/$datasourceId"
+                  params={{ datasourceId: row.id }}
+                >
+                  {row.name}
+                </Link>
+                <p className="text-xs text-muted-foreground">
+                  {row.sourceType} · {row.format} · {row.fieldCount}{' '}
+                  {row.fieldCount === 1 ? 'field' : 'fields'} · {formatRelativeTime(row.updatedAt)}
+                </p>
+              </div>
+            )}
             rowProps={(row) => ({
               className: 'cursor-pointer',
               // The name cell is already a link, so let its own navigation stand.

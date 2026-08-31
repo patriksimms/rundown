@@ -206,9 +206,41 @@ function DatasourceContent() {
           />
           <DataTable
             table={table}
+            sortLabel="Sort fields by"
             emptyMessage={
               rows.length ? 'No field matches this search.' : 'This datasource has no fields.'
             }
+            renderCard={(row) => (
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-medium">{row.label}</p>
+                    <p className="font-mono text-xs break-all text-muted-foreground">
+                      {row.canonicalName}
+                    </p>
+                  </div>
+                  <Badge variant="outline" className={roleBadgeStyles[row.role]}>
+                    {row.role}
+                  </Badge>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs text-muted-foreground">
+                    {datasourceFieldOriginLabels[row.origin]} · {row.semanticType}
+                    {row.description ? ` · ${row.description}` : ''}
+                  </p>
+                  {isAdmin && row.editable ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      aria-label={`Edit ${row.label}`}
+                      onClick={() => openDialog(row)}
+                    >
+                      Edit
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            )}
           />
           <p className="text-sm text-muted-foreground">
             Column names come from the database and stay fixed so library metrics and widget
