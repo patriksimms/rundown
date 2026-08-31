@@ -8,4 +8,10 @@ describe('control option search', () => {
     expect(query.sql).toContain('LIMIT 100');
     expect(query.parameters).toEqual(['%z%', 'z']);
   });
+
+  it('excludes null values that the filter cannot represent', () => {
+    expect(controlOptionsQuery('"Region"', undefined, 'ASC').sql).toContain(
+      'WHERE "Region" IS NOT NULL',
+    );
+  });
 });

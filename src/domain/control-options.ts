@@ -4,7 +4,9 @@ export function controlOptionsQuery(
   direction: string,
 ) {
   const parameters: unknown[] = [];
-  const where = search ? ` WHERE CAST(${expression} AS VARCHAR) ILIKE ?` : '';
+  const where = search
+    ? ` WHERE CAST(${expression} AS VARCHAR) ILIKE ?`
+    : ` WHERE ${expression} IS NOT NULL`;
   if (search) parameters.push(`%${search}%`);
   const exactFirst = search
     ? `MIN(CASE WHEN CAST(${expression} AS VARCHAR) = ? THEN 0 ELSE 1 END), `
