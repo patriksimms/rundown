@@ -125,12 +125,12 @@ The `Check` workflow runs three jobs: lint, types, and unit tests; Worker integr
 browser tests. The browser job needs a Clerk development instance and fails with a list of what is
 missing until it is configured:
 
-| Name                          | Kind                | Purpose                                   |
-| ----------------------------- | ------------------- | ----------------------------------------- |
-| `VITE_CLERK_PUBLISHABLE_KEY`  | Repository variable | Loads Clerk in the browser                |
-| `CLERK_SECRET_KEY`            | Repository secret   | Lets the Worker verify sessions           |
-| `E2E_CLERK_USER_USERNAME`     | Repository secret   | Identifier of the Clerk test user         |
-| `E2E_CLERK_USER_PASSWORD`     | Repository secret   | Password of the Clerk test user           |
+| Name                         | Kind                | Purpose                           |
+| ---------------------------- | ------------------- | --------------------------------- |
+| `VITE_CLERK_PUBLISHABLE_KEY` | Repository variable | Loads Clerk in the browser        |
+| `CLERK_SECRET_KEY`           | Repository secret   | Lets the Worker verify sessions   |
+| `E2E_CLERK_USER_USERNAME`    | Repository secret   | Identifier of the Clerk test user |
+| `E2E_CLERK_USER_PASSWORD`    | Repository secret   | Password of the Clerk test user   |
 
 The test user needs a `+clerk_test` email address, a password, and membership in a Clerk
 organization. The tests section above explains why.
