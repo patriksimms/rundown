@@ -82,7 +82,7 @@ describe('POST /api/rundown', () => {
     const source = await seedDataSource(workspace);
     const dashboard = await createDashboard();
     const widget = await addWidget(dashboard.id, scorecardDefinition(source));
-    queryEngine.rejectQueries(503, 'the query container is unavailable');
+    queryEngine.rejectQueries(503, 'container 10.0.0.4 refused the connection');
 
     const response = await postApiRequest({
       action: 'queryWidget',
@@ -92,7 +92,11 @@ describe('POST /api/rundown', () => {
 
     // A connector that cannot answer is an upstream failure, not a bad request.
     expect(response.status).toBe(502);
-    expect((await envelope(response)).error?.code).toBe('datasource_connector_failed');
+    const body = await envelope(response);
+    expect(body.error?.code).toBe('datasource_connector_failed');
+    // The transport detail stays in the log rather than reaching the browser.
+    expect(body.error?.message).toBe('The query service is unavailable. Try again.');
+    expect(JSON.stringify(body)).not.toContain('10.0.0.4');
   });
 
   test('a filter control is added through the route and compiles to no SQL', async () => {

@@ -1705,6 +1705,12 @@ function throwDatasourceError(error: unknown): never {
     unsupported_datasource_connector: 400,
     datasource_connector_failed: 502,
   }[error.code];
+  if (error.code === 'datasource_connector_failed') {
+    // A connector that failed to answer reports whatever the transport said, which can name
+    // container addresses and object keys. That belongs in the log, not in the response.
+    console.warn('rundown.datasource_connector_failed', { error: error.message });
+    throw new ApiError(status, error.code, 'The query service is unavailable. Try again.');
+  }
   throw new ApiError(status, error.code, error.message);
 }
 

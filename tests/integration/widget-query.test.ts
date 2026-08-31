@@ -231,13 +231,15 @@ describe('query engine failures', () => {
     expect(queryEngine.queryCalls).toHaveLength(1);
   });
 
-  test('an engine outage stays an internal error rather than a query error', async () => {
+  test('an engine outage reports an upstream failure without the transport detail', async () => {
     const { dashboardId, widgetId } = await seedScorecardDashboard();
-    queryEngine.rejectQueries(503, 'container unavailable');
+    queryEngine.rejectQueries(503, 'container 10.0.0.4 refused the connection');
 
-    await expect(callService({ action: 'queryWidget', dashboardId, widgetId })).rejects.toThrow(
-      'container unavailable',
+    const error = await expectApiError(
+      callService({ action: 'queryWidget', dashboardId, widgetId }),
+      { status: 502, code: 'datasource_connector_failed' },
     );
+    expect(error.message).not.toContain('10.0.0.4');
   });
 
   test('a widget definition that the engine cannot explain is not persisted', async () => {
