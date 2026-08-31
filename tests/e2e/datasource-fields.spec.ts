@@ -32,10 +32,17 @@ test('searching the field list keeps unsaved edits and keeps focus after a save'
   await costLabel.fill('Spend');
   const save = costCard.getByRole('button', { name: 'Save MediaCost' });
   await save.focus();
+  // Focus is already on the button, so the save has to land before the assertion means anything.
+  const saved = page.waitForResponse(
+    (response) =>
+      response.url().includes('/api/rundown') &&
+      response.request().postDataJSON()?.action === 'updateFieldMetadata',
+  );
   await page.keyboard.press('Enter');
+  await saved;
+  await expect(page.getByText('0 of 5 fields')).toBeVisible();
   await expect(save).toBeFocused();
   await expect(costLabel).toBeVisible();
-  await expect(page.getByText('0 of 5 fields')).toBeVisible();
 
   // It leaves the filtered list once focus moves on.
   await search.focus();
