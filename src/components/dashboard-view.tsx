@@ -288,6 +288,7 @@ function QueryCard({
     let current = true;
     setRows(undefined);
     setComparisonRows(undefined);
+    setError(undefined);
     void callApi<{
       rows: Record<string, unknown>[];
       comparisonRows?: Record<string, unknown>[];
