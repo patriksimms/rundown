@@ -33,7 +33,7 @@ function RootDocument({ children }: { children: ReactNode }) {
         <HeadContent />
       </head>
       <body>
-        <ClerkProvider>
+        <ClerkProvider signInUrl="/sign-in" signUpUrl="/sign-up">
           <TooltipProvider>
             {children}
             <Scripts />
