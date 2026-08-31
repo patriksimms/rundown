@@ -4,6 +4,7 @@ export interface DataSourceRecord {
   id: string;
   workspaceId: string;
   name: string;
+  connectorType: string;
   location: DataSourceLocation;
   version: string;
 }
