@@ -19,6 +19,7 @@ export interface QueryContext {
   bucketName: string;
   sourceTableName?: string;
   resolvedControls?: Array<{ fieldId: string; values: unknown[] }>;
+  offset?: number;
 }
 
 export interface CompiledQuery {
@@ -48,6 +49,18 @@ export function compileWidgetQuery(context: QueryContext): CompiledQuery {
       const compiled = metricExpression(metric, context, definitions);
       return `${compiled} AS ${quoteIdentifier(`metric_${index + 1}`)}`;
     }),
+    ...(definition.type === 'gauge' && definition.upperLimit?.kind === 'library'
+      ? [
+          `${metricExpression(
+            {
+              source: { kind: 'library', libraryMetricId: definition.upperLimit.libraryMetricId },
+              dataType: 'number',
+            },
+            context,
+            definitions,
+          )} AS "upper_limit"`,
+        ]
+      : []),
   ];
   const parameters: unknown[] = [];
   const conditions: string[] = [];
@@ -68,13 +81,16 @@ export function compileWidgetQuery(context: QueryContext): CompiledQuery {
   const groupBy = dimensions.length
     ? ` GROUP BY ${dimensions.map((_, index) => index + 1).join(', ')}`
     : '';
-  const orderBy =
+  const explicitSort =
     'sort' in definition && definition.sort?.length
-      ? ` ORDER BY ${compileSort(definition.sort, dimensions.length, context)}`
-      : '';
+      ? compileSort(definition.sort, dimensions.length, context)
+      : undefined;
+  const stableDimensions = dimensions.map((_, index) => `${index + 1} ASC`).join(', ');
+  const order = [explicitSort, stableDimensions].filter(Boolean).join(', ');
+  const orderBy = order ? ` ORDER BY ${order}` : '';
   const limit = widgetLimit(definition);
   return {
-    sql: `SELECT ${select.join(', ')} FROM ${source} WHERE ${conditions.join(' AND ')}${groupBy}${orderBy}${limit ? ` LIMIT ${limit}` : ''}`,
+    sql: `SELECT ${select.join(', ')} FROM ${source} WHERE ${conditions.join(' AND ')}${groupBy}${orderBy}${limit ? ` LIMIT ${context.offset === undefined ? limit : limit + 1}` : ''}${context.offset ? ` OFFSET ${context.offset}` : ''}`,
     parameters,
     definitions,
   };

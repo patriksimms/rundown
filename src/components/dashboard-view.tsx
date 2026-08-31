@@ -15,9 +15,9 @@ import type { ControlState, DashboardDocument, DashboardWidget } from '#/domain/
 import type { QueryResultColumn } from '#/domain/query-result';
 import { callApi } from '#/api/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '#/components/ui/card';
+import { Button } from '#/components/ui/button';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '#/components/ui/chart';
 import { Badge } from '#/components/ui/badge';
-import { Button } from '#/components/ui/button';
 import { Command, CommandGroup, CommandInput, CommandList } from '#/components/ui/command';
 import { Field, FieldLabel } from '#/components/ui/field';
 import { Input } from '#/components/ui/input';
@@ -25,6 +25,11 @@ import { Popover, PopoverContent, PopoverTrigger } from '#/components/ui/popover
 import { Skeleton } from '#/components/ui/skeleton';
 import { widgetQueryRequest } from '#/domain/widget-query';
 import { controlDefaultValues, toggleControlValue } from '#/domain/control-state';
+import {
+  pieBreakdownRows,
+  pivotBreakdownRows,
+  withComparisonSeries,
+} from '#/domain/widget-results';
 import {
   Table,
   TableBody,
@@ -395,16 +400,20 @@ function QueryCard({
   const [rows, setRows] = useState<Record<string, unknown>[]>();
   const [columns, setColumns] = useState<QueryResultColumn[]>();
   const [comparisonRows, setComparisonRows] = useState<Record<string, unknown>[]>();
+  const [summaryRow, setSummaryRow] = useState<Record<string, unknown>>();
   const [error, setError] = useState<string>();
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  useEffect(() => setPage(0), [controlState, dashboardId, widget.definition, widget.id]);
   useEffect(() => {
     let current = true;
-    setRows(undefined);
-    setColumns(undefined);
-    setComparisonRows(undefined);
+    // Keep the last result usable if loading a new page fails.
     void callApi<{
       rows: Record<string, unknown>[];
       columns: QueryResultColumn[];
       comparisonRows?: Record<string, unknown>[];
+      summaryRow?: Record<string, unknown>;
+      hasMore?: boolean;
     }>(
       widgetQueryRequest({
         dashboardId,
@@ -412,6 +421,7 @@ function QueryCard({
         controlState,
         preview: preview ?? false,
         shareToken,
+        page,
       }),
     )
       .then((result) => {
@@ -419,6 +429,8 @@ function QueryCard({
         setRows(result.rows);
         setColumns(result.columns);
         setComparisonRows(result.comparisonRows);
+        setSummaryRow(result.summaryRow);
+        setHasMore(Boolean(result.hasMore));
         setError(undefined);
       })
       .catch((caught: unknown) => {
@@ -427,7 +439,7 @@ function QueryCard({
     return () => {
       current = false;
     };
-  }, [controlState, dashboardId, preview, shareToken, widget.definition, widget.id]);
+  }, [controlState, dashboardId, page, preview, shareToken, widget.definition, widget.id]);
   const definition = widget.definition;
   if (!('title' in definition)) return null;
   return (
@@ -445,6 +457,10 @@ function QueryCard({
             rows={rows}
             columns={columns}
             comparisonRows={comparisonRows}
+            summaryRow={summaryRow}
+            page={page}
+            hasMore={hasMore}
+            setPage={setPage}
           />
         )}
       </CardContent>
@@ -457,11 +473,19 @@ export function Result({
   rows,
   columns,
   comparisonRows,
+  summaryRow,
+  page,
+  hasMore,
+  setPage,
 }: {
   definition: Extract<DashboardWidget['definition'], { title: string }>;
   rows: Record<string, unknown>[];
   columns: QueryResultColumn[];
   comparisonRows?: Record<string, unknown>[];
+  summaryRow?: Record<string, unknown>;
+  page: number;
+  hasMore: boolean;
+  setPage: (page: number) => void;
 }) {
   const dimensionColumns = columns.filter((column) => column.kind === 'dimension');
   const metricColumns = columns.filter((column) => column.kind === 'metric');
@@ -470,8 +494,15 @@ export function Result({
     const value = rows[0]?.[metric.key];
     const previous = comparisonRows?.[0]?.[metric.key];
     const maximum =
-      definition.type === 'gauge' && definition.upperLimit?.kind === 'manual'
-        ? definition.upperLimit.value
+      definition.type === 'gauge'
+        ? definition.upperLimit?.kind === 'manual'
+          ? definition.upperLimit.value
+          : rows[0]?.upper_limit
+        : undefined;
+    const parsedMaximum = maximum == null ? undefined : Number(maximum);
+    const numericMaximum =
+      parsedMaximum !== undefined && Number.isFinite(parsedMaximum) && parsedMaximum > 0
+        ? parsedMaximum
         : undefined;
     return (
       <div className="space-y-2">
@@ -479,23 +510,26 @@ export function Result({
         {previous !== undefined ? (
           <p className="text-sm text-muted-foreground">Previous: {formatValue(previous, metric)}</p>
         ) : null}
-        {maximum !== undefined ? (
+        {numericMaximum !== undefined ? (
           <div
             className="h-2 overflow-hidden rounded-full bg-muted"
-            aria-label={`${String(value)} of ${maximum}`}
+            aria-label={`${String(value)} of ${numericMaximum}`}
           >
             <div
               className="h-full bg-primary"
-              style={{ width: `${Math.min(100, Math.max(0, (Number(value) / maximum) * 100))}%` }}
+              style={{
+                width: `${Math.min(100, Math.max(0, (Number(value) / numericMaximum) * 100))}%`,
+              }}
             />
           </div>
         ) : null}
       </div>
     );
   }
-  if (definition.type === 'table')
+  if (definition.type === 'table') {
+    const summary = definition.showSummaryRow ? summaryRow : undefined;
     return (
-      <div className="overflow-x-auto">
+      <div className="space-y-3 overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
@@ -512,36 +546,136 @@ export function Result({
                 ))}
               </TableRow>
             ))}
+            {summary ? (
+              <TableRow className="font-medium">
+                {columns.map((column, columnIndex) => (
+                  <TableCell key={column.key}>
+                    {columnIndex === 0 && definition.dimensions.length > 0
+                      ? 'Summary'
+                      : columnIndex < definition.dimensions.length
+                        ? ''
+                        : formatValue(summary[column.key], column)}
+                  </TableCell>
+                ))}
+              </TableRow>
+            ) : null}
           </TableBody>
         </Table>
+        {comparisonRows?.length ? (
+          <div>
+            <p className="mb-2 text-sm font-medium">
+              {definition.comparison?.mode === 'previousYear' ? 'Previous year' : 'Previous period'}
+            </p>
+            <Table>
+              <TableBody>
+                {comparisonRows.map((row, index) => (
+                  <TableRow key={index}>
+                    {columns.map((column) => (
+                      <TableCell key={column.key}>{formatValue(row[column.key], column)}</TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        ) : null}
+        {definition.resultLimit.mode === 'pagination' ? (
+          <div className="flex items-center justify-between text-sm">
+            <span>
+              {rows.length ? page * definition.resultLimit.amount + 1 : 0}–
+              {rows.length ? page * definition.resultLimit.amount + rows.length : 0}
+            </span>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={page === 0}
+                onClick={() => setPage(page - 1)}
+              >
+                Previous
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!hasMore}
+                onClick={() => setPage(page + 1)}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </div>
     );
-  if (!rows.length || !dimensionColumns.length || !metricColumns.length)
+  }
+  if (
+    (!rows.length && !comparisonRows?.length) ||
+    !dimensionColumns.length ||
+    !metricColumns.length
+  )
     return <p className="text-sm text-muted-foreground">No rows for this date range.</p>;
   let dimension = dimensionColumns[0]!;
-  let chartRows = normalizeMetricValues(rows, metricColumns);
+  let currentRows = normalizeMetricValues(rows, metricColumns);
+  let previousRows = normalizeMetricValues(comparisonRows ?? [], metricColumns);
   let chartMetrics = metricColumns;
   if (definition.type === 'bar' && definition.breakdownDimension && dimensionColumns[1]) {
-    const shaped = pivotBreakdownRows(
-      chartRows,
-      dimension.key,
-      dimensionColumns[1].key,
-      metricColumns[0]!,
-    );
-    chartRows = shaped.rows;
-    chartMetrics = shaped.metrics;
+    const breakdownSeries = pivotBreakdownRows([...currentRows, ...previousRows]).series;
+    currentRows = pivotBreakdownRows(currentRows, breakdownSeries).rows;
+    previousRows = pivotBreakdownRows(previousRows, breakdownSeries).rows;
+    chartMetrics = breakdownSeries.map((series) => ({
+      ...metricColumns[0]!,
+      key: series.key,
+      label: series.label,
+    }));
   }
   if (definition.type === 'pie' && definition.breakdownDimension && dimensionColumns[1]) {
-    chartRows = chartRows.map((row) => ({
-      ...row,
-      breakdown_label: `${String(row[dimension.key])} · ${String(row[dimensionColumns[1]!.key])}`,
-    }));
-    dimension = { ...dimension, key: 'breakdown_label' };
+    currentRows = pieBreakdownRows(currentRows);
+    dimension = { ...dimension, key: 'label' };
   }
+  const comparison =
+    definition.type !== 'pie' && previousRows.length
+      ? withComparisonSeries(
+          currentRows,
+          previousRows,
+          'key',
+          chartMetrics.map((metric) => metric.key),
+        )
+      : undefined;
+  let chartRows = comparison?.rows ?? currentRows;
+  const sourceSeries = [
+    ...chartMetrics.map((column, index) => ({
+      sourceKey: column.key,
+      column,
+      colorIndex: index,
+      isComparison: false,
+      label: column.label,
+    })),
+    ...(comparison?.series.map((sourceKey, index) => {
+      const column = chartMetrics[index]!;
+      return {
+        sourceKey,
+        column,
+        colorIndex: index,
+        isComparison: true,
+        label: `Previous ${column.label}`,
+      };
+    }) ?? []),
+  ];
+  const occupiedKeys = new Set(chartRows.flatMap((row) => Object.keys(row)));
+  const series = sourceSeries.map((item, index) => {
+    let key = `chart_series_${index}`;
+    while (occupiedKeys.has(key)) key = `_${key}`;
+    occupiedKeys.add(key);
+    return { ...item, key };
+  });
+  chartRows = chartRows.map((row) => ({
+    ...row,
+    ...Object.fromEntries(series.map((item) => [item.key, row[item.sourceKey]])),
+  }));
   const config = Object.fromEntries(
-    chartMetrics.map((metric, index) => [
-      metric.key,
-      { label: metric.label, color: `var(--chart-${(index % 5) + 1})` },
+    series.map((item) => [
+      item.key,
+      { label: item.label, color: `var(--chart-${(item.colorIndex % 5) + 1})` },
     ]),
   );
   const tooltip = (
@@ -549,7 +683,10 @@ export function Result({
       content={
         <ChartTooltipContent
           valueFormatter={(value, name) =>
-            formatValue(value, columnByKey(metricColumns, String(name)))
+            formatValue(
+              value,
+              series.find((item) => item.key === String(name))?.column ?? metricColumns[0]!,
+            )
           }
         />
       }
@@ -562,9 +699,9 @@ export function Result({
           {tooltip}
           <Pie
             data={chartRows}
-            dataKey={metricColumns[0]!.key}
+            dataKey={series[0]?.key ?? ''}
             nameKey={dimension.key}
-            fill={`var(--color-${metricColumns[0]!.key})`}
+            fill={`var(--color-${series[0]?.key ?? ''})`}
           />
         </PieChart>
       </ChartContainer>
@@ -580,8 +717,13 @@ export function Result({
           />
           <YAxis tickFormatter={(value) => formatAxisValue(value, metricColumns[0]!)} />
           {tooltip}
-          {chartMetrics.map((metric) => (
-            <Bar key={metric.key} dataKey={metric.key} fill={`var(--color-${metric.key})`} />
+          {series.map((item) => (
+            <Bar
+              key={item.key}
+              dataKey={item.key}
+              fill={`var(--color-${item.key})`}
+              fillOpacity={item.isComparison ? 0.5 : 1}
+            />
           ))}
         </BarChart>
       </ChartContainer>
@@ -613,12 +755,13 @@ export function Result({
           />
         ) : null}
         {tooltip}
-        {metricColumns.map((metric) => (
+        {series.map((item) => (
           <Line
-            key={metric.key}
-            dataKey={metric.key}
-            yAxisId={metric.dataType === 'percent' ? 'percent' : 'number'}
-            stroke={`var(--color-${metric.key})`}
+            key={item.key}
+            dataKey={item.key}
+            yAxisId={item.column.dataType === 'percent' ? 'percent' : 'number'}
+            stroke={`var(--color-${item.key})`}
+            strokeDasharray={item.isComparison ? '4 4' : undefined}
             dot={false}
           />
         ))}
@@ -680,30 +823,6 @@ function numericMetricValue(value: unknown, column: QueryResultColumn) {
   return Number.isFinite(number) ? number : undefined;
 }
 
-function pivotBreakdownRows(
-  rows: Record<string, unknown>[],
-  dimensionKey: string,
-  breakdownKey: string,
-  metric: QueryResultColumn,
-) {
-  const values = [...new Set(rows.map((row) => row[breakdownKey]))];
-  const metrics = values.map((value, index) => ({
-    ...metric,
-    key: `breakdown_${index + 1}`,
-    label: String(value),
-  }));
-  const metricByValue = new Map(values.map((value, index) => [value, metrics[index]!]));
-  const pivoted = new Map<unknown, Record<string, unknown>>();
-  for (const row of rows) {
-    const dimension = row[dimensionKey];
-    const target = pivoted.get(dimension) ?? { [dimensionKey]: dimension };
-    const series = metricByValue.get(row[breakdownKey]);
-    if (series) target[series.key] = row[metric.key];
-    pivoted.set(dimension, target);
-  }
-  return { rows: [...pivoted.values()], metrics };
-}
-
 function normalizeMetricValues(rows: Record<string, unknown>[], metrics: QueryResultColumn[]) {
   return rows.map((row) =>
     Object.fromEntries(
@@ -713,10 +832,6 @@ function normalizeMetricValues(rows: Record<string, unknown>[], metrics: QueryRe
       }),
     ),
   );
-}
-
-function columnByKey(columns: QueryResultColumn[], key: string) {
-  return columns.find((column) => column.key === key) ?? columns[0]!;
 }
 
 function formatAxisValue(value: unknown, column: QueryResultColumn) {

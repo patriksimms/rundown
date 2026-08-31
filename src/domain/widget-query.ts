@@ -7,12 +7,14 @@ export function widgetQueryRequest({
   controlState,
   preview,
   shareToken,
+  page,
 }: {
   dashboardId: string;
   widget: DashboardWidget;
   controlState: ControlState;
   preview: boolean;
   shareToken?: string;
+  page?: number;
 }): Extract<ApiRequest, { action: 'previewWidget' | 'queryWidget' }> {
   return preview
     ? {
@@ -27,5 +29,6 @@ export function widgetQueryRequest({
         widgetId: widget.id,
         shareToken,
         controlState,
+        page,
       };
 }
