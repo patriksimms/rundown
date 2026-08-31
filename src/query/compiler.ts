@@ -42,12 +42,12 @@ export function compileWidgetQuery(context: QueryContext): CompiledQuery {
   const definitions: CompiledQuery['definitions'] = [];
   const select = [
     ...dimensions.map(
-      (dimension) =>
-        `${fieldExpression(dimension.fieldId, context)} AS ${quoteIdentifier(dimension.userDefinedName ?? fieldById(dimension.fieldId, context).label)}`,
+      (dimension, index) =>
+        `${fieldExpression(dimension.fieldId, context)} AS ${quoteIdentifier(`dimension_${index + 1}`)}`,
     ),
     ...metrics.map((metric, index) => {
       const compiled = metricExpression(metric, context, definitions);
-      return `${compiled} AS ${quoteIdentifier(metric.userDefinedName ?? `metric_${index + 1}`)}`;
+      return `${compiled} AS ${quoteIdentifier(`metric_${index + 1}`)}`;
     }),
     ...(definition.type === 'gauge' && definition.upperLimit?.kind === 'library'
       ? [
@@ -182,13 +182,6 @@ function fieldExpression(fieldId: string, context: QueryContext) {
   if (!calculated) throw new Error(`Unknown field ${fieldId}.`);
   assertSingleExpression(calculated.expression);
   return `(${calculated.expression})`;
-}
-
-function fieldById(fieldId: string, context: QueryContext) {
-  const field = context.fields.find((item) => item.id === fieldId);
-  const calculated = context.calculatedFields.find((item) => item.id === fieldId);
-  if (!field && !calculated) throw new Error(`Unknown field ${fieldId}.`);
-  return field ?? calculated!;
 }
 
 function rewriteCanonicalNames(expression: string, context: QueryContext) {

@@ -1,9 +1,17 @@
-import { Show, SignInButton, SignUpButton, UserButton } from '@clerk/tanstack-react-start';
+import { Show, UserButton } from '@clerk/tanstack-react-start';
 import { Link } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
+import { SignInAction, SignUpAction } from '#/components/auth-actions';
 import { Button } from '#/components/ui/button';
+import { WorkspaceGate } from '#/components/workspace-gate';
 
-export function AppShell({ children }: { children: ReactNode }) {
+export function AppShell({
+  children,
+  requireWorkspace = false,
+}: {
+  children: ReactNode;
+  requireWorkspace?: boolean;
+}) {
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b bg-background">
@@ -25,21 +33,21 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Show>
           </nav>
           <Show when="signed-out">
-            <SignInButton>
+            <SignInAction>
               <Button variant="ghost" size="sm">
                 Sign in
               </Button>
-            </SignInButton>
-            <SignUpButton>
+            </SignInAction>
+            <SignUpAction>
               <Button size="sm">Create account</Button>
-            </SignUpButton>
+            </SignUpAction>
           </Show>
           <Show when="signed-in">
             <UserButton />
           </Show>
         </div>
       </header>
-      {children}
+      {requireWorkspace ? <WorkspaceGate>{children}</WorkspaceGate> : children}
     </div>
   );
 }

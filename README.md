@@ -1,8 +1,8 @@
 # Rundown
 
 Rundown turns reporting intent into query-backed client dashboards. Editors build in the GUI or
-through WebMCP tools, viewers use stored widgets and controls, and admins register existing CSV or
-parquet files from tenant-scoped R2 prefixes.
+through WebMCP tools, viewers use stored widgets and controls, and editors register uploaded or
+existing CSV and Parquet files from tenant-scoped R2 prefixes.
 
 The TanStack Start app and API run in a Cloudflare Worker. Query execution runs in a Bun Cloudflare
 Container with native DuckDB. The Worker authorizes the datasource and compiles SQL, then the
@@ -17,10 +17,11 @@ bun run db:migrate:local
 bun run dev
 ```
 
-Docker must be running for local query execution. Place CSV and parquet files in `dev-data/`. Local
-workspaces see those files under their tenant-scoped `ws/<workspaceId>/` prefix. Vite serves the
-files with range request support so the query container can read them without R2 credentials or a
-separate object-storage service.
+Docker must be running for local query execution. Upload files from the datasource registration
+screen or place CSV and Parquet files in `dev-data/`. Local workspaces see those files under their
+tenant-scoped `ws/<workspaceId>/` prefix. Vite serves the files with upload, deletion, and range
+request support so the query container can read them without R2 credentials or a separate
+object-storage service.
 
 For example:
 
@@ -93,6 +94,22 @@ Each environment needs `CLERK_SECRET_KEY`, `R2_ACCESS_KEY_ID`, and `R2_SECRET_AC
 credentials come from an API token that can read the configured bucket and are passed to the private
 query container at startup. Cloudflare Builds needs `VITE_CLERK_PUBLISHABLE_KEY` as a build variable.
 Wrangler environments are separate Workers, so production secrets do not carry over to preview.
+
+Browser uploads use 15-minute presigned PUT URLs. Before deploying this feature, add this CORS policy
+to the production R2 bucket. Apply the equivalent policy to a preview bucket with its exact preview
+origin before testing uploads there.
+
+```json
+[
+  {
+    "AllowedOrigins": ["https://rundown-app.dev"],
+    "AllowedMethods": ["PUT"],
+    "AllowedHeaders": ["Content-Type"],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
 
 To deploy from a local authenticated shell instead:
 

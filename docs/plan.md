@@ -16,7 +16,7 @@ Users:
 
 - Editors (account managers). Create dashboards, write formulas, invite others. Want to describe intent to an agent and then fine-tune in a GUI, because when they already know the fix (a CASE WHEN mapping campaign IDs to readable names) explaining it to an AI is slower than doing it.
 - Viewers (clients, agency contacts). Experts in their domain, want a GUI, should never have to type. Reach dashboards via unlisted links or a viewer login.
-- Admins. Everything, plus datasource registration and workspace management.
+- Admins. Everything, plus workspace-level metadata and workspace management.
 
 ## 2. Challenge context
 
@@ -55,7 +55,8 @@ From the spec ([webmachinelearning.github.io/webmcp](https://webmachinelearning.
 10. Metric library is workspace-level data, configurable in the UI and via a tool. Nothing domain-specific is hardcoded.
 11. Caching is lazy. Key = hash(widget definition and referenced calculated fields) + normalized control state + datasource version. No cron.
 12. Multi-tenant from the start. Every row carries a `workspaceId`; R2 keys live under a per-workspace prefix.
-13. Files are already in R2. No upload UI. Ingestion and transformation are out of scope.
+13. Editors can upload one CSV or Parquet file up to 100 MB directly to R2. Existing workspace
+    objects and prefixes can also be registered. Transformations remain out of scope.
 14. Controls across datasources behave like Looker Studio: a control applies to every widget whose datasource has a matching field, matched on canonical name from the lookup table.
 15. Every builder action and every consumption question is a WebMCP tool, and the GUI exposes the same actions. Login is not a tool.
 16. No AI agent inside the app. Intent inference is done by the external agent (ChatGPT, Chrome) using what `describeDatasource` returns.
@@ -104,7 +105,10 @@ Judging access. Provide a test account with editor rights and at least one unlis
 
 A datasource points at one R2 object or a prefix glob (partitioned files, `read_parquet('r2://bucket/ws/x/reports/*.parquet')`). CSV and parquet both read directly, no conversion.
 
-Registration: admin picks an object or prefix from the listing, the Worker runs `DESCRIBE` on it, and the lookup table is seeded automatically. Numeric columns become metrics, text becomes dimensions, date-like columns become dates. The admin then corrects only what matters. With 200 columns nobody annotates by hand.
+Registration: an editor or admin uploads a CSV or Parquet file or picks an existing object or prefix.
+The Worker runs `DESCRIBE` and seeds the lookup table automatically. Numeric columns become metrics,
+text becomes dimensions, and date-like columns become dates. Admins then correct only the metadata
+that matters. With 200 columns nobody annotates by hand.
 
 Lookup table, one row per column:
 
@@ -221,10 +225,12 @@ Edit mode. Registered in addition to view mode when the caller has an editor or 
 - `upsertLibraryMetric({ name, expression, semanticType, description })`, workspace-level.
 - `shareDashboard({ action: createLink | revokeLink | grant | revoke, userEmail?, role? })`.
 
-Admin mode. Registered on the datasource admin route.
+Datasource mode. Registered for editors and admins on the datasource route.
 
 - `listR2Objects({ prefix? })` within the workspace prefix.
 - `registerDatasource({ key | prefix, name })` runs `DESCRIBE`, seeds the lookup table, returns it.
+
+Local file selection and upload bytes remain GUI-only because WebMCP tools accept JSON inputs.
 
 Input schemas are JSON Schema `type: object` documents generated from the same zod schemas the server validates with, so tool and API cannot drift. Because ChatGPT ignores `outputSchema`, every description states what the tool returns.
 

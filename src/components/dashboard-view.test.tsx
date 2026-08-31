@@ -1,7 +1,8 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import type { QueryResultColumn } from '#/domain/query-result';
 import type { DashboardWidget } from '#/domain/schema';
-import { Result } from './dashboard-view';
+import { formatValue, Result } from './dashboard-view';
 
 type QueryDefinition = Extract<DashboardWidget['definition'], { title: string }>;
 const base = {
@@ -13,6 +14,56 @@ const metric = {
   source: { kind: 'field' as const, fieldId: 'value', aggregation: 'sum' as const },
   dataType: 'number' as const,
 };
+const dimension: QueryResultColumn = {
+  key: 'dimension_1',
+  label: 'Account ID',
+  kind: 'dimension',
+  dataType: 'id',
+};
+const currency: QueryResultColumn = {
+  key: 'metric_1',
+  label: 'Spend }; body { color: red; } /*',
+  kind: 'metric',
+  dataType: 'currency',
+  radix: 2,
+};
+
+function columnsFor(definition: QueryDefinition): QueryResultColumn[] {
+  const dimensionCount =
+    definition.type === 'line'
+      ? 1
+      : definition.type === 'bar' || definition.type === 'pie'
+        ? definition.breakdownDimension
+          ? 2
+          : 1
+        : definition.type === 'table'
+          ? definition.dimensions.length
+          : 0;
+  const metrics =
+    definition.type === 'line' || definition.type === 'table'
+      ? definition.metrics
+      : definition.type === 'scorecard' ||
+          definition.type === 'gauge' ||
+          definition.type === 'bar' ||
+          definition.type === 'pie'
+        ? [definition.metric]
+        : [];
+  return [
+    ...Array.from({ length: dimensionCount }, (_, index) => ({
+      key: `dimension_${index + 1}`,
+      label: `Dimension ${index + 1}`,
+      kind: 'dimension' as const,
+      dataType: 'text' as const,
+    })),
+    ...metrics.map((item, index) => ({
+      key: `metric_${index + 1}`,
+      label: `Metric ${index + 1}`,
+      kind: 'metric' as const,
+      dataType: item.dataType,
+      ...(item.displayFormat?.radix === undefined ? {} : { radix: item.displayFormat.radix }),
+    })),
+  ];
+}
 
 function render(
   definition: QueryDefinition,
@@ -24,6 +75,7 @@ function render(
     <Result
       definition={definition}
       rows={rows}
+      columns={columnsFor(definition)}
       comparisonRows={comparisonRows}
       summaryRow={summaryRow}
       page={0}
@@ -57,8 +109,10 @@ describe('widget result rendering', () => {
       metrics: [metric],
     };
     expect(render(line, [])).toContain('No rows');
-    expect(render(line, [{ month: 'Jan', metric_1: 10 }])).toContain('--color-chart_series_0');
-    const previousOnly = render(line, [], [{ month: 'Jan', metric_1: 5 }]);
+    expect(render(line, [{ dimension_1: 'Jan', metric_1: 10 }])).toContain(
+      '--color-chart_series_0',
+    );
+    const previousOnly = render(line, [], [{ dimension_1: 'Jan', metric_1: 5 }]);
     expect(previousOnly).not.toContain('No rows');
     expect(previousOnly).toContain('--color-chart_series_1');
     const barMarkup = render(
@@ -69,8 +123,8 @@ describe('widget result rendering', () => {
         dimension: { fieldId: 'month' },
         breakdownDimension: { fieldId: 'channel' },
       },
-      [{ month: 'Jan', channel: 'Paid Search', metric_1: 10 }],
-      [{ month: 'Jan', channel: 'Organic Social', metric_1: 5 }],
+      [{ dimension_1: 'Jan', dimension_2: 'Paid Search', metric_1: 10 }],
+      [{ dimension_1: 'Jan', dimension_2: 'Organic Social', metric_1: 5 }],
     );
     expect(barMarkup).toContain('--color-chart_series_0');
     expect(barMarkup).toContain('--color-chart_series_1');
@@ -85,7 +139,7 @@ describe('widget result rendering', () => {
           dimension: { fieldId: 'month' },
           breakdownDimension: { fieldId: 'channel' },
         },
-        [{ month: 'Jan', channel: 'Search', metric_1: 10 }],
+        [{ dimension_1: 'Jan', dimension_2: 'Search', metric_1: 10 }],
       ),
     ).toContain('--color-chart_series_0');
   });
@@ -98,8 +152,8 @@ describe('widget result rendering', () => {
         dimension: { fieldId: 'day' },
         metrics: [metric, { ...metric, dataType: 'percent' }],
       },
-      [{ day: '2026-01-02', metric_1: 10, metric_2: 0.2 }],
-      [{ day: '2026-01-02', metric_1: 8, metric_2: 0.1 }],
+      [{ dimension_1: '2026-01-02', metric_1: 10, metric_2: 0.2 }],
+      [{ dimension_1: '2026-01-02', metric_1: 8, metric_2: 0.1 }],
     );
     expect(markup).toContain('--color-chart_series_1');
     expect(markup).toContain('--color-chart_series_2');
@@ -118,13 +172,114 @@ describe('widget result rendering', () => {
     };
     const markup = render(
       definition,
-      [{ month: 'Jan', metric_1: 10 }],
-      [{ month: 'Jan', metric_1: 5 }],
-      { month: 'Summary', metric_1: 10 },
+      [{ dimension_1: 'Jan', metric_1: 10 }],
+      [{ dimension_1: 'Jan', metric_1: 5 }],
+      { metric_1: 10 },
     );
     expect(markup).toContain('Summary');
     expect(markup).toContain('Previous year');
     expect(markup).toContain('1–1');
     expect(render(definition, [])).toContain('0–0');
+  });
+
+  it('uses stable chart keys while retaining the custom display label', () => {
+    const html = renderToStaticMarkup(
+      <Result
+        definition={{
+          type: 'bar',
+          title: 'Spend',
+          dataSourceId: 'source',
+          dateRangeFieldId: 'date',
+          dimension: { fieldId: 'account' },
+          metric: {
+            source: { kind: 'field', fieldId: 'spend', aggregation: 'sum' },
+            userDefinedName: currency.label,
+            dataType: 'currency',
+          },
+        }}
+        rows={[{ dimension_1: '9223372036854775807', metric_1: '1234.5' }]}
+        columns={[dimension, currency]}
+        page={0}
+        hasMore={false}
+        setPage={() => {}}
+      />,
+    );
+    expect(html).toContain('--color-chart_series_0');
+    expect(html).not.toContain('--color-Spend');
+    expect(html).not.toContain('body { color: red');
+  });
+
+  it('renders null and string-null breakdowns as separate stable series', () => {
+    const html = renderToStaticMarkup(
+      <Result
+        definition={{
+          type: 'bar',
+          title: 'Spend by channel',
+          dataSourceId: 'source',
+          dateRangeFieldId: 'date',
+          dimension: { fieldId: 'account' },
+          breakdownDimension: { fieldId: 'channel' },
+          metric: {
+            source: { kind: 'field', fieldId: 'spend', aggregation: 'sum' },
+            dataType: 'currency',
+          },
+        }}
+        rows={[
+          { dimension_1: 'A', dimension_2: null, metric_1: '10' },
+          { dimension_1: 'A', dimension_2: 'null', metric_1: '20' },
+        ]}
+        columns={[
+          dimension,
+          { ...dimension, key: 'dimension_2', label: 'Channel', dataType: 'text' },
+          currency,
+        ]}
+        page={0}
+        hasMore={false}
+        setPage={() => {}}
+      />,
+    );
+    expect(html).toContain('--color-chart_series_0');
+    expect(html).toContain('--color-chart_series_1');
+  });
+
+  it('formats metric strings while preserving dimension strings', () => {
+    const html = renderToStaticMarkup(
+      <Result
+        definition={{
+          type: 'table',
+          title: 'Accounts',
+          dataSourceId: 'source',
+          dateRangeFieldId: 'date',
+          dimensions: [{ fieldId: 'account' }],
+          metrics: [
+            {
+              source: { kind: 'field', fieldId: 'spend', aggregation: 'sum' },
+              dataType: 'currency',
+              displayFormat: { radix: 2 },
+            },
+          ],
+          resultLimit: { mode: 'top', amount: 10 },
+        }}
+        rows={[{ dimension_1: '9223372036854775807', metric_1: '1234.5' }]}
+        columns={[dimension, currency]}
+        page={0}
+        hasMore={false}
+        setPage={() => {}}
+      />,
+    );
+    expect(html).toContain('9223372036854775807');
+    expect(html).toMatch(/1[,.]234[,.]50/u);
+  });
+
+  it('applies percent, duration, and radix formatting to numeric strings', () => {
+    expect(formatValue('0.125', { ...currency, dataType: 'percent', radix: 1 })).toBe('12.5%');
+    expect(formatValue('3661', { ...currency, dataType: 'duration' })).toBe('1h 1m 1s');
+    expect(formatValue('3599.6', { ...currency, dataType: 'duration' })).toBe('1h');
+    expect(formatValue('1234', { ...currency, dataType: 'number', radix: 0 })).toMatch(/1[,.]234/u);
+    expect(formatValue('1234.567', { ...currency, dataType: 'number', radix: 2 })).toMatch(
+      /1[,.]234[,.]57/u,
+    );
+    expect(formatValue('9223372036854775807', dimension)).toBe('9223372036854775807');
+    expect(formatValue('9223372036854775807', currency)).toBe('9223372036854775807');
   });
 });

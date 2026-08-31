@@ -267,6 +267,38 @@ describe('query compiler', () => {
     expect(result.sql).toContain('SELECT SUM("MediaCost") AS "metric_1"');
   });
 
+  it('keeps custom names out of result aliases', () => {
+    const result = compileWidgetQuery({
+      dashboard,
+      definition: {
+        type: 'line',
+        title: 'Spend',
+        dataSourceId: 'source',
+        dateRangeFieldId: 'date',
+        dimension: { fieldId: 'campaign', userDefinedName: 'Campaign label' },
+        metrics: [
+          {
+            source: { kind: 'field', fieldId: 'cost', aggregation: 'sum' },
+            userDefinedName: 'Spend }; body { color: red; } /*',
+            dataType: 'currency',
+          },
+        ],
+      },
+      dataSource,
+      fields,
+      calculatedFields: [],
+      libraryMetrics: [],
+      controlState: {},
+      bucketName: 'bucket',
+      sourceTableName: 'rundown_source',
+    });
+
+    expect(result.sql).toContain('"Campaign" AS "dimension_1"');
+    expect(result.sql).toContain('SUM("MediaCost") AS "metric_1"');
+    expect(result.sql).not.toContain('Campaign label');
+    expect(result.sql).not.toContain('body');
+  });
+
   it('rejects a top-level alias while allowing aliases inside string literals', () => {
     expect(() =>
       compileLibraryExpression('SUM(media_cost) AS total', { fields, calculatedFields: [] }),
