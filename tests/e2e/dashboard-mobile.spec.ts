@@ -29,6 +29,12 @@ test('a phone viewer reaches the controls from a sticky bar and never scrolls si
   await page.mouse.wheel(0, 2000);
   await expect(page.getByRole('button', { name: 'Hide controls' })).toBeInViewport();
 
+  // The filter popover is portalled, so the scrollable bar must not clip it.
+  await page.getByRole('button', { name: 'Choose Platform values' }).click();
+  await page.getByRole('option', { name: 'TikTok' }).click();
+  await page.keyboard.press('Escape');
+  await expect(controls.getByRole('button', { name: 'Remove TikTok' })).toBeVisible();
+
   await page.getByRole('button', { name: 'Hide controls' }).click();
   await expect(page.getByText('Date range')).toBeHidden();
   await page.getByRole('button', { name: 'Show controls' }).click();
