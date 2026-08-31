@@ -5,6 +5,9 @@ export interface ResolvedDateRange {
   end: string;
 }
 
+const invalidRangeMessage = 'The start date must not be after the end date.';
+export const unsupportedDateRangeMessage = 'The date range is outside the supported calendar.';
+
 export function resolveDateRange(
   range: DateRange,
   timezone: string,
@@ -14,6 +17,20 @@ export function resolveDateRange(
     start: resolveDateValue(range.startDate, timezone, now),
     end: resolveDateValue(range.endDate, timezone, now),
   };
+}
+
+export function tryResolveDateRange(range: DateRange, timezone: string, now = new Date()) {
+  try {
+    const resolved = resolveDateRange(range, timezone, now);
+    return isHtmlDate(resolved.start) && isHtmlDate(resolved.end) ? resolved : undefined;
+  } catch (caught) {
+    if (caught instanceof RangeError) return undefined;
+    throw caught;
+  }
+}
+
+function isHtmlDate(value: string) {
+  return /^(?!0000)\d{4,}-\d{2}-\d{2}$/u.test(value);
 }
 
 export function comparisonDateRange(
@@ -26,8 +43,8 @@ export function comparisonDateRange(
   const start = parseDate(resolved.start);
   const end = parseDate(resolved.end);
   if (mode === 'previousYear') {
-    start.setUTCFullYear(start.getUTCFullYear() - 1);
-    end.setUTCFullYear(end.getUTCFullYear() - 1);
+    start.setTime(shiftMonths(start, -12).getTime());
+    end.setTime(shiftMonths(end, -12).getTime());
   } else {
     const days = Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
     end.setUTCDate(start.getUTCDate() - 1);
@@ -60,16 +77,53 @@ function resolveDateValue(value: DateRange['startDate'], timezone: string, now: 
       resolved.setUTCDate(resolved.getUTCDate() + amount * 7);
       break;
     case 'month':
-      resolved.setUTCMonth(resolved.getUTCMonth() + amount);
+      resolved = shiftMonths(resolved, amount);
       break;
     case 'quarter':
-      resolved.setUTCMonth(resolved.getUTCMonth() + amount * 3);
+      resolved = shiftMonths(resolved, amount * 3);
       break;
     case 'year':
-      resolved.setUTCFullYear(resolved.getUTCFullYear() + amount);
+      resolved = shiftMonths(resolved, amount * 12);
       break;
   }
   return resolved.toISOString().slice(0, 10);
+}
+
+export function updateDateRangeBoundary(
+  range: DateRange,
+  timezone: string,
+  boundary: 'start' | 'end',
+  value: string,
+): { range?: DateRange; error?: string } {
+  if (!value) return {};
+  const resolved = tryResolveDateRange(range, timezone);
+  if (!resolved) return { error: unsupportedDateRangeMessage };
+  const next = {
+    startDate: { fixed: boundary === 'start' ? value : resolved.start },
+    endDate: { fixed: boundary === 'end' ? value : resolved.end },
+  } satisfies DateRange;
+  if (next.startDate.fixed > next.endDate.fixed) return { error: invalidRangeMessage };
+  return { range: next };
+}
+
+export function dateRangeOrderError(range: DateRange, timezone: string) {
+  const resolved = tryResolveDateRange(range, timezone);
+  if (!resolved) return unsupportedDateRangeMessage;
+  return resolved.start > resolved.end ? invalidRangeMessage : undefined;
+}
+
+function shiftMonths(date: Date, amount: number) {
+  const target = utcDate(date.getUTCFullYear(), date.getUTCMonth() + amount, 1);
+  const lastDay = utcDate(target.getUTCFullYear(), target.getUTCMonth() + 1, 0).getUTCDate();
+  target.setUTCDate(Math.min(date.getUTCDate(), lastDay));
+  return target;
+}
+
+function utcDate(year: number, month: number, day: number) {
+  const date = new Date(0);
+  date.setUTCHours(0, 0, 0, 0);
+  date.setUTCFullYear(year, month, day);
+  return date;
 }
 
 function parseDate(value: string) {

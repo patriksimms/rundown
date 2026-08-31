@@ -7,8 +7,13 @@ import {
   fieldRoleSchema,
   gridPlacementSchema,
   semanticTypeSchema,
+  timezoneSchema,
   widgetDefinitionSchema,
 } from '#/domain/schema';
+import {
+  datasourceUploadEventSchema,
+  prepareDatasourceUploadSchema,
+} from '#/domain/datasource-upload';
 
 const dashboardRef = { dashboardId: z.string().min(1), shareToken: z.string().min(1).optional() };
 
@@ -21,14 +26,14 @@ export const apiRequestSchema = z.discriminatedUnion('action', [
     action: z.literal('createDashboard'),
     name: z.string().trim().min(1),
     dataSourceIds: z.array(z.string()).default([]),
-    timezone: z.string().default('Europe/Berlin'),
+    timezone: timezoneSchema.default('Europe/Berlin'),
     defaultDateRange: dateRangeSchema.optional(),
   }),
   z.object({
     action: z.literal('updateDashboard'),
     dashboardId: z.string().min(1),
     name: z.string().trim().min(1).optional(),
-    timezone: z.string().min(1).optional(),
+    timezone: timezoneSchema.optional(),
     defaultDateRange: dateRangeSchema.optional(),
   }),
   z.object({
@@ -85,6 +90,7 @@ export const apiRequestSchema = z.discriminatedUnion('action', [
     ...dashboardRef,
     widgetId: z.string().min(1),
     controlState: controlStateSchema.optional(),
+    page: z.number().int().nonnegative().optional(),
   }),
   z.object({ action: z.literal('explainWidget'), ...dashboardRef, widgetId: z.string().min(1) }),
   z.object({
@@ -102,10 +108,18 @@ export const apiRequestSchema = z.discriminatedUnion('action', [
     shareToken: z.string().min(1).optional(),
   }),
   z.object({ action: z.literal('listR2Objects'), prefix: z.string().optional() }),
+  prepareDatasourceUploadSchema.extend({ action: z.literal('prepareDatasourceUpload') }),
+  z.object({
+    action: z.literal('removeDatasourceUpload'),
+    key: z.string().min(1),
+    cleanupToken: z.string().min(1),
+  }),
+  datasourceUploadEventSchema.extend({ action: z.literal('trackDatasourceUpload') }),
   z.object({
     action: z.literal('registerDatasource'),
     name: z.string().trim().min(1),
     location: dataSourceLocationSchema,
+    cleanupToken: z.string().min(1).optional(),
   }),
   z.object({
     action: z.literal('updateFieldMetadata'),
