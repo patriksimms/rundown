@@ -148,13 +148,17 @@ function DatasourcesContent() {
 function FieldTable({ source, refresh }: { source: Description; refresh: () => Promise<void> }) {
   const [search, setSearch] = useState('');
   const needle = search.trim().toLowerCase();
-  const matches = needle
-    ? source.fields.filter((field) =>
-        [field.columnName, field.label, field.canonicalName, field.description ?? ''].some(
-          (value) => value.toLowerCase().includes(needle),
-        ),
-      )
-    : source.fields;
+  const matches = new Set(
+    needle
+      ? source.fields
+          .filter((field) =>
+            [field.columnName, field.label, field.canonicalName, field.description ?? ''].some(
+              (value) => value.toLowerCase().includes(needle),
+            ),
+          )
+          .map((field) => field.id)
+      : source.fields.map((field) => field.id),
+  );
   return (
     <div className="flex flex-col gap-4">
       <Field className="max-w-sm">
@@ -167,18 +171,25 @@ function FieldTable({ source, refresh }: { source: Description; refresh: () => P
           onChange={(event) => setSearch(event.target.value)}
         />
         <FieldDescription aria-live="polite">
-          {matches.length} of {source.fields.length} fields
+          {matches.size} of {source.fields.length} fields
         </FieldDescription>
       </Field>
-      {matches.length ? (
-        <ul className="flex flex-col gap-3">
-          {matches.map((field) => (
-            <li key={field.id}>
-              <FieldRow sourceId={source.id} field={field} refresh={refresh} />
-            </li>
-          ))}
-        </ul>
-      ) : (
+      {/*
+        Every field stays mounted so filtering never throws away an unsaved edit. A row that no
+        longer matches only disappears once it stops holding focus, so saving a field out of its
+        own search result does not drop the caret to the document.
+      */}
+      <ul className="flex flex-col gap-3">
+        {source.fields.map((field) => (
+          <li
+            key={field.id}
+            className={matches.has(field.id) ? undefined : 'not-focus-within:hidden'}
+          >
+            <FieldRow sourceId={source.id} field={field} refresh={refresh} />
+          </li>
+        ))}
+      </ul>
+      {matches.size ? null : (
         <p className="text-sm text-muted-foreground">No field matches that search.</p>
       )}
     </div>
@@ -293,13 +304,21 @@ function FieldRow({
           variant="outline"
           size="sm"
           disabled={saving}
+          // Stay focusable while the save runs, so the keyboard caret is not dropped to the
+          // document and the row keeps the focus that holds it in a narrowed search.
+          focusableWhenDisabled
+          className="aria-disabled:pointer-events-none aria-disabled:opacity-50"
           aria-label={`Save ${field.columnName}`}
           onClick={save}
         >
           {saving ? 'Saving…' : 'Save'}
         </Button>
       </div>
-      {error ? <p className="mt-2 text-sm text-destructive">{error}</p> : null}
+      {error ? (
+        <p role="alert" className="mt-2 text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

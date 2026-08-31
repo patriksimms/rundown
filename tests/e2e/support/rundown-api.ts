@@ -122,13 +122,13 @@ const fields = [
   },
 ];
 
-const description = {
+const description = () => ({
   id: dataSourceId,
   name: 'Reporting example',
-  fields,
+  fields: fields.map((field) => ({ ...field })),
   calculatedFields: [],
   libraryMetrics: [],
-};
+});
 
 interface MockOptions {
   role?: 'admin' | 'editor' | 'viewer';
@@ -140,7 +140,7 @@ interface MockOptions {
  * behaviour can be exercised against the real routes without a Clerk session.
  */
 export async function mockRundownApi(page: Page, options: MockOptions = {}) {
-  const state = { dashboard: buildDashboard(), nextWidget: 0 };
+  const state = { dashboard: buildDashboard(), source: description(), nextWidget: 0 };
   const ok = (route: Route, data: unknown) =>
     route.fulfill({
       status: 200,
@@ -154,12 +154,13 @@ export async function mockRundownApi(page: Page, options: MockOptions = {}) {
       width?: number;
       height?: number;
       placements?: Array<{ widgetId: string; placement: DashboardWidget['layout'] }>;
+      patch?: Record<string, unknown>;
     };
     switch (request.action) {
       case 'bootstrap':
         return ok(route, {
           isAdmin: options.isAdmin ?? true,
-          dataSources: [{ id: dataSourceId, name: description.name }],
+          dataSources: [{ id: dataSourceId, name: state.source.name }],
         });
       case 'listDashboards':
         return ok(route, [{ id: state.dashboard.id, name: state.dashboard.name }]);
@@ -167,11 +168,19 @@ export async function mockRundownApi(page: Page, options: MockOptions = {}) {
         return ok(route, {
           dashboard: state.dashboard,
           role: options.role ?? 'editor',
-          dataSources: [{ id: dataSourceId, name: description.name }],
+          dataSources: [{ id: dataSourceId, name: state.source.name }],
           sharing: { links: [], grants: [] },
         });
       case 'describeDatasource':
-        return ok(route, description);
+        return ok(route, state.source);
+      case 'updateFieldMetadata':
+        state.source = {
+          ...state.source,
+          fields: state.source.fields.map((field) =>
+            field.columnName === request.columnName ? { ...field, ...request.patch } : field,
+          ),
+        };
+        return ok(route, { ok: true });
       case 'getControlOptions':
         return ok(route, { values: ['FB', 'IG', 'TikTok'] });
       case 'queryWidget':
