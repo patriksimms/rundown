@@ -35,7 +35,12 @@ import { comparisonDateRange, resolveDateRange } from '#/domain/dates';
 import { queryCacheState, widgetDependencyState } from '#/domain/cache';
 import { queryResultColumns } from '#/domain/query-result';
 import { remapWidgetDefinition } from '#/domain/remap';
-import { mergeControlState } from '#/domain/control-state';
+import {
+  controlDefaultValues,
+  mergeControlState,
+  singleValueControlWithMultipleSelections,
+} from '#/domain/control-state';
+import { controlOptionsQuery } from '#/domain/control-options';
 import { isWorkspaceR2Key, scopedR2Prefix } from '#/domain/tenancy';
 import {
   createDatasourceUploadCleanupToken,
@@ -585,17 +590,10 @@ async function getControlOptions(
   if (!field) throw new ApiError(400, 'unknown_field', 'The control field no longer exists.');
   const expression =
     'columnName' in field ? quoteIdentifier(field.columnName) : `(${field.expression})`;
-  const parameters: unknown[] = [];
-  const where = search ? ` WHERE CAST(${expression} AS VARCHAR) ILIKE ?` : '';
-  if (search) parameters.push(`%${search}%`);
   const direction = controlDefinition.optionsSortDirection?.toUpperCase() ?? 'ASC';
-  const rows = await runIsolatedPreparedQuery<{ value: unknown }>(
-    dataSource,
-    (sourceTableName) => ({
-      sql: `SELECT ${expression} AS value FROM ${quoteIdentifier(sourceTableName)}${where} GROUP BY 1 ORDER BY 1 ${direction} LIMIT 100`,
-      parameters,
-    }),
-  );
+  const rows = await runIsolatedPreparedQuery<{ value: unknown }>(dataSource, (sourceTableName) => {
+    return controlOptionsQuery(expression, search, direction, quoteIdentifier(sourceTableName));
+  });
   return { values: rows.map((row) => normalize(row.value)) };
 }
 
@@ -1295,8 +1293,8 @@ function defaultControlState(dashboard: DashboardDocument): ControlState {
   const dateControl = dashboard.widgets.find((widget) => widget.definition.type === 'dateControl');
   const values = Object.fromEntries(
     dashboard.widgets.flatMap((widget) =>
-      widget.definition.type === 'control' && widget.definition.defaultValues?.length
-        ? [[widget.id, widget.definition.defaultValues]]
+      widget.definition.type === 'control' && controlDefaultValues(widget)?.length
+        ? [[widget.id, controlDefaultValues(widget)]]
         : [],
     ),
   );
@@ -1323,6 +1321,16 @@ function widgetById(document: DashboardDocument, widgetId: string) {
 }
 
 async function validateDefinition(dashboard: DashboardDocument, definition: WidgetDefinition) {
+  if (
+    definition.type === 'control' &&
+    !definition.allowMultiple &&
+    (definition.defaultValues?.length ?? 0) > 1
+  )
+    throw new ApiError(
+      400,
+      'multiple_default_values_not_allowed',
+      'A single-select filter accepts only one default value.',
+    );
   if (!('dataSourceId' in definition)) return;
   const dataSource = await loadDataSource(definition.dataSourceId, dashboard.workspaceId);
   const metadata = await loadQueryMetadata(dataSource.id, dashboard.workspaceId);
@@ -1431,7 +1439,7 @@ async function definitionHash(definition: WidgetDefinition, workspaceId: string)
   return hashJson(widgetDependencyState(definition, metadata));
 }
 
-function validateControlState(dashboard: DashboardDocument, input: ControlState) {
+export function validateControlState(dashboard: DashboardDocument, input: ControlState) {
   const state = controlStateSchema.parse(input);
   if (
     dashboard.widgets.some((widget) => widget.definition.type === 'dateControl') &&
@@ -1446,6 +1454,8 @@ function validateControlState(dashboard: DashboardDocument, input: ControlState)
   for (const key of Object.keys(state.values ?? {}))
     if (!controlIds.has(key))
       throw new ApiError(400, 'unknown_control', `Unknown dashboard control ${key}.`);
+  if (singleValueControlWithMultipleSelections(dashboard, state))
+    throw new ApiError(400, 'multiple_values_not_allowed', 'This filter accepts only one value.');
   return state;
 }
 

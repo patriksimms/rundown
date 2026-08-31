@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  controlDefaultValues,
   mergeControlState,
+  singleValueControlWithMultipleSelections,
+  toggleControlValue,
   withDefaultDateRange,
   withoutWidgetControlState,
 } from './control-state';
@@ -99,5 +102,52 @@ describe('dashboard control defaults', () => {
       definitionHash: 'hash',
     };
     expect(withoutWidgetControlState(defaults, widget, true)).toBe(defaults);
+  });
+
+  it('detects multiple submitted values for a single-select control', () => {
+    const dashboard = {
+      widgets: [
+        {
+          id: 'region',
+          definition: {
+            type: 'control' as const,
+            dataSourceId: 'source',
+            fieldId: 'region',
+            allowMultiple: false,
+          },
+        },
+      ],
+    } as Parameters<typeof singleValueControlWithMultipleSelections>[0];
+
+    expect(
+      singleValueControlWithMultipleSelections(dashboard, {
+        values: { region: ['EMEA', 'APAC'] },
+      }),
+    ).toBe('region');
+    expect(
+      singleValueControlWithMultipleSelections(dashboard, { values: { region: ['EMEA'] } }),
+    ).toBeUndefined();
+  });
+
+  it('limits persisted single-select defaults to one value', () => {
+    const widget = {
+      id: 'region',
+      definition: {
+        type: 'control' as const,
+        dataSourceId: 'source',
+        fieldId: 'region',
+        allowMultiple: false,
+        defaultValues: ['EMEA', 'APAC'],
+      },
+      layout: { x: 0, y: 0, width: 3, height: 1 },
+      definitionHash: 'hash',
+    };
+    expect(controlDefaultValues(widget)).toEqual(['EMEA']);
+  });
+
+  it('replaces a single selection and toggles multiple selections', () => {
+    expect(toggleControlValue(['EMEA'], 'APAC', false)).toEqual(['APAC']);
+    expect(toggleControlValue(['EMEA'], 'APAC', true)).toEqual(['EMEA', 'APAC']);
+    expect(toggleControlValue(['EMEA', 'APAC'], 'EMEA', true)).toEqual(['APAC']);
   });
 });

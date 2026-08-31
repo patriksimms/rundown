@@ -9,17 +9,22 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties, type KeyboardEvent } from 'react';
+import { ChevronsUpDown, X } from 'lucide-react';
 import type { ControlState, DashboardDocument, DashboardWidget } from '#/domain/schema';
 import type { QueryResultColumn } from '#/domain/query-result';
 import { callApi } from '#/api/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '#/components/ui/card';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '#/components/ui/chart';
+import { Badge } from '#/components/ui/badge';
+import { Button } from '#/components/ui/button';
+import { Command, CommandGroup, CommandInput, CommandList } from '#/components/ui/command';
 import { Field, FieldLabel } from '#/components/ui/field';
 import { Input } from '#/components/ui/input';
-import { NativeSelect, NativeSelectOption } from '#/components/ui/native-select';
+import { Popover, PopoverContent, PopoverTrigger } from '#/components/ui/popover';
 import { Skeleton } from '#/components/ui/skeleton';
 import { widgetQueryRequest } from '#/domain/widget-query';
+import { controlDefaultValues, toggleControlValue } from '#/domain/control-state';
 import {
   Table,
   TableBody,
@@ -219,51 +224,159 @@ function FilterControl({
   setControlState: (state: ControlState) => void;
 }) {
   const [values, setValues] = useState<unknown[]>([]);
+  const [search, setSearch] = useState('');
+  const [retry, setRetry] = useState(0);
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [open, setOpen] = useState(false);
   useEffect(() => {
     let current = true;
-    async function loadOptions() {
-      const result = await callApi<{ values: unknown[] }>({
+    setStatus('loading');
+    const timeout = setTimeout(() => {
+      void callApi<{ values: unknown[] }>({
         action: 'getControlOptions',
         dashboardId,
         controlId: widgetId,
         shareToken,
-      });
-      if (current) setValues(result.values);
-    }
-    void loadOptions();
+        ...(search ? { search } : {}),
+      })
+        .then((result) => {
+          if (!current) return;
+          setValues(result.values);
+          setStatus('ready');
+        })
+        .catch(() => {
+          if (current) setStatus('error');
+        });
+    }, 250);
     return () => {
       current = false;
+      clearTimeout(timeout);
     };
-  }, [dashboardId, definitionHash, shareToken, widgetId]);
-  const selected = controlState.values?.[widgetId]?.[0];
+  }, [dashboardId, definitionHash, retry, search, shareToken, widgetId]);
+  const selected = (controlState.values?.[widgetId] ?? []).map(String);
+  const updateSelected = (next: string[]) =>
+    setControlState({
+      ...controlState,
+      values: { ...controlState.values, [widgetId]: next },
+    });
+  const select = (value: string) => {
+    if (!definition.allowMultiple) {
+      updateSelected(toggleControlValue(selected, value, false));
+      setOpen(false);
+      return;
+    }
+    updateSelected(toggleControlValue(selected, value, true));
+  };
   return (
     <Card size="sm">
       <CardHeader>
         <CardTitle>{definition.userDefinedName ?? 'Filter'}</CardTitle>
       </CardHeader>
-      <CardContent>
-        <NativeSelect
-          value={selected === undefined ? '' : String(selected)}
-          onChange={(event) =>
-            setControlState({
-              ...controlState,
-              values: {
-                ...controlState.values,
-                [widgetId]: event.target.value ? [event.target.value] : [],
-              },
-            })
-          }
-        >
-          <NativeSelectOption value="">All</NativeSelectOption>
-          {values.map((value) => (
-            <NativeSelectOption key={String(value)} value={String(value)}>
-              {String(value)}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
+      <CardContent className="flex flex-col gap-2">
+        <Popover open={open} onOpenChange={setOpen}>
+          <PopoverTrigger
+            render={
+              <Button
+                variant="outline"
+                className="w-full justify-between font-normal"
+                aria-label={`Choose ${definition.userDefinedName ?? 'filter'} values`}
+              />
+            }
+          >
+            {selected.length
+              ? definition.allowMultiple
+                ? `${selected.length} selected`
+                : selected[0]
+              : 'All values'}
+            <ChevronsUpDown className="size-4 opacity-50" />
+          </PopoverTrigger>
+          <PopoverContent className="w-(--anchor-width) p-0" align="start">
+            <Command shouldFilter={false} label={definition.userDefinedName ?? 'Filter values'}>
+              <CommandInput value={search} onValueChange={setSearch} placeholder="Search values…" />
+              <CommandList aria-multiselectable={definition.allowMultiple || undefined}>
+                {status === 'loading' ? (
+                  <div role="status" className="py-6 text-center text-sm text-muted-foreground">
+                    Loading…
+                  </div>
+                ) : status === 'error' ? (
+                  <div role="alert" className="flex flex-col items-center gap-2 py-6 text-sm">
+                    <p>Could not load values.</p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setRetry((value) => value + 1)}
+                    >
+                      Retry
+                    </Button>
+                  </div>
+                ) : values.length ? (
+                  <CommandGroup>
+                    {values.map((value) => {
+                      const option = String(value);
+                      const checked = selected.includes(option);
+                      return (
+                        <button
+                          type="button"
+                          role="option"
+                          key={option}
+                          aria-selected={checked}
+                          className="flex min-h-10 w-full items-center rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+                          onKeyDown={handleFilterOptionKeyDown}
+                          onClick={() => select(option)}
+                        >
+                          {option}
+                          <span aria-hidden="true" className="ml-auto">
+                            {checked ? '✓' : ''}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </CommandGroup>
+                ) : (
+                  <div className="py-6 text-center text-sm">No values found.</div>
+                )}
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+        {selected.length ? (
+          <div className="flex flex-wrap gap-1.5">
+            {selected.map((value) => (
+              <Badge key={value} variant="secondary" className="gap-1 pr-1">
+                {value}
+                <button
+                  type="button"
+                  className="flex size-6 items-center justify-center rounded-sm hover:bg-muted"
+                  aria-label={`Remove ${value}`}
+                  onClick={() => updateSelected(selected.filter((item) => item !== value))}
+                >
+                  <X className="size-3" />
+                </button>
+              </Badge>
+            ))}
+            <Button variant="ghost" size="xs" onClick={() => updateSelected([])}>
+              Clear
+            </Button>
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );
+}
+
+function handleFilterOptionKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+  if (!['Enter', ' ', 'ArrowDown', 'ArrowUp'].includes(event.key)) return;
+  event.stopPropagation();
+  if (event.key === 'Enter' || event.key === ' ') return;
+  event.preventDefault();
+  const options = [
+    ...(event.currentTarget
+      .closest('[role="listbox"]')
+      ?.querySelectorAll<HTMLElement>('[role="option"]') ?? []),
+  ];
+  const index = options.indexOf(event.currentTarget);
+  const direction = event.key === 'ArrowDown' ? 1 : -1;
+  options[(index + direction + options.length) % options.length]?.focus();
 }
 
 function QueryCard({
@@ -518,8 +631,8 @@ export function initialControlState(dashboard: DashboardDocument): ControlState 
   const dateControl = dashboard.widgets.find((widget) => widget.definition.type === 'dateControl');
   const values = Object.fromEntries(
     dashboard.widgets.flatMap((widget) =>
-      widget.definition.type === 'control' && widget.definition.defaultValues?.length
-        ? [[widget.id, widget.definition.defaultValues]]
+      widget.definition.type === 'control' && controlDefaultValues(widget)?.length
+        ? [[widget.id, controlDefaultValues(widget)]]
         : [],
     ),
   );
