@@ -187,22 +187,33 @@ function FieldRow({
   refresh: () => Promise<void>;
 }) {
   const [value, setValue] = useState(field);
+  const [error, setError] = useState<string>();
+  const [saving, setSaving] = useState(false);
   async function save() {
-    await callApi({
-      action: 'updateFieldMetadata',
-      dataSourceId: sourceId,
-      columnName: field.columnName,
-      patch: {
-        label: value.label,
-        canonicalName: value.canonicalName,
-        role: value.role,
-        semanticType: value.semanticType,
-        description: value.description,
-        hidden: value.hidden,
-        castTo: value.castTo,
-      },
-    });
-    await refresh();
+    if (saving) return;
+    setSaving(true);
+    setError(undefined);
+    try {
+      await callApi({
+        action: 'updateFieldMetadata',
+        dataSourceId: sourceId,
+        columnName: field.columnName,
+        patch: {
+          label: value.label,
+          canonicalName: value.canonicalName,
+          role: value.role,
+          semanticType: value.semanticType,
+          description: value.description,
+          hidden: value.hidden,
+          castTo: value.castTo,
+        },
+      });
+      await refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setSaving(false);
+    }
   }
   return (
     <TableRow>
@@ -259,9 +270,10 @@ function FieldRow({
         />
       </TableCell>
       <TableCell>
-        <Button variant="outline" size="sm" onClick={save}>
-          Save
+        <Button variant="outline" size="sm" disabled={saving} onClick={save}>
+          {saving ? 'Saving…' : 'Save'}
         </Button>
+        {error ? <p className="mt-1 text-xs text-destructive">{error}</p> : null}
       </TableCell>
     </TableRow>
   );
@@ -288,7 +300,6 @@ function RegisterForm({ refresh }: { refresh: () => Promise<void> }) {
   const fileInput = useRef<HTMLInputElement | null>(null);
   const uploadRequest = useRef<XMLHttpRequest | undefined>(undefined);
   const uploadStartedAt = useRef(0);
-
   useEffect(() => {
     if (!key && objects[0]) setKey(objects[0].key);
   }, [key, objects]);

@@ -418,12 +418,14 @@ function QueryCard({
   const [comparisonRows, setComparisonRows] = useState<Record<string, unknown>[]>();
   const [summaryRow, setSummaryRow] = useState<Record<string, unknown>>();
   const [error, setError] = useState<string>();
+  const [retry, setRetry] = useState(0);
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   useEffect(() => setPage(0), [controlState, dashboardId, widget.definition, widget.id]);
   useEffect(() => {
     let current = true;
     // Keep the last result usable if loading a new page fails.
+    setError(undefined);
     void callApi<{
       rows: Record<string, unknown>[];
       columns: QueryResultColumn[];
@@ -455,7 +457,7 @@ function QueryCard({
     return () => {
       current = false;
     };
-  }, [controlState, dashboardId, page, preview, shareToken, widget.definition, widget.id]);
+  }, [controlState, dashboardId, page, preview, retry, shareToken, widget.definition, widget.id]);
   const definition = widget.definition;
   if (!('title' in definition)) return null;
   return (
@@ -466,18 +468,34 @@ function QueryCard({
       </CardHeader>
       <CardContent>
         {!rows || !columns ? (
-          <Skeleton className="h-28 w-full" />
+          error ? (
+            <div className="flex flex-col items-start gap-3">
+              <p className="text-sm text-destructive">{error}</p>
+              <Button variant="outline" size="sm" onClick={() => setRetry((value) => value + 1)}>
+                Retry
+              </Button>
+            </div>
+          ) : (
+            <Skeleton className="h-28 w-full" />
+          )
         ) : (
-          <Result
-            definition={definition}
-            rows={rows}
-            columns={columns}
-            comparisonRows={comparisonRows}
-            summaryRow={summaryRow}
-            page={page}
-            hasMore={hasMore}
-            setPage={setPage}
-          />
+          <div className="space-y-3">
+            <Result
+              definition={definition}
+              rows={rows}
+              columns={columns}
+              comparisonRows={comparisonRows}
+              summaryRow={summaryRow}
+              page={page}
+              hasMore={hasMore}
+              setPage={setPage}
+            />
+            {error ? (
+              <Button variant="outline" size="sm" onClick={() => setRetry((value) => value + 1)}>
+                Retry
+              </Button>
+            ) : null}
+          </div>
         )}
       </CardContent>
     </Card>
