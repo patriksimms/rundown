@@ -6,6 +6,7 @@ export interface ResolvedDateRange {
 }
 
 const invalidRangeMessage = 'The start date must not be after the end date.';
+export const unsupportedDateRangeMessage = 'The date range is outside the supported calendar.';
 
 export function resolveDateRange(
   range: DateRange,
@@ -16,6 +17,15 @@ export function resolveDateRange(
     start: resolveDateValue(range.startDate, timezone, now),
     end: resolveDateValue(range.endDate, timezone, now),
   };
+}
+
+export function tryResolveDateRange(range: DateRange, timezone: string, now = new Date()) {
+  try {
+    return resolveDateRange(range, timezone, now);
+  } catch (caught) {
+    if (caught instanceof RangeError) return undefined;
+    throw caught;
+  }
 }
 
 export function comparisonDateRange(
@@ -81,7 +91,8 @@ export function updateDateRangeBoundary(
   value: string,
 ): { range?: DateRange; error?: string } {
   if (!value) return {};
-  const resolved = resolveDateRange(range, timezone);
+  const resolved = tryResolveDateRange(range, timezone);
+  if (!resolved) return { error: unsupportedDateRangeMessage };
   const next = {
     startDate: { fixed: boundary === 'start' ? value : resolved.start },
     endDate: { fixed: boundary === 'end' ? value : resolved.end },
@@ -91,17 +102,23 @@ export function updateDateRangeBoundary(
 }
 
 export function dateRangeOrderError(range: DateRange, timezone: string) {
-  const resolved = resolveDateRange(range, timezone);
+  const resolved = tryResolveDateRange(range, timezone);
+  if (!resolved) return unsupportedDateRangeMessage;
   return resolved.start > resolved.end ? invalidRangeMessage : undefined;
 }
 
 function shiftMonths(date: Date, amount: number) {
-  const target = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + amount, 1));
-  const lastDay = new Date(
-    Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0),
-  ).getUTCDate();
+  const target = utcDate(date.getUTCFullYear(), date.getUTCMonth() + amount, 1);
+  const lastDay = utcDate(target.getUTCFullYear(), target.getUTCMonth() + 1, 0).getUTCDate();
   target.setUTCDate(Math.min(date.getUTCDate(), lastDay));
   return target;
+}
+
+function utcDate(year: number, month: number, day: number) {
+  const date = new Date(0);
+  date.setUTCHours(0, 0, 0, 0);
+  date.setUTCFullYear(year, month, day);
+  return date;
 }
 
 function parseDate(value: string) {

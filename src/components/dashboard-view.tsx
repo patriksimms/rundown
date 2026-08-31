@@ -19,7 +19,12 @@ import { Input } from '#/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '#/components/ui/native-select';
 import { Skeleton } from '#/components/ui/skeleton';
 import { widgetQueryRequest } from '#/domain/widget-query';
-import { dateRangeOrderError, resolveDateRange, updateDateRangeBoundary } from '#/domain/dates';
+import {
+  dateRangeOrderError,
+  tryResolveDateRange,
+  unsupportedDateRangeMessage,
+  updateDateRangeBoundary,
+} from '#/domain/dates';
 import {
   Table,
   TableBody,
@@ -163,9 +168,15 @@ function DateControl({
   setControlState: (state: ControlState) => void;
 }) {
   const range = controlState.dateRange;
-  const resolved = range ? resolveDateRange(range, timezone) : undefined;
+  const resolved = range ? tryResolveDateRange(range, timezone) : undefined;
   const [error, setError] = useState<string>();
-  const displayedError = error ?? (range ? dateRangeOrderError(range, timezone) : undefined);
+  const displayedError =
+    error ??
+    (range
+      ? resolved
+        ? dateRangeOrderError(range, timezone)
+        : unsupportedDateRangeMessage
+      : undefined);
 
   const updateBoundary = (boundary: 'start' | 'end', value: string) => {
     if (!range) return;

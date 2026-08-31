@@ -3,6 +3,7 @@ import {
   comparisonDateRange,
   dateRangeOrderError,
   resolveDateRange,
+  tryResolveDateRange,
   updateDateRangeBoundary,
 } from './dates';
 
@@ -81,6 +82,28 @@ describe('date range resolution', () => {
         'UTC',
       ),
     ).toEqual({ startDate: { fixed: '2023-02-28' }, endDate: { fixed: '2023-02-28' } });
+  });
+
+  it('preserves years below 100 when shifting comparisons', () => {
+    expect(
+      comparisonDateRange(
+        { startDate: { fixed: '0100-03-01' }, endDate: { fixed: '0100-03-01' } },
+        'previousYear',
+        'UTC',
+      ),
+    ).toEqual({ startDate: { fixed: '0099-03-01' }, endDate: { fixed: '0099-03-01' } });
+  });
+
+  it('reports relative ranges outside the supported calendar without throwing', () => {
+    const value = {
+      relative: {
+        amount: 300_000,
+        unit: 'year' as const,
+        direction: 'past' as const,
+        anchor: 'now' as const,
+      },
+    };
+    expect(tryResolveDateRange({ startDate: value, endDate: value }, 'UTC')).toBeUndefined();
   });
 
   it('turns a relative range into valid fixed values when edited', () => {
