@@ -463,7 +463,7 @@ async function queryWidget(
   const widget = widgetById(access.document, widgetId);
   const defaults = defaultControlState(access.document);
   const controlState = validateControlState(access.document, mergeControlState(defaults, state));
-  if (!('dataSourceId' in widget.definition)) return { rows: [], controlState };
+  if (!compilesToQuery(widget.definition)) return { rows: [], controlState };
   const dataSource = await loadDataSource(
     widget.definition.dataSourceId,
     access.document.workspaceId,
@@ -576,7 +576,7 @@ async function queryWidget(
 async function explainWidget(dashboardId: string, widgetId: string, shareToken?: string) {
   const access = await authorizeDashboard(dashboardId, 'viewer', shareToken);
   const widget = widgetById(access.document, widgetId);
-  if (!('dataSourceId' in widget.definition)) return { sql: null, definitions: [] };
+  if (!compilesToQuery(widget.definition)) return { sql: null, definitions: [] };
   const dataSource = await loadDataSource(
     widget.definition.dataSourceId,
     access.document.workspaceId,
@@ -1383,7 +1383,6 @@ async function validateDefinition(dashboard: DashboardDocument, definition: Widg
       'unknown_field',
       'The widget references a field that does not belong to its datasource.',
     );
-  // Filter controls read a datasource but never compile to a query of their own.
   if (!compilesToQuery(definition)) return;
   const compiled = compileWidgetQuery({
     dashboard,
@@ -1404,7 +1403,7 @@ async function runDefinition(
 ) {
   const defaults = defaultControlState(dashboard);
   const controlState = validateControlState(dashboard, mergeControlState(defaults, state));
-  if (!('dataSourceId' in definition)) return { rows: [], controlState };
+  if (!compilesToQuery(definition)) return { rows: [], controlState };
   const dataSource = await loadDataSource(definition.dataSourceId, dashboard.workspaceId);
   const metadata = await loadQueryMetadata(dataSource.id, dashboard.workspaceId);
   const columns = queryResultColumns(definition, metadata);
@@ -1562,6 +1561,10 @@ function compatibleSemanticTypes(left: string, right: string) {
   return left === right || (left === 'text' && right === 'text');
 }
 
+/**
+ * Text, date controls, and filter controls have no query of their own. Filter controls do name a
+ * datasource, so a datasource check alone is not enough to keep them out of the compiler.
+ */
 function compilesToQuery(definition: WidgetDefinition) {
   return 'dataSourceId' in definition && 'dateRangeFieldId' in definition;
 }

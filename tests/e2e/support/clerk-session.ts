@@ -18,17 +18,11 @@ interface BrowserSignIn {
   status: string;
   createdSessionId: string | null;
   supportedFirstFactors: EmailCodeFactor[] | null;
-  supportedSecondFactors: EmailCodeFactor[] | null;
   prepareFirstFactor(params: {
     strategy: 'email_code';
     emailAddressId: string;
   }): Promise<BrowserSignIn>;
   attemptFirstFactor(params: { strategy: 'email_code'; code: string }): Promise<BrowserSignIn>;
-  prepareSecondFactor(params: {
-    strategy: 'email_code';
-    emailAddressId: string;
-  }): Promise<BrowserSignIn>;
-  attemptSecondFactor(params: { strategy: 'email_code'; code: string }): Promise<BrowserSignIn>;
 }
 
 interface BrowserClerk {
@@ -64,21 +58,16 @@ export async function signInWithClerk(page: Page, credentials: ClerkCredentials)
         password,
       });
 
-      if (attempt.status === 'needs_client_trust' || attempt.status === 'needs_second_factor') {
-        const first = emailCodeFactor(attempt.supportedFirstFactors);
-        const second = emailCodeFactor(attempt.supportedSecondFactors);
-        if (first?.emailAddressId) {
+      // Clerk keeps `supportedFirstFactors` populated after the password verifies, so the factor
+      // list is only meaningful for the status that actually asked for it.
+      if (attempt.status === 'needs_client_trust') {
+        const factor = emailCodeFactor(attempt.supportedFirstFactors);
+        if (factor?.emailAddressId) {
           const prepared = await attempt.prepareFirstFactor({
             strategy: 'email_code',
-            emailAddressId: first.emailAddressId,
+            emailAddressId: factor.emailAddressId,
           });
           attempt = await prepared.attemptFirstFactor({ strategy: 'email_code', code });
-        } else if (second?.emailAddressId) {
-          const prepared = await attempt.prepareSecondFactor({
-            strategy: 'email_code',
-            emailAddressId: second.emailAddressId,
-          });
-          attempt = await prepared.attemptSecondFactor({ strategy: 'email_code', code });
         }
       }
 

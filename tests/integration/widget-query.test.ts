@@ -267,6 +267,37 @@ describe('query engine failures', () => {
     expect(opened.dashboard.widgets).toEqual([]);
   });
 
+  test('a filter control answers every compiler entry point without a query', async () => {
+    const workspace = await signInToNewWorkspace();
+    const source = await seedDataSource(workspace);
+    const dashboard = await createDashboard();
+    const control = await addWidget(dashboard.id, regionControlDefinition(source));
+
+    expect(
+      await callService({
+        action: 'queryWidget',
+        dashboardId: dashboard.id,
+        widgetId: control.id,
+      }),
+    ).toMatchObject({ rows: [] });
+    expect(
+      await callService({
+        action: 'explainWidget',
+        dashboardId: dashboard.id,
+        widgetId: control.id,
+      }),
+    ).toEqual({ sql: null, definitions: [] });
+    expect(
+      await callService({
+        action: 'previewWidget',
+        dashboardId: dashboard.id,
+        definition: regionControlDefinition(source),
+      }),
+    ).toMatchObject({ rows: [] });
+    // None of them reach the query engine.
+    expect(queryEngine.calls).toEqual([]);
+  });
+
   test('a widget cannot reference a field from another datasource', async () => {
     const workspace: TestWorkspace = await signInToNewWorkspace();
     const source = await seedDataSource(workspace);
