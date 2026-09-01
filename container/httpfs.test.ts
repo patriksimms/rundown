@@ -12,6 +12,10 @@ describe('DuckDB HTTPFS through an internal-style endpoint', () => {
   const requests: Array<{ path: string; method: string; range: string | null }> = [];
   let activeRanges = 0;
   let maximumActiveRanges = 0;
+  let releaseFirstRange: () => void = () => {};
+  const secondRangeStarted = new Promise<void>((resolve) => {
+    releaseFirstRange = resolve;
+  });
 
   beforeAll(async () => {
     directory = await mkdtemp(join(tmpdir(), 'rundown-httpfs-'));
@@ -60,7 +64,8 @@ describe('DuckDB HTTPFS through an internal-style endpoint', () => {
         }
         activeRanges += 1;
         maximumActiveRanges = Math.max(maximumActiveRanges, activeRanges);
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        if (activeRanges === 1) await waitForSecondRange(secondRangeStarted);
+        else releaseFirstRange();
         activeRanges -= 1;
         headers['content-length'] = String(range.end - range.start + 1);
         headers['content-range'] = `bytes ${range.start}-${range.end}/${size}`;
@@ -96,6 +101,11 @@ describe('DuckDB HTTPFS through an internal-style endpoint', () => {
       expect(result.getRowObjectsJson()).toEqual([
         { rows: '200000', first_id: '0', last_id: '199999' },
       ]);
+      const suffixResponse = await fetch(`${baseUrl}/a.parquet`, {
+        headers: { range: 'bytes=-16' },
+      });
+      expect(suffixResponse.status).toBe(206);
+      expect((await suffixResponse.arrayBuffer()).byteLength).toBe(16);
     } finally {
       connection.closeSync();
       instance.closeSync();
@@ -110,9 +120,27 @@ describe('DuckDB HTTPFS through an internal-style endpoint', () => {
 });
 
 function parseRange(value: string | null, size: number) {
-  const match = value?.match(/^bytes=(\d+)-(\d*)$/u);
+  const match = value?.match(/^bytes=(?:(\d+)-(\d*)|-([1-9]\d*))$/u);
   if (!match) return undefined;
+  if (match[3]) {
+    const length = Math.min(Number(match[3]), size);
+    return { start: size - length, end: size - 1 };
+  }
   const start = Number(match[1]);
   const end = match[2] ? Math.min(Number(match[2]), size - 1) : size - 1;
   return { start, end };
+}
+
+async function waitForSecondRange(secondRangeStarted: Promise<void>) {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      secondRangeStarted,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('DuckDB serialized its range reads.')), 1_000);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }

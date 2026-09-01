@@ -124,19 +124,37 @@ export async function handleInternalR2Request(request: Request, environment: Clo
   if (request.method !== 'PUT') return methodNotAllowed('GET, HEAD, PUT');
   const contentLength = validContentLength(request, MAX_INGESTED_FILE_BYTES);
   if (!contentLength) return new Response('A valid Content-Length is required.', { status: 413 });
+  if (!request.body) return new Response('Upload body is required.', { status: 400 });
+  const claimedAt = new Date().toISOString();
   const claimed = await environment.DB.prepare(
     `UPDATE ingestion_tokens SET used_at = ?
      WHERE id = ? AND used_at IS NULL AND expires_at >= ?
      RETURNING id`,
   )
-    .bind(new Date().toISOString(), capability.tokenId, new Date().toISOString())
+    .bind(claimedAt, capability.tokenId, claimedAt)
     .first();
   if (!claimed) return new Response('Ingestion token was already used.', { status: 409 });
-  if (!request.body) return new Response('Upload body is required.', { status: 400 });
-  const stored = await environment.DATA.put(capability.destinationKey, request.body, {
-    onlyIf: { etagDoesNotMatch: '*' },
-    httpMetadata: { contentType: 'application/vnd.apache.parquet' },
-  });
+  let stored: R2Object | null;
+  try {
+    stored = await environment.DATA.put(capability.destinationKey, request.body, {
+      onlyIf: { etagDoesNotMatch: '*' },
+      httpMetadata: { contentType: 'application/vnd.apache.parquet' },
+    });
+  } catch (error) {
+    try {
+      await environment.DB.prepare(
+        'UPDATE ingestion_tokens SET used_at = NULL WHERE id = ? AND used_at = ?',
+      )
+        .bind(capability.tokenId, claimedAt)
+        .run();
+    } catch (releaseError) {
+      console.warn('rundown.ingestion_token_release_failed', {
+        tokenId: capability.tokenId,
+        error: releaseError instanceof Error ? releaseError.message : 'Unknown release error.',
+      });
+    }
+    throw error;
+  }
   if (!stored) return new Response('Ingestion destination already exists.', { status: 409 });
   return new Response(null, { status: 201, headers: { etag: stored.httpEtag } });
 }

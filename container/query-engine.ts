@@ -57,6 +57,7 @@ export async function executeQueryEngineRequest(input: unknown) {
           method: 'PUT',
           headers: { 'content-length': String(file.size) },
           body: file,
+          signal: AbortSignal.timeout(QUERY_TIMEOUT_MS),
         });
         if (!response.ok)
           throw new Error(

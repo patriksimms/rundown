@@ -55,4 +55,17 @@ describe('formula compiler', () => {
       /only allowed in aggregate/u,
     );
   });
+
+  it('binds not around comparisons before boolean connectors', () => {
+    expect(
+      compileFormula("not campaign = 'Brand' and media_cost > 0", {
+        mode: 'row',
+        fields,
+      }).sql,
+    ).toBe(`((NOT ("Campaign" = 'Brand')) AND ("Media Cost" > 0))`);
+  });
+
+  it('rejects numeric literals that overflow to infinity', () => {
+    expect(() => compileFormula('1e999', { mode: 'row', fields })).toThrow(/must be finite/u);
+  });
 });

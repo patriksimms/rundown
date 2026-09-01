@@ -11,6 +11,7 @@ import {
   scorecardDefinition,
   seedDataSource,
   signInToNewWorkspace,
+  withR2Storage,
   type SeededDataSource,
   type TestWorkspace,
 } from './fixtures';
@@ -216,6 +217,18 @@ describe('control validation', () => {
 });
 
 describe('query engine failures', () => {
+  test('a missing R2 source returns the typed not-found error', async () => {
+    const { dashboardId, widgetId } = await seedScorecardDashboard();
+
+    await withR2Storage(() =>
+      expectApiError(callService({ action: 'queryWidget', dashboardId, widgetId }), {
+        status: 404,
+        code: 'datasource_source_not_found',
+      }),
+    );
+    expect(queryEngine.calls).toHaveLength(0);
+  });
+
   test('a rejected query surfaces as an invalid query error', async () => {
     const { dashboardId, widgetId } = await seedScorecardDashboard();
     queryEngine.rejectQueries(400, 'Binder Error: Referenced column "missing" not found');
@@ -260,7 +273,6 @@ describe('query engine failures', () => {
     expect(queryEngine.calls).toHaveLength(0);
 
     queryEngine.reset();
-    queryEngine.install();
     const opened = (await callService({ action: 'getDashboard', dashboardId: dashboard.id })) as {
       dashboard: { widgets: unknown[] };
     };
@@ -351,8 +363,9 @@ describe('query engine failures', () => {
     const dashboard = await createDashboard();
     const { createDatabase } = await import('#/db/client');
     const { libraryMetrics } = await import('#/db/schema');
+    const metricId = `legacy-text-metric-${crypto.randomUUID().slice(0, 8)}`;
     await createDatabase(env.DB).insert(libraryMetrics).values({
-      id: 'legacy-text-metric',
+      id: metricId,
       workspaceId: workspace.workspaceId,
       name: 'Legacy text metric',
       canonicalName: 'legacy_text_metric',
@@ -369,7 +382,7 @@ describe('query engine failures', () => {
         definition: {
           ...scorecardDefinition(source),
           metric: {
-            source: { kind: 'library', libraryMetricId: 'legacy-text-metric' },
+            source: { kind: 'library', libraryMetricId: metricId },
             dataType: 'number',
           },
         },

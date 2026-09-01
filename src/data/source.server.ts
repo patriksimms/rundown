@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { z } from 'zod';
+import { DatasourceError } from '#/data/connectors/contract';
 import { datasourceUploadKey, type DatasourceUploadFormat } from '#/domain/datasource-upload';
 import { compileSourceSqlFromBaseUrl, compileSourceSqlFromUrls } from '#/query/compiler';
 import type { DataSourceRecord } from '#/query/types';
@@ -100,7 +101,11 @@ export async function resolveDataSource(dataSource: DataSourceRecord, queryId: s
             ),
             dataSource.location.format,
           ).map((object) => object.key);
-    if (!keys.length) throw new Error('No matching datasource files were found.');
+    if (!keys.length)
+      throw new DatasourceError(
+        'datasource_source_not_found',
+        'No matching datasource files were found.',
+      );
     return {
       sql: compileSourceSqlFromBaseUrl(dataSource, env.QUERY_DATA_SOURCE_BASE_URL, keys),
       sourceBytes: 0,
@@ -116,10 +121,17 @@ export async function resolveDataSource(dataSource: DataSourceRecord, queryId: s
           await collectObjectPages((cursor) => listSourceObjects(dataSource.location.key, cursor)),
           dataSource.location.format,
         );
-  if (!objects.length) throw new Error('No matching datasource files were found.');
+  if (!objects.length)
+    throw new DatasourceError(
+      'datasource_source_not_found',
+      'No matching datasource files were found.',
+    );
   const sourceBytes = objects.reduce((total, object) => total + object.size, 0);
   if (sourceBytes > MAX_QUERY_SOURCE_BYTES)
-    throw new Error(`Datasource exceeds the ${MAX_QUERY_SOURCE_BYTES} byte query limit.`);
+    throw new DatasourceError(
+      'datasource_source_too_large',
+      `Datasource exceeds the ${MAX_QUERY_SOURCE_BYTES} byte query limit.`,
+    );
   await createQueryReadBudget(queryId, dataSource.workspaceId, env);
 
   const urls = await Promise.all(

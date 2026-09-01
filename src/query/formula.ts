@@ -271,7 +271,11 @@ class FormulaParser {
 
   private parsePrefix(): FormulaNode {
     const token = this.take();
-    if (token.kind === 'number') return { kind: 'literal', value: Number(token.value) };
+    if (token.kind === 'number') {
+      const value = Number(token.value);
+      if (!Number.isFinite(value)) throw syntaxError(token, 'Number must be finite.');
+      return { kind: 'literal', value };
+    }
     if (token.kind === 'string') return { kind: 'literal', value: token.value };
     if (token.kind === 'operator' && (token.value === '+' || token.value === '-'))
       return { kind: 'unary', operator: token.value, operand: this.parseExpression(6) };
@@ -280,7 +284,7 @@ class FormulaParser {
       if (name === 'true' || name === 'false') return { kind: 'literal', value: name === 'true' };
       if (name === 'null') return { kind: 'literal', value: null };
       if (name === 'not')
-        return { kind: 'unary', operator: name, operand: this.parseExpression(6) };
+        return { kind: 'unary', operator: name, operand: this.parseExpression(3) };
       if (this.peek().kind === 'punctuation' && this.peek().value === '(') {
         this.index += 1;
         const arguments_: FormulaNode[] = [];

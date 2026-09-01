@@ -149,7 +149,7 @@ function MetricsContent() {
                   <TableHead>Name</TableHead>
                   <TableHead>Canonical name</TableHead>
                   <TableHead>Type</TableHead>
-                  <TableHead>Expression</TableHead>
+                  <TableHead>Aggregate formula</TableHead>
                   <TableHead>Description</TableHead>
                 </TableRow>
               </TableHeader>

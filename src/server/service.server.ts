@@ -10,7 +10,11 @@ import {
   prepareSourceUpload,
 } from '#/data/source.server';
 import { capabilityUrl, createR2Capability } from '#/data/internal-r2';
-import { DatasourceError, DUCKDB_FILE_CONNECTOR } from '#/data/connectors/contract';
+import {
+  DatasourceError,
+  DUCKDB_FILE_CONNECTOR,
+  type DatasourceExpression,
+} from '#/data/connectors/contract';
 import { datasourceConnector } from '#/data/connectors/index.server';
 import {
   calculatedFields,
@@ -671,17 +675,17 @@ async function describeDatasource(dataSourceId: string, dashboardId?: string, sh
   const metadata = await loadQueryMetadata(dataSource.id, workspaceId);
   const applicableMetrics = [];
   for (const metric of metadata.libraryMetrics) {
-    try {
-      await connectorFor(dataSource).validateExpression(dataSource, {
-        kind: 'libraryMetric',
-        expression: metric.expression,
-        semanticType: metric.semanticType,
-        metadata,
-      });
+    if (
+      await datasourceOperation(() =>
+        libraryMetricApplies(dataSource, {
+          kind: 'libraryMetric',
+          expression: metric.expression,
+          semanticType: metric.semanticType,
+          metadata,
+        }),
+      )
+    )
       applicableMetrics.push(metric);
-    } catch (error) {
-      if (!(error instanceof DatasourceError) || error.code !== 'invalid_query') throw error;
-    }
   }
   return {
     ...dataSource,
@@ -831,6 +835,15 @@ async function registerDatasource(request: Extract<ApiRequest, { action: 'regist
     isManagedDatasourceUpload(session.workspace.r2Prefix, request.location.key)
       ? request.location.key
       : undefined;
+  if (
+    managedUploadKey &&
+    !managedUploadKey.toLocaleLowerCase('en-US').endsWith(`.${request.location.format}`)
+  )
+    throw new ApiError(
+      400,
+      'invalid_upload_format',
+      `Managed ${request.location.format} uploads need a .${request.location.format} key.`,
+    );
   const claimId = managedUploadKey
     ? await claimPendingUpload(session, managedUploadKey, request.cleanupToken)
     : undefined;
@@ -942,6 +955,7 @@ async function ingestManagedCsvUpload(session: SessionContext, sourceKey: string
       env.INTERNAL_R2_SIGNING_SECRET,
     );
     sourceUrl = capabilityUrl(token);
+    // The ingestion capability selects its read and write object from the HTTP method.
     destinationUrl = sourceUrl;
   } else {
     sourceUrl = localSourceUrl(sourceKey);
@@ -1221,19 +1235,18 @@ async function upsertLibraryMetric(
   for (const row of sourceRows) {
     const dataSource = await loadDataSource(row.id, session.workspace.id);
     const metadata = await loadQueryMetadata(row.id, session.workspace.id);
-    try {
+    if (
       await datasourceOperation(() =>
-        connectorFor(dataSource).validateExpression(dataSource, {
+        libraryMetricApplies(dataSource, {
           kind: 'libraryMetric',
           expression: request.expression,
           semanticType: request.semanticType,
           metadata,
         }),
-      );
+      )
+    ) {
       validated = true;
       break;
-    } catch (error) {
-      if (!(error instanceof ApiError) || error.code !== 'invalid_query') throw error;
     }
   }
   if (!validated)
@@ -1808,6 +1821,19 @@ async function datasourceOperation<T>(operation: () => T | Promise<T>) {
     return await operation();
   } catch (error) {
     throwDatasourceError(error);
+  }
+}
+
+async function libraryMetricApplies(
+  dataSource: DataSourceRecord,
+  expression: Extract<DatasourceExpression, { kind: 'libraryMetric' }>,
+) {
+  try {
+    await connectorFor(dataSource).validateExpression(dataSource, expression);
+    return true;
+  } catch (error) {
+    if (error instanceof DatasourceError && error.code === 'invalid_query') return false;
+    throw error;
   }
 }
 

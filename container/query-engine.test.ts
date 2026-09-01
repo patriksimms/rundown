@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { executeQueryEngineRequest, queryEngineRequestSchema } from './query-engine';
 
 const sourceSql = '(VALUES (1, 10), (2, 20)) AS source(day, spend)';
@@ -71,6 +71,7 @@ describe('native query engine', () => {
     if (!address || typeof address === 'string')
       throw new Error('Ingestion test server did not bind.');
     const directory = await mkdtemp(join(tmpdir(), 'rundown-ingestion-proof-'));
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
     try {
       const result = await executeQueryEngineRequest({
         operation: 'ingestCsv',
@@ -81,6 +82,7 @@ describe('native query engine', () => {
       if (!('size' in result) || result.size === undefined)
         throw new Error('Ingestion did not return an uploaded file.');
       expect(uploaded?.byteLength).toBe(result.size);
+      expect(timeout).toHaveBeenCalledWith(30_000);
       if (!uploaded) throw new Error('Ingestion did not upload Parquet bytes.');
 
       const path = join(directory, 'uploaded.parquet');
@@ -97,6 +99,7 @@ describe('native query engine', () => {
         server.close((error) => (error ? reject(error) : resolve())),
       );
       await rm(directory, { recursive: true, force: true });
+      timeout.mockRestore();
     }
   });
 });

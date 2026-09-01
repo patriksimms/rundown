@@ -190,4 +190,50 @@ describe('internal R2 capabilities', () => {
       expect.objectContaining({ onlyIf: { etagDoesNotMatch: '*' } }),
     );
   });
+
+  it('releases an ingestion token when the object write fails', async () => {
+    const token = await createR2Capability(
+      {
+        kind: 'ingestion',
+        tokenId: 'ingestion-1',
+        sourceKey: 'ws/acme/upload.csv',
+        destinationKey: 'ws/acme/upload.parquet',
+      },
+      'secret',
+    );
+    const claimFirst = vi
+      .fn<() => Promise<{ id: string } | undefined>>()
+      .mockResolvedValue({ id: 'ingestion-1' });
+    const claimBind = vi.fn<() => { first: typeof claimFirst }>().mockReturnValue({
+      first: claimFirst,
+    });
+    const releaseRun = vi.fn<() => Promise<void>>().mockResolvedValue();
+    const releaseBind = vi.fn<() => { run: typeof releaseRun }>().mockReturnValue({
+      run: releaseRun,
+    });
+    const prepare = vi
+      .fn<(query: string) => object>()
+      .mockReturnValueOnce({ bind: claimBind })
+      .mockReturnValueOnce({ bind: releaseBind });
+    const environment = {
+      INTERNAL_R2_SIGNING_SECRET: 'secret',
+      DB: { prepare },
+      DATA: { put: vi.fn<() => Promise<never>>().mockRejectedValue(new Error('R2 unavailable')) },
+    } as unknown as Cloudflare.Env;
+
+    await expect(
+      handleInternalR2Request(
+        new Request(capabilityUrl(token), {
+          method: 'PUT',
+          headers: { 'content-length': '4' },
+          body: 'data',
+        }),
+        environment,
+      ),
+    ).rejects.toThrow('R2 unavailable');
+    expect(releaseRun).toHaveBeenCalledOnce();
+    expect(prepare).toHaveBeenLastCalledWith(
+      'UPDATE ingestion_tokens SET used_at = NULL WHERE id = ? AND used_at = ?',
+    );
+  });
 });

@@ -54,7 +54,9 @@ export default defineConfig(({ command }) => ({
                   process.env.INTERNAL_R2_SIGNING_SECRET ?? 'rundown-local-internal-r2-only',
                 UPLOAD_SIGNING_SECRET:
                   process.env.UPLOAD_SIGNING_SECRET ?? 'rundown-local-upload-only',
-                RESET_ADMIN_TOKEN: process.env.RESET_ADMIN_TOKEN ?? 'rundown-local-reset-only',
+                ...(process.env.RESET_ADMIN_TOKEN
+                  ? { RESET_ADMIN_TOKEN: process.env.RESET_ADMIN_TOKEN }
+                  : {}),
               },
             }
           : {}),
