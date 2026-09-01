@@ -438,8 +438,10 @@ export function DashboardBuilder({
         setError(undefined);
         await refresh();
       }
+      return true;
     } catch (caught) {
       if (revision === mutationRevisionRef.current) setError(message(caught));
+      return false;
     } finally {
       finishSaving();
     }
@@ -679,10 +681,9 @@ export function DashboardBuilder({
                 if (!removeTarget) return;
                 setRemoving(true);
                 try {
-                  await removeWidget(removeTarget);
+                  if (await removeWidget(removeTarget)) setRemoveTarget(undefined);
                 } finally {
                   setRemoving(false);
-                  setRemoveTarget(undefined);
                 }
               }}
             >
