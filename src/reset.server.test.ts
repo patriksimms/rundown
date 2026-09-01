@@ -36,6 +36,7 @@ describe('environment reset', () => {
       executed: false,
       plan: {
         environment: 'production',
+        d1Tables: expect.arrayContaining(['query_read_budgets']),
         r2ObjectKeys: ['workspace/data.parquet'],
         kvNamespace: 'rundown-query-cache',
         kvKeys: ['query-cache-key'],

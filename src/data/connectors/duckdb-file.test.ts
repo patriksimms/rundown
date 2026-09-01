@@ -145,6 +145,17 @@ describe('duckdb-file datasource connector', () => {
     expect(explanation.sql).toContain('SUM("MediaCost")');
   });
 
+  it('rejects a calculated field whose declared type disagrees with its formula', async () => {
+    await expect(
+      duckdbFileConnector.validateExpression(dataSource, {
+        kind: 'calculatedField',
+        expression: 'lower(media_cost)',
+        semanticType: 'count',
+        metadata: { fields: [dateField, { ...costField, semanticType: 'text' }] },
+      }),
+    ).rejects.toThrow(/returns text/u);
+  });
+
   it('inspects a file and returns a stable source version', async () => {
     mocks.headSourceObject.mockResolvedValue({
       key: dataSource.location.key,

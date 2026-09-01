@@ -68,6 +68,19 @@ export const ingestionTokens = sqliteTable(
   (table) => [index('ingestion_tokens_workspace_id_idx').on(table.workspaceId)],
 );
 
+export const queryReadBudgets = sqliteTable(
+  'query_read_budgets',
+  {
+    id: text().primaryKey(),
+    workspaceId: text('workspace_id').notNull(),
+    scannedBytes: integer('scanned_bytes').notNull().default(0),
+    maximumBytes: integer('maximum_bytes').notNull(),
+    expiresAt: text('expires_at').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [index('query_read_budgets_workspace_id_idx').on(table.workspaceId)],
+);
+
 export const fields = sqliteTable(
   'fields',
   {

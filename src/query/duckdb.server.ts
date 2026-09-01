@@ -1,5 +1,6 @@
 import { getContainer } from '@cloudflare/containers';
 import { env } from 'cloudflare:workers';
+import { finishQueryReadBudget } from '#/data/internal-r2';
 import { resolveDataSource } from '#/data/source.server';
 import type {
   QueryEngineMetrics,
@@ -26,16 +27,23 @@ export async function runPreparedQuery<T extends Record<string, unknown>>(
 ) {
   const queryId = crypto.randomUUID();
   const source = await resolveDataSource(dataSource, queryId);
-  const query = compile(source.sql);
-  const result = await queryEngineRequest<T[]>(dataSource.workspaceId, queryId, {
-    operation: 'query',
-    sql: query.sql,
-    parameters: query.parameters,
-  });
+  let result;
+  let scannedBytes = 0;
+  try {
+    const query = compile(source.sql);
+    result = await queryEngineRequest<T[]>(dataSource.workspaceId, queryId, {
+      operation: 'query',
+      sql: query.sql,
+      parameters: query.parameters,
+    });
+  } finally {
+    scannedBytes = await finishSourceRead(source.queryBudgetId, queryId, dataSource.workspaceId);
+  }
   console.info('rundown.query_execution', {
     queryId,
     workspaceId: dataSource.workspaceId,
     sourceBytes: source.sourceBytes,
+    scannedBytes,
     objectCount: source.objectKeys.length,
     ...result.metrics,
   });
@@ -44,7 +52,7 @@ export async function runPreparedQuery<T extends Record<string, unknown>>(
     numbers: [
       result.metrics.containerStartMs,
       result.metrics.queryDurationMs,
-      source.sourceBytes,
+      scannedBytes,
       result.metrics.resultBytes,
     ],
     index: dataSource.workspaceId,
@@ -55,14 +63,18 @@ export async function runPreparedQuery<T extends Record<string, unknown>>(
 export async function describeDataSource(dataSource: DataSourceRecord) {
   const queryId = crypto.randomUUID();
   const source = await resolveDataSource(dataSource, queryId);
-  const result = await queryEngineRequest<{
-    description: Array<{ column_name: string; column_type: string }>;
-    samples: Record<string, unknown>[];
-  }>(dataSource.workspaceId, queryId, {
-    operation: 'describeSource',
-    sourceSql: source.sql,
-  });
-  return result.data;
+  try {
+    const result = await queryEngineRequest<{
+      description: Array<{ column_name: string; column_type: string }>;
+      samples: Record<string, unknown>[];
+    }>(dataSource.workspaceId, queryId, {
+      operation: 'describeSource',
+      sourceSql: source.sql,
+    });
+    return result.data;
+  } finally {
+    await finishSourceRead(source.queryBudgetId, queryId, dataSource.workspaceId);
+  }
 }
 
 export async function ingestCsv(
@@ -145,4 +157,28 @@ function queryMetrics(metrics: QueryEngineMetrics, totalDurationMs: number) {
     containerStartMs: Math.max(0, totalDurationMs - metrics.queryDurationMs),
     resultBytes: metrics.resultBytes,
   };
+}
+
+async function finishSourceRead(
+  budgetId: string | undefined,
+  queryId: string,
+  workspaceId: string,
+) {
+  if (!budgetId) return 0;
+  try {
+    const scannedBytes = await finishQueryReadBudget(budgetId, env);
+    console.info('rundown.query_scanned_bytes', { queryId, workspaceId, scannedBytes });
+    recordProductMetric('query_scanned_bytes', {
+      numbers: [scannedBytes],
+      index: workspaceId,
+    });
+    return scannedBytes;
+  } catch (error) {
+    console.warn('rundown.query_budget_cleanup_failed', {
+      queryId,
+      workspaceId,
+      error: error instanceof Error ? error.message : 'Unknown cleanup error.',
+    });
+    return 0;
+  }
 }

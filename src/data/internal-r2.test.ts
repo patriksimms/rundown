@@ -49,7 +49,9 @@ describe('internal R2 capabilities', () => {
   it('streams browser uploads only for a pending opaque key', async () => {
     const key = 'ws/acme/uploads/2026-09-01/550e8400-e29b-41d4-a716-446655440000.csv';
     const first = vi.fn<() => Promise<{ pending: number }>>().mockResolvedValue({ pending: 1 });
-    const bind = vi.fn<(key: string) => { first: typeof first }>().mockReturnValue({ first });
+    const bind = vi
+      .fn<(key: string, workspaceId: string, userId: string) => { first: typeof first }>()
+      .mockReturnValue({ first });
     const prepare = vi.fn<(query: string) => { bind: typeof bind }>().mockReturnValue({ bind });
     const put = vi
       .fn<(key: string, body: ReadableStream, options: unknown) => Promise<{ httpEtag: string }>>()
@@ -66,15 +68,32 @@ describe('internal R2 capabilities', () => {
       }),
       path.slice('/api/datasource-upload/'.length),
       environment,
+      { userId: 'user-1', workspaceId: 'workspace-1', workspacePrefix: 'ws/acme/' },
     );
 
     expect(response.status).toBe(201);
-    expect(bind).toHaveBeenCalledWith(key);
+    expect(bind).toHaveBeenCalledWith(key, 'workspace-1', 'user-1');
     expect(put).toHaveBeenCalledWith(
       key,
       expect.any(ReadableStream),
       expect.objectContaining({ onlyIf: { etagDoesNotMatch: '*' } }),
     );
+  });
+
+  it('rejects browser upload keys outside the authorized workspace', async () => {
+    const path = browserUploadPath('ws/other/upload.csv');
+    const response = await handleBrowserUploadRequest(
+      new Request(`https://rundown.test${path}`, {
+        method: 'PUT',
+        headers: { 'content-length': '4' },
+        body: 'data',
+      }),
+      path.slice('/api/datasource-upload/'.length),
+      {} as Cloudflare.Env,
+      { userId: 'user-1', workspaceId: 'workspace-1', workspacePrefix: 'ws/acme/' },
+    );
+
+    expect(response.status).toBe(403);
   });
 
   it('keeps query capabilities read-only', async () => {
@@ -89,6 +108,41 @@ describe('internal R2 capabilities', () => {
 
     expect(response.status).toBe(405);
     expect(response.headers.get('allow')).toBe('GET, HEAD');
+  });
+
+  it('rejects range reads after the query byte budget is exhausted', async () => {
+    const token = await createR2Capability(
+      { kind: 'read', key: 'ws/acme/report.parquet', queryId: 'query-1' },
+      'secret',
+    );
+    const first = vi
+      .fn<() => Promise<{ scanned_bytes: number } | undefined>>()
+      .mockResolvedValueOnce({ scanned_bytes: 4 })
+      .mockResolvedValueOnce(undefined);
+    const bind = vi.fn<() => { first: typeof first }>().mockReturnValue({ first });
+    const prepare = vi.fn<() => { bind: typeof bind }>().mockReturnValue({ bind });
+    const get = vi.fn<(key: string) => object>().mockImplementation(() => ({
+      body: new Response('data').body,
+      size: 4,
+      range: { offset: 0, length: 4 },
+      httpEtag: '"etag"',
+      uploaded: new Date('2026-09-01T00:00:00.000Z'),
+      httpMetadata: { contentType: 'application/vnd.apache.parquet' },
+      writeHttpMetadata: vi.fn<(headers: Headers) => void>(),
+    }));
+    const environment = {
+      INTERNAL_R2_SIGNING_SECRET: 'secret',
+      DB: { prepare },
+      DATA: { get },
+    } as unknown as Cloudflare.Env;
+    const read = () =>
+      handleInternalR2Request(
+        new Request(capabilityUrl(token), { headers: { range: 'bytes=0-3' } }),
+        environment,
+      );
+
+    await expect(read().then((response) => response.status)).resolves.toBe(206);
+    await expect(read().then((response) => response.status)).resolves.toBe(413);
   });
 
   it('accepts an ingestion destination only once', async () => {

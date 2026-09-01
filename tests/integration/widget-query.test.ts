@@ -294,6 +294,30 @@ describe('query engine failures', () => {
     expect(queryEngine.calls).toHaveLength(0);
   });
 
+  test('saving rejects numeric aggregation over a text field without querying', async () => {
+    const workspace = await signInToNewWorkspace();
+    const source = await seedDataSource(workspace);
+    const dashboard = await createDashboard();
+
+    await expectApiError(
+      callService({
+        action: 'addWidget',
+        dashboardId: dashboard.id,
+        definition: {
+          ...scorecardDefinition(source),
+          metric: {
+            source: { kind: 'field', fieldId: source.fieldIds.region, aggregation: 'sum' },
+            dataType: 'number',
+          },
+        },
+        width: 4,
+        height: 3,
+      }),
+      { status: 400, code: 'invalid_query' },
+    );
+    expect(queryEngine.calls).toHaveLength(0);
+  });
+
   test('a filter control answers every compiler entry point without a query', async () => {
     const workspace = await signInToNewWorkspace();
     const source = await seedDataSource(workspace);

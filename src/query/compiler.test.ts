@@ -182,6 +182,31 @@ describe('query compiler', () => {
     );
   });
 
+  it('rejects numeric aggregations over text fields during static validation', () => {
+    expect(() =>
+      compileWidgetQuery({
+        dashboard,
+        definition: {
+          type: 'scorecard',
+          title: 'Campaign sum',
+          dataSourceId: 'source',
+          dateRangeFieldId: 'date',
+          metric: {
+            source: { kind: 'field', fieldId: 'campaign', aggregation: 'sum' },
+            dataType: 'number',
+          },
+        },
+        dataSource,
+        fields,
+        calculatedFields: [],
+        libraryMetrics: [],
+        controlState: {},
+        bucketName: 'bucket',
+        sourceSql: '"rundown_source"',
+      }),
+    ).toThrow(/requires a numeric field/u);
+  });
+
   it('does not rewrite canonical names inside formula string literals', () => {
     const paid = {
       ...fields[0],

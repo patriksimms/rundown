@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { MAX_DATASOURCE_FILE_BYTES } from '#/domain/datasource-upload';
+import { isWorkspaceR2Key } from '#/domain/tenancy';
 import { recordProductMetric } from '#/observability';
 
 export const INTERNAL_R2_HOST = 'r2.rundown.internal';
@@ -74,6 +75,7 @@ export async function handleBrowserUploadRequest(
   request: Request,
   encodedKey: string,
   environment: Cloudflare.Env,
+  authorization: { userId: string; workspaceId: string; workspacePrefix: string },
 ) {
   if (request.method !== 'PUT') return methodNotAllowed('PUT');
   let key: string;
@@ -82,12 +84,15 @@ export async function handleBrowserUploadRequest(
   } catch {
     return new Response('Invalid upload.', { status: 404 });
   }
+  if (!isWorkspaceR2Key(authorization.workspacePrefix, key))
+    return new Response('Upload is outside this workspace.', { status: 403 });
   const contentLength = validContentLength(request, MAX_DATASOURCE_FILE_BYTES);
   if (!contentLength) return new Response('A valid Content-Length is required.', { status: 413 });
   const pending = await environment.DB.prepare(
-    `SELECT 1 FROM datasource_uploads WHERE key = ? AND status = 'pending'`,
+    `SELECT 1 FROM datasource_uploads
+     WHERE key = ? AND workspace_id = ? AND clerk_user_id = ? AND status = 'pending'`,
   )
-    .bind(key)
+    .bind(key, authorization.workspaceId, authorization.userId)
     .first();
   if (!pending) return new Response('Upload is not pending.', { status: 409 });
   if (!request.body) return new Response('Upload body is required.', { status: 400 });
@@ -111,11 +116,11 @@ export async function handleInternalR2Request(request: Request, environment: Clo
 
   if (capability.kind === 'read') {
     if (request.method !== 'GET' && request.method !== 'HEAD') return methodNotAllowed('GET, HEAD');
-    return serveObject(request, environment.DATA, capability.key, capability.queryId);
+    return serveObject(request, environment, capability.key, capability.queryId, true);
   }
 
   if (request.method === 'GET' || request.method === 'HEAD')
-    return serveObject(request, environment.DATA, capability.sourceKey, capability.tokenId);
+    return serveObject(request, environment, capability.sourceKey, capability.tokenId, false);
   if (request.method !== 'PUT') return methodNotAllowed('GET, HEAD, PUT');
   const contentLength = validContentLength(request, MAX_INGESTED_FILE_BYTES);
   if (!contentLength) return new Response('A valid Content-Length is required.', { status: 413 });
@@ -136,7 +141,48 @@ export async function handleInternalR2Request(request: Request, environment: Clo
   return new Response(null, { status: 201, headers: { etag: stored.httpEtag } });
 }
 
-async function serveObject(request: Request, bucket: R2Bucket, key: string, queryId: string) {
+export async function createQueryReadBudget(
+  queryId: string,
+  workspaceId: string,
+  environment: Cloudflare.Env,
+) {
+  const now = new Date();
+  await environment.DB.prepare('DELETE FROM query_read_budgets WHERE expires_at < ?')
+    .bind(now.toISOString())
+    .run();
+  await environment.DB.prepare(
+    `INSERT INTO query_read_budgets
+     (id, workspace_id, scanned_bytes, maximum_bytes, expires_at, created_at)
+     VALUES (?, ?, 0, ?, ?, ?)`,
+  )
+    .bind(
+      queryId,
+      workspaceId,
+      MAX_QUERY_SOURCE_BYTES,
+      new Date(now.getTime() + 10 * 60 * 1000).toISOString(),
+      now.toISOString(),
+    )
+    .run();
+}
+
+export async function finishQueryReadBudget(queryId: string, environment: Cloudflare.Env) {
+  const row = await environment.DB.prepare(
+    'SELECT scanned_bytes FROM query_read_budgets WHERE id = ?',
+  )
+    .bind(queryId)
+    .first<{ scanned_bytes: number }>();
+  await environment.DB.prepare('DELETE FROM query_read_budgets WHERE id = ?').bind(queryId).run();
+  return row?.scanned_bytes ?? 0;
+}
+
+async function serveObject(
+  request: Request,
+  environment: Cloudflare.Env,
+  key: string,
+  queryId: string,
+  enforceBudget: boolean,
+) {
+  const bucket = environment.DATA;
   if (request.method === 'HEAD') {
     const object = await bucket.head(key);
     if (!object) return new Response('Not found.', { status: 404 });
@@ -148,6 +194,8 @@ async function serveObject(request: Request, bucket: R2Bucket, key: string, quer
   const range = normalizedRange(object.range, object.size);
   if (range) headers.set('content-range', `bytes ${range.start}-${range.end}/${object.size}`);
   const scannedBytes = range ? range.end - range.start + 1 : object.size;
+  if (enforceBudget && !(await claimQueryReadBytes(environment.DB, queryId, scannedBytes)))
+    return new Response('Query scanned-byte limit exceeded.', { status: 413 });
   headers.set('content-length', String(scannedBytes));
   console.info('rundown.datasource_read', { queryId, key, scannedBytes });
   recordProductMetric('datasource_read', {
@@ -155,6 +203,19 @@ async function serveObject(request: Request, bucket: R2Bucket, key: string, quer
     numbers: [scannedBytes],
   });
   return new Response(object.body, { status: range ? 206 : 200, headers });
+}
+
+async function claimQueryReadBytes(database: D1Database, queryId: string, bytes: number) {
+  const claimed = await database
+    .prepare(
+      `UPDATE query_read_budgets
+       SET scanned_bytes = scanned_bytes + ?
+       WHERE id = ? AND expires_at >= ? AND scanned_bytes + ? <= maximum_bytes
+       RETURNING scanned_bytes`,
+    )
+    .bind(bytes, queryId, new Date().toISOString(), bytes)
+    .first();
+  return Boolean(claimed);
 }
 
 function objectHeaders(object: R2Object, key: string) {

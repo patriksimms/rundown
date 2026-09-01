@@ -7,6 +7,7 @@ import { collectObjectPages, matchingSourceObjects } from './listing';
 import {
   browserUploadPath,
   capabilityUrl,
+  createQueryReadBudget,
   createR2Capability,
   MAX_QUERY_SOURCE_BYTES,
 } from './internal-r2';
@@ -104,6 +105,7 @@ export async function resolveDataSource(dataSource: DataSourceRecord, queryId: s
       sql: compileSourceSqlFromBaseUrl(dataSource, env.QUERY_DATA_SOURCE_BASE_URL, keys),
       sourceBytes: 0,
       objectKeys: keys,
+      queryBudgetId: undefined,
     };
   }
 
@@ -118,6 +120,7 @@ export async function resolveDataSource(dataSource: DataSourceRecord, queryId: s
   const sourceBytes = objects.reduce((total, object) => total + object.size, 0);
   if (sourceBytes > MAX_QUERY_SOURCE_BYTES)
     throw new Error(`Datasource exceeds the ${MAX_QUERY_SOURCE_BYTES} byte query limit.`);
+  await createQueryReadBudget(queryId, dataSource.workspaceId, env);
 
   const urls = await Promise.all(
     objects.map(async (object) =>
@@ -133,6 +136,7 @@ export async function resolveDataSource(dataSource: DataSourceRecord, queryId: s
     sql: compileSourceSqlFromUrls(dataSource, urls),
     sourceBytes,
     objectKeys: objects.map((object) => object.key),
+    queryBudgetId: queryId,
   };
 }
 

@@ -1,4 +1,9 @@
-import type { ControlState, DashboardDocument, WidgetDefinition } from '#/domain/schema';
+import type {
+  ControlState,
+  DashboardDocument,
+  SemanticType,
+  WidgetDefinition,
+} from '#/domain/schema';
 import type {
   CalculatedFieldRecord,
   DataSourceRecord,
@@ -38,11 +43,13 @@ export type DatasourceExpression =
   | {
       kind: 'calculatedField';
       expression: string;
+      semanticType: SemanticType;
       metadata: Pick<DatasourceQueryMetadata, 'fields'>;
     }
   | {
       kind: 'libraryMetric';
       expression: string;
+      semanticType: SemanticType;
       metadata: Pick<DatasourceQueryMetadata, 'fields' | 'calculatedFields'>;
     };
 

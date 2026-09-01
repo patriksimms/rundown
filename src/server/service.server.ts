@@ -675,6 +675,7 @@ async function describeDatasource(dataSourceId: string, dashboardId?: string, sh
       await connectorFor(dataSource).validateExpression(dataSource, {
         kind: 'libraryMetric',
         expression: metric.expression,
+        semanticType: metric.semanticType,
         metadata,
       });
       applicableMetrics.push(metric);
@@ -1152,6 +1153,7 @@ async function upsertCalculatedField(
     connectorFor(dataSource).validateExpression(dataSource, {
       kind: 'calculatedField',
       expression: request.expression,
+      semanticType: request.semanticType,
       metadata,
     }),
   );
@@ -1224,6 +1226,7 @@ async function upsertLibraryMetric(
         connectorFor(dataSource).validateExpression(dataSource, {
           kind: 'libraryMetric',
           expression: request.expression,
+          semanticType: request.semanticType,
           metadata,
         }),
       );

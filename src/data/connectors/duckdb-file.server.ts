@@ -4,8 +4,8 @@ import { headSourceObject, listSourceObjects } from '#/data/source.server';
 import { controlOptionsQuery } from '#/domain/control-options';
 import { hashJson } from '#/domain/hash';
 import {
-  compileLibraryExpression,
   compileWidgetQuery,
+  validateAggregateFormula,
   validateRowFormula,
   type CompiledQuery,
 } from '#/query/compiler';
@@ -127,8 +127,13 @@ function compileWidget(
 
 function expressionSql(definition: DatasourceExpression) {
   if (definition.kind === 'libraryMetric')
-    return compileLibraryExpression(definition.expression, definition.metadata);
-  return validateRowFormula(definition.expression, definition.metadata).sql;
+    return validateAggregateFormula(
+      definition.expression,
+      definition.metadata,
+      definition.semanticType,
+    ).sql;
+  return validateRowFormula(definition.expression, definition.metadata, definition.semanticType)
+    .sql;
 }
 
 function connectorError(

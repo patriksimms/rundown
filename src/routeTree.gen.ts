@@ -20,6 +20,7 @@ import { Route as DatasourcesDatasourceIdRouteImport } from './routes/datasource
 import { Route as ShareTokenRouteImport } from './routes/share.$token'
 import { Route as SignInSplatRouteImport } from './routes/sign-in.$'
 import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
+import { Route as ApiDatasourceUploadTokenRouteImport } from './routes/api.datasource-upload.$token'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -76,6 +77,12 @@ const SignUpSplatRoute = SignUpSplatRouteImport.update({
   path: '/sign-up/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiDatasourceUploadTokenRoute =
+  ApiDatasourceUploadTokenRouteImport.update({
+    id: '/api/datasource-upload/$token',
+    path: '/api/datasource-upload/$token',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -89,6 +96,7 @@ export interface FileRoutesByFullPath {
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
   '/datasources/': typeof DatasourcesIndexRoute
+  '/api/datasource-upload/$token': typeof ApiDatasourceUploadTokenRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -102,6 +110,7 @@ export interface FileRoutesByTo {
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
   '/datasources': typeof DatasourcesIndexRoute
+  '/api/datasource-upload/$token': typeof ApiDatasourceUploadTokenRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -116,6 +125,7 @@ export interface FileRoutesById {
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
   '/datasources/': typeof DatasourcesIndexRoute
+  '/api/datasource-upload/$token': typeof ApiDatasourceUploadTokenRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -131,6 +141,7 @@ export interface FileRouteTypes {
     | '/sign-in/$'
     | '/sign-up/$'
     | '/datasources/'
+    | '/api/datasource-upload/$token'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -144,6 +155,7 @@ export interface FileRouteTypes {
     | '/sign-in/$'
     | '/sign-up/$'
     | '/datasources'
+    | '/api/datasource-upload/$token'
   id:
     | '__root__'
     | '/'
@@ -157,6 +169,7 @@ export interface FileRouteTypes {
     | '/sign-in/$'
     | '/sign-up/$'
     | '/datasources/'
+    | '/api/datasource-upload/$token'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -171,6 +184,7 @@ export interface RootRouteChildren {
   SignInSplatRoute: typeof SignInSplatRoute
   SignUpSplatRoute: typeof SignUpSplatRoute
   DatasourcesIndexRoute: typeof DatasourcesIndexRoute
+  ApiDatasourceUploadTokenRoute: typeof ApiDatasourceUploadTokenRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -252,6 +266,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SignUpSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/datasource-upload/$token': {
+      id: '/api/datasource-upload/$token'
+      path: '/api/datasource-upload/$token'
+      fullPath: '/api/datasource-upload/$token'
+      preLoaderRoute: typeof ApiDatasourceUploadTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -267,6 +288,7 @@ const rootRouteChildren: RootRouteChildren = {
   SignInSplatRoute: SignInSplatRoute,
   SignUpSplatRoute: SignUpSplatRoute,
   DatasourcesIndexRoute: DatasourcesIndexRoute,
+  ApiDatasourceUploadTokenRoute: ApiDatasourceUploadTokenRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -175,8 +175,10 @@ Editing a widget changes its hash, so old cache entries become unreachable and e
 
 `explainWidget` returns the compiled SQL plus the metric and calculated field definitions and descriptions, so a viewer or agent can see what a number means.
 
-Query-container constraints: queries have time, memory, source-size, and result-size limits. Container
-disks are ephemeral, and 64-bit integers are serialized losslessly.
+Query-container constraints: each query has a 30 second execution timeout, a 192 MB DuckDB memory
+limit, two DuckDB threads, a cumulative 500 MB Parquet read budget across HTTP range requests, and
+a 5 MB JSON result limit. Container disks are ephemeral, and 64-bit integers are serialized
+losslessly.
 
 ## 9. Dashboards, widgets, controls
 

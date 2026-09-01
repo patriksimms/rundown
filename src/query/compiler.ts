@@ -1,4 +1,10 @@
-import type { ControlState, DashboardDocument, WidgetDefinition } from '#/domain/schema';
+import type {
+  Aggregation,
+  ControlState,
+  DashboardDocument,
+  SemanticType,
+  WidgetDefinition,
+} from '#/domain/schema';
 import { resolveDateRange } from '#/domain/dates';
 import type {
   CalculatedFieldRecord,
@@ -119,6 +125,7 @@ function metricExpression(
   definitions: CompiledQuery['definitions'],
 ) {
   if (metric.source.kind === 'field') {
+    assertAggregationType(metric.source.aggregation, metric.source.fieldId, context);
     const expression = fieldExpression(metric.source.fieldId, context);
     const aggregation = {
       sum: 'SUM',
@@ -176,14 +183,41 @@ export function compileLibraryExpression(
   expression: string,
   context: Pick<QueryContext, 'fields' | 'calculatedFields'>,
 ) {
-  return compileFormula(expression, {
-    mode: 'aggregate',
-    fields: formulaFields(context),
-  }).sql;
+  return validateAggregateFormula(expression, context).sql;
 }
 
-export function validateRowFormula(expression: string, context: Pick<QueryContext, 'fields'>) {
-  return compileFormula(expression, { mode: 'row', fields: rawFormulaFields(context.fields) });
+export function validateAggregateFormula(
+  expression: string,
+  context: Pick<QueryContext, 'fields' | 'calculatedFields'>,
+  semanticType?: SemanticType,
+) {
+  const compiled = compileFormula(expression, {
+    mode: 'aggregate',
+    fields: formulaFields(context),
+  });
+  const expected = semanticType ? formulaTypeForSemanticType(semanticType) : undefined;
+  if (expected && compiled.type !== expected && compiled.type !== 'null')
+    throw new Error(
+      `Formula returns ${compiled.type}, but ${semanticType} metrics require ${expected}.`,
+    );
+  return compiled;
+}
+
+export function validateRowFormula(
+  expression: string,
+  context: Pick<QueryContext, 'fields'>,
+  semanticType?: SemanticType,
+) {
+  const compiled = compileFormula(expression, {
+    mode: 'row',
+    fields: rawFormulaFields(context.fields),
+  });
+  const expected = semanticType ? formulaTypeForSemanticType(semanticType) : undefined;
+  if (expected && compiled.type !== expected && compiled.type !== 'null')
+    throw new Error(
+      `Formula returns ${compiled.type}, but ${semanticType} fields require ${expected}.`,
+    );
+  return compiled;
 }
 
 function compileFilter(
@@ -302,10 +336,35 @@ function formulaFields(context: Pick<QueryContext, 'fields' | 'calculatedFields'
     ...raw,
     ...context.calculatedFields
       .filter((field) => !rawNames.has(field.canonicalName.toLocaleLowerCase('en-US')))
-      .map((field) => ({
-        canonicalName: field.canonicalName,
-        sql: `(${compileFormula(field.expression, { mode: 'row', fields: raw }).sql})`,
-        type: formulaTypeForSemanticType(field.semanticType),
-      })),
+      .map((field) => {
+        const compiled = compileFormula(field.expression, { mode: 'row', fields: raw });
+        return {
+          canonicalName: field.canonicalName,
+          sql: `(${compiled.sql})`,
+          type: compiled.type,
+        };
+      }),
   ];
+}
+
+function assertAggregationType(
+  aggregation: Aggregation,
+  fieldId: string,
+  context: Pick<QueryContext, 'fields' | 'calculatedFields'>,
+) {
+  if (aggregation === 'count' || aggregation === 'countDistinct') return;
+  if (aggregation === 'min' || aggregation === 'max') return;
+  const field = context.fields.find((item) => item.id === fieldId);
+  const calculated = context.calculatedFields.find((item) => item.id === fieldId);
+  const type = field
+    ? formulaTypeForSemanticType(field.semanticType)
+    : calculated
+      ? compileFormula(calculated.expression, {
+          mode: 'row',
+          fields: rawFormulaFields(context.fields),
+        }).type
+      : undefined;
+  if (!type) throw new Error(`Unknown field ${fieldId}.`);
+  if (type !== 'number')
+    throw new Error(`${aggregation} requires a numeric field, received ${type}.`);
 }
