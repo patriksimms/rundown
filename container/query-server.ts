@@ -9,8 +9,14 @@ const server = Bun.serve({
       return Response.json({ ok: false, error: 'Not found.' }, { status: 404 });
 
     try {
-      const data = await executeQueryEngineRequest(await request.json(), process.env);
-      return Response.json({ ok: true, data });
+      const startedAt = performance.now();
+      const data = await executeQueryEngineRequest(await request.json());
+      const resultBytes = new TextEncoder().encode(JSON.stringify(data)).byteLength;
+      return Response.json({
+        ok: true,
+        data,
+        metrics: { queryDurationMs: performance.now() - startedAt, resultBytes },
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown query engine error.';
       console.error('Query engine request failed', { message });

@@ -339,7 +339,7 @@ function FieldDialog({
           <DialogDescription>
             {field
               ? `Column ${field.canonicalName} is fixed. Rename the field with its label.`
-              : 'Define a SQL expression over this datasource. Its column name comes from the label.'}
+              : 'Define a row formula with canonical field names. Its column name comes from the label.'}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit}>
@@ -355,7 +355,7 @@ function FieldDialog({
             </Field>
             {isCalculated ? (
               <Field>
-                <FieldLabel htmlFor="field-expression">Expression</FieldLabel>
+                <FieldLabel htmlFor="field-expression">Formula</FieldLabel>
                 <Textarea
                   id="field-expression"
                   value={expression}

@@ -46,8 +46,17 @@ export default defineConfig(({ command }) => ({
         ...(command === 'serve'
           ? {
               vars: {
+                APP_ENV: 'development',
+                QUERY_CACHE_NAME: 'rundown-query-cache-development',
                 DATA_SOURCE_BASE_URL: devDataBaseUrl,
                 QUERY_DATA_SOURCE_BASE_URL: devDataBaseUrl,
+                INTERNAL_R2_SIGNING_SECRET:
+                  process.env.INTERNAL_R2_SIGNING_SECRET ?? 'rundown-local-internal-r2-only',
+                UPLOAD_SIGNING_SECRET:
+                  process.env.UPLOAD_SIGNING_SECRET ?? 'rundown-local-upload-only',
+                ...(process.env.RESET_ADMIN_TOKEN
+                  ? { RESET_ADMIN_TOKEN: process.env.RESET_ADMIN_TOKEN }
+                  : {}),
               },
             }
           : {}),

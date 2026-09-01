@@ -57,7 +57,9 @@ flowchart TD
 - IDs are opaque strings. Every top-level document carries a `workspaceId`.
 - A `fieldId` refers to either a column in the datasource's lookup table or a calculated field of the same datasource. Both share one namespace per datasource.
 - A `canonicalName` is a stable, workspace-wide name for a field. Library metrics and cross-datasource controls match on it.
-- Expressions are DuckDB SQL expressions, stored verbatim. Row-level expressions live on calculated fields. Aggregate expressions live on metrics and library metrics. The server compiles and validates them; clients never send SQL.
+- Formulas use Rundown's allowlisted text syntax. Row formulas live on calculated fields. Aggregate
+  formulas live on metrics and library metrics. The server parses, type-checks, and compiles them;
+  clients never send SQL.
 - `styling` is an open object. Each renderer owns its supported keys.
 - Dates use ISO 8601 when fixed. Relative dates use a structured expression and resolve in the dashboard's timezone.
 - Dashboards store a `schemaVersion` so stored JSON can be migrated.

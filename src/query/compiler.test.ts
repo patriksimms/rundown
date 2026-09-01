@@ -1,12 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { defaultDateRange, type DashboardDocument } from '#/domain/schema';
+import { defaultDateRange, type DashboardDocument, type WidgetDefinition } from '#/domain/schema';
 import {
-  assertSingleExpression,
   compileLibraryExpression,
   compileSourceSqlFromBaseUrl,
   compileWidgetQuery,
 } from './compiler';
-import type { DataSourceRecord, FieldRecord } from './types';
+import type { DataSourceRecord, FieldRecord, LibraryMetricRecord } from './types';
 
 const dataSource: DataSourceRecord = {
   id: 'source',
@@ -74,6 +73,29 @@ const dashboard: DashboardDocument = {
   updatedAt: '2026-08-29T00:00:00.000Z',
 };
 
+function compileScorecard(
+  metric: Extract<WidgetDefinition, { type: 'scorecard' }>['metric'],
+  libraryMetrics: LibraryMetricRecord[] = [],
+) {
+  return compileWidgetQuery({
+    dashboard,
+    definition: {
+      type: 'scorecard',
+      title: 'Metric',
+      dataSourceId: 'source',
+      dateRangeFieldId: 'date',
+      metric,
+    },
+    dataSource,
+    fields,
+    calculatedFields: [],
+    libraryMetrics,
+    controlState: {},
+    bucketName: 'bucket',
+    sourceSql: '"rundown_source"',
+  });
+}
+
 describe('query compiler', () => {
   it('compiles explicit local files into an HTTP source', () => {
     expect(
@@ -107,7 +129,7 @@ describe('query compiler', () => {
       libraryMetrics: [],
       controlState: {},
       bucketName: 'bucket',
-      sourceTableName: 'rundown_source',
+      sourceSql: '"rundown_source"',
       resolvedControls: [{ fieldId: 'campaign', values: ['Alpha'] }],
     });
     expect(result.sql).toContain('FROM "rundown_source"');
@@ -136,7 +158,7 @@ describe('query compiler', () => {
       libraryMetrics: [],
       controlState: {},
       bucketName: 'bucket',
-      sourceTableName: 'rundown_source',
+      sourceSql: '"rundown_source"',
       offset: 40,
     });
     expect(result.sql).toContain('LIMIT 21 OFFSET 40');
@@ -172,7 +194,7 @@ describe('query compiler', () => {
       ],
       controlState: {},
       bucketName: 'bucket',
-      sourceTableName: 'rundown_source',
+      sourceSql: '"rundown_source"',
     });
     expect(result.sql).toContain('1000 AS "upper_limit"');
   });
@@ -183,7 +205,49 @@ describe('query compiler', () => {
     );
   });
 
-  it('does not rewrite canonical names inside SQL string literals', () => {
+  it.each(['sum', 'min', 'max'] as const)(
+    'rejects %s over text fields during static validation',
+    (aggregation) => {
+      expect(() =>
+        compileScorecard({
+          source: { kind: 'field', fieldId: 'campaign', aggregation },
+          dataType: 'number',
+        }),
+      ).toThrow(/requires a numeric field/u);
+    },
+  );
+
+  it('rejects text widget expressions during static validation', () => {
+    expect(() =>
+      compileScorecard({
+        source: { kind: 'expression', expression: "'not a number'" },
+        dataType: 'currency',
+      }),
+    ).toThrow(/must return a number/u);
+  });
+
+  it('rejects text library metrics during static validation', () => {
+    expect(() =>
+      compileScorecard(
+        {
+          source: { kind: 'library', libraryMetricId: 'text-metric' },
+          dataType: 'number',
+        },
+        [
+          {
+            id: 'text-metric',
+            name: 'Text metric',
+            canonicalName: 'text_metric',
+            expression: "'not a number'",
+            semanticType: 'text',
+            description: null,
+          },
+        ],
+      ),
+    ).toThrow(/must return a number/u);
+  });
+
+  it('does not rewrite canonical names inside formula string literals', () => {
     const paid = {
       ...fields[0],
       id: 'paid',
@@ -191,11 +255,11 @@ describe('query compiler', () => {
       columnName: 'Paid',
     };
     expect(
-      compileLibraryExpression(`SUM(CASE WHEN campaign = 'paid' THEN media_cost ELSE 0 END)`, {
+      compileLibraryExpression(`sum(if(campaign = 'paid', media_cost, 0))`, {
         fields: [...fields, paid],
         calculatedFields: [],
       }),
-    ).toBe(`SUM(CASE WHEN "Campaign" = 'paid' THEN "MediaCost" ELSE 0 END)`);
+    ).toBe(`SUM(CASE WHEN ("Campaign" = 'paid') THEN "MediaCost" ELSE 0 END)`);
   });
 
   it('rewrites quoted canonical identifiers without double quoting them', () => {
@@ -214,7 +278,7 @@ describe('query compiler', () => {
             dataSourceId: 'source',
             canonicalName: 'media_cost',
             label: 'Calculated cost',
-            expression: 'MediaCost * 2',
+            expression: 'media_cost * 2',
             role: 'metric',
             semanticType: 'currency',
             description: null,
@@ -245,7 +309,7 @@ describe('query compiler', () => {
           dataSourceId: 'source',
           canonicalName: 'media_cost',
           label: 'Calculated cost',
-          expression: 'MediaCost * 2',
+          expression: 'media_cost * 2',
           role: 'metric',
           semanticType: 'currency',
           description: null,
@@ -263,7 +327,7 @@ describe('query compiler', () => {
       ],
       controlState: {},
       bucketName: 'bucket',
-      sourceTableName: 'rundown_source',
+      sourceSql: '"rundown_source"',
     });
     expect(result.sql).toContain('SELECT SUM("MediaCost") AS "metric_1"');
   });
@@ -291,7 +355,7 @@ describe('query compiler', () => {
       libraryMetrics: [],
       controlState: {},
       bucketName: 'bucket',
-      sourceTableName: 'rundown_source',
+      sourceSql: '"rundown_source"',
     });
 
     expect(result.sql).toContain('"Campaign" AS "dimension_1"');
@@ -300,12 +364,12 @@ describe('query compiler', () => {
     expect(result.sql).not.toContain('body');
   });
 
-  it('rejects a top-level alias while allowing aliases inside string literals', () => {
+  it('rejects SQL aliases and casts while allowing the same text in string literals', () => {
     expect(() =>
       compileLibraryExpression('SUM(media_cost) AS total', { fields, calculatedFields: [] }),
-    ).toThrow(/one SQL expression/u);
+    ).toThrow(/Unexpected/u);
     expect(() =>
-      compileLibraryExpression(`SUM(CASE WHEN campaign = 'AS' THEN media_cost ELSE 0 END)`, {
+      compileLibraryExpression(`sum(if(campaign = 'AS', media_cost, 0))`, {
         fields,
         calculatedFields: [],
       }),
@@ -315,11 +379,15 @@ describe('query compiler', () => {
         fields,
         calculatedFields: [],
       }),
-    ).not.toThrow();
+    ).toThrow(/closing parenthesis/u);
   });
 
-  it('rejects statement separators and SQL comments in expressions', () => {
-    expect(() => assertSingleExpression('SUM(cost); SELECT 1')).toThrow(/one SQL expression/u);
-    expect(() => assertSingleExpression('SUM(cost) -- ignore')).toThrow(/one SQL expression/u);
+  it('rejects SQL syntax in formulas', () => {
+    expect(() =>
+      compileLibraryExpression('sum(media_cost); select 1', { fields, calculatedFields: [] }),
+    ).toThrow(/Unexpected/u);
+    expect(() =>
+      compileLibraryExpression('sum(media_cost) -- ignore', { fields, calculatedFields: [] }),
+    ).toThrow(/Unknown formula/u);
   });
 });

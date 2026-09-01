@@ -1,10 +1,17 @@
 import { env } from 'cloudflare:workers';
-import { AwsClient } from 'aws4fetch';
 import { z } from 'zod';
+import { DatasourceError } from '#/data/connectors/contract';
 import { datasourceUploadKey, type DatasourceUploadFormat } from '#/domain/datasource-upload';
-import { compileSourceSqlFromBaseUrl } from '#/query/compiler';
+import { compileSourceSqlFromBaseUrl, compileSourceSqlFromUrls } from '#/query/compiler';
 import type { DataSourceRecord } from '#/query/types';
 import { collectObjectPages, matchingSourceObjects } from './listing';
+import {
+  browserUploadPath,
+  capabilityUrl,
+  createQueryReadBudget,
+  createR2Capability,
+  MAX_QUERY_SOURCE_BYTES,
+} from './internal-r2';
 
 const sourceObjectSchema = z.object({
   key: z.string(),
@@ -70,22 +77,7 @@ export async function prepareSourceUpload(workspacePrefix: string, format: Datas
   if (!usesR2()) {
     return { key, uploadUrl: sourceUrl(key) };
   }
-
-  const signer = new AwsClient({
-    accessKeyId: env.R2_ACCESS_KEY_ID,
-    secretAccessKey: env.R2_SECRET_ACCESS_KEY,
-  });
-  const objectUrl = new URL(
-    `https://${env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com/${encodeURIComponent(env.R2_BUCKET_NAME)}/${key
-      .split('/')
-      .map(encodeURIComponent)
-      .join('/')}`,
-  );
-  objectUrl.searchParams.set('X-Amz-Expires', '900');
-  const signed = await signer.sign(new Request(objectUrl, { method: 'PUT' }), {
-    aws: { signQuery: true },
-  });
-  return { key, uploadUrl: signed.url };
+  return { key, uploadUrl: browserUploadPath(key) };
 }
 
 export async function deleteSourceObject(key: string) {
@@ -98,25 +90,65 @@ export async function deleteSourceObject(key: string) {
     throw new Error(`Local data deletion returned HTTP ${response.status}.`);
 }
 
-export async function resolveDataSource(dataSource: DataSourceRecord) {
-  if (usesR2()) {
+export async function resolveDataSource(dataSource: DataSourceRecord, queryId: string) {
+  if (!usesR2()) {
+    const keys =
+      dataSource.location.kind === 'object'
+        ? [dataSource.location.key]
+        : matchingSourceObjects(
+            await collectObjectPages((cursor) =>
+              listSourceObjects(dataSource.location.key, cursor),
+            ),
+            dataSource.location.format,
+          ).map((object) => object.key);
+    if (!keys.length)
+      throw new DatasourceError(
+        'datasource_source_not_found',
+        'No matching datasource files were found.',
+      );
     return {
-      sql: compileSourceSqlFromBaseUrl(dataSource, env.QUERY_DATA_SOURCE_BASE_URL),
-      requiresR2Credentials: true,
+      sql: compileSourceSqlFromBaseUrl(dataSource, env.QUERY_DATA_SOURCE_BASE_URL, keys),
+      sourceBytes: 0,
+      objectKeys: keys,
+      queryBudgetId: undefined,
     };
   }
 
-  const keys =
+  const objects =
     dataSource.location.kind === 'object'
-      ? [dataSource.location.key]
+      ? [await headSourceObject(dataSource.location.key)].filter((item) => item !== null)
       : matchingSourceObjects(
           await collectObjectPages((cursor) => listSourceObjects(dataSource.location.key, cursor)),
           dataSource.location.format,
-        ).map((object) => object.key);
-  if (!keys.length) throw new Error('No matching local data files were found.');
+        );
+  if (!objects.length)
+    throw new DatasourceError(
+      'datasource_source_not_found',
+      'No matching datasource files were found.',
+    );
+  const sourceBytes = objects.reduce((total, object) => total + object.size, 0);
+  if (sourceBytes > MAX_QUERY_SOURCE_BYTES)
+    throw new DatasourceError(
+      'datasource_source_too_large',
+      `Datasource exceeds the ${MAX_QUERY_SOURCE_BYTES} byte query limit.`,
+    );
+  await createQueryReadBudget(queryId, dataSource.workspaceId, env);
+
+  const urls = await Promise.all(
+    objects.map(async (object) =>
+      capabilityUrl(
+        await createR2Capability(
+          { kind: 'read', key: object.key, queryId },
+          env.INTERNAL_R2_SIGNING_SECRET,
+        ),
+      ),
+    ),
+  );
   return {
-    sql: compileSourceSqlFromBaseUrl(dataSource, env.QUERY_DATA_SOURCE_BASE_URL, keys),
-    requiresR2Credentials: false,
+    sql: compileSourceSqlFromUrls(dataSource, urls),
+    sourceBytes,
+    objectKeys: objects.map((object) => object.key),
+    queryBudgetId: queryId,
   };
 }
 
@@ -137,4 +169,9 @@ function usesR2() {
 function sourceUrl(key: string) {
   const base = env.DATA_SOURCE_BASE_URL.replace(/\/$/u, '');
   return `${base}/${key.split('/').map(encodeURIComponent).join('/')}`;
+}
+
+export function localSourceUrl(key: string) {
+  if (usesR2()) throw new Error('Local source URLs are unavailable for R2.');
+  return sourceUrl(key);
 }

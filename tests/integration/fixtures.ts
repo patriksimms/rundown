@@ -124,7 +124,7 @@ export async function seedDataSource(
       columnName: 'day',
       canonicalName: 'day',
       label: 'Day',
-      role: 'date',
+      role: 'dimension',
       semanticType: 'date',
       defaultAggregation: null,
     },
