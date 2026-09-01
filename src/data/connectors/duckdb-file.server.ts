@@ -4,17 +4,12 @@ import { headSourceObject, listSourceObjects } from '#/data/source.server';
 import { controlOptionsQuery } from '#/domain/control-options';
 import { hashJson } from '#/domain/hash';
 import {
-  assertSingleExpression,
-  compileLibraryExpression,
   compileWidgetQuery,
+  validateAggregateFormula,
+  validateRowFormula,
   type CompiledQuery,
 } from '#/query/compiler';
-import {
-  describeDataSource,
-  explainIsolatedQuery,
-  QueryEngineError,
-  runIsolatedPreparedQuery,
-} from '#/query/duckdb.server';
+import { describeDataSource, QueryEngineError, runPreparedQuery } from '#/query/duckdb.server';
 import type { DataSourceRecord } from '#/query/types';
 import {
   DatasourceError,
@@ -69,8 +64,8 @@ export const duckdbFileConnector: DatasourceConnector = {
     query: DatasourceQuery,
   ) {
     try {
-      return await runIsolatedPreparedQuery<T>(dataSource, (sourceTableName) =>
-        compileQuery(dataSource, query, sourceTableName),
+      return await runPreparedQuery<T>(dataSource, (sourceSql) =>
+        compileQuery(dataSource, query, sourceSql),
       );
     } catch (error) {
       throw connectorError(error);
@@ -79,8 +74,7 @@ export const duckdbFileConnector: DatasourceConnector = {
 
   async validateQuery(dataSource, query) {
     try {
-      const compiled = compileWidget(dataSource, query, 'rundown_source');
-      await explainIsolatedQuery(dataSource, compiled.sql, compiled.parameters);
+      compileWidget(dataSource, query, quoteIdentifier('rundown_source'));
     } catch (error) {
       throw connectorError(error, 'invalid_query');
     }
@@ -88,48 +82,35 @@ export const duckdbFileConnector: DatasourceConnector = {
 
   explainQuery(dataSource, query) {
     try {
-      const compiled = compileWidget(dataSource, query, 'rundown_source');
+      const compiled = compileWidget(dataSource, query, quoteIdentifier('rundown_source'));
       return { sql: compiled.sql, definitions: compiled.definitions };
     } catch (error) {
       throw connectorError(error, 'invalid_query');
     }
   },
 
-  async validateExpression(dataSource, definition) {
+  async validateExpression(_dataSource, definition) {
     try {
-      const expression = expressionSql(definition);
-      await explainIsolatedQuery(
-        dataSource,
-        `SELECT ${expression} FROM ${quoteIdentifier('rundown_source')} LIMIT 1`,
-      );
+      expressionSql(definition);
     } catch (error) {
       throw connectorError(error, 'invalid_query');
     }
   },
 };
 
-function compileQuery(
-  dataSource: DataSourceRecord,
-  query: DatasourceQuery,
-  sourceTableName: string,
-) {
-  if (query.kind === 'widget') return compileWidget(dataSource, query, sourceTableName);
+function compileQuery(dataSource: DataSourceRecord, query: DatasourceQuery, sourceSql: string) {
+  if (query.kind === 'widget') return compileWidget(dataSource, query, sourceSql);
   const expression =
     'columnName' in query.field
       ? quoteIdentifier(query.field.columnName)
-      : `(${query.field.expression})`;
-  return controlOptionsQuery(
-    expression,
-    query.search,
-    query.direction,
-    quoteIdentifier(sourceTableName),
-  );
+      : `(${validateRowFormula(query.field.expression, query.metadata).sql})`;
+  return controlOptionsQuery(expression, query.search, query.direction, sourceSql);
 }
 
 function compileWidget(
   dataSource: DataSourceRecord,
   query: WidgetDatasourceQuery,
-  sourceTableName: string,
+  sourceSql: string,
 ): CompiledQuery {
   return compileWidgetQuery({
     dashboard: query.dashboard,
@@ -138,7 +119,7 @@ function compileWidget(
     ...query.metadata,
     controlState: query.controlState,
     bucketName: env.R2_BUCKET_NAME,
-    sourceTableName,
+    sourceSql,
     resolvedControls: query.resolvedControls,
     offset: query.offset,
   });
@@ -146,9 +127,13 @@ function compileWidget(
 
 function expressionSql(definition: DatasourceExpression) {
   if (definition.kind === 'libraryMetric')
-    return compileLibraryExpression(definition.expression, definition.metadata);
-  assertSingleExpression(definition.expression);
-  return definition.expression;
+    return validateAggregateFormula(
+      definition.expression,
+      definition.metadata,
+      definition.semanticType,
+    ).sql;
+  return validateRowFormula(definition.expression, definition.metadata, definition.semanticType)
+    .sql;
 }
 
 function connectorError(

@@ -13,12 +13,13 @@ interface EngineReply {
 
 type EngineHandler = (request: QueryEngineRequest) => EngineReply | Promise<EngineReply>;
 
-const emptyResult: EngineHandler = () => ({ body: { ok: true, data: [] } });
+const metrics = { queryDurationMs: 1, resultBytes: 2 };
+const emptyResult: EngineHandler = () => ({ body: { ok: true, data: [], metrics } });
 
-type IsolatedQueryRequest = Extract<QueryEngineRequest, { operation: 'isolatedQuery' }>;
+type QueryRequest = Extract<QueryEngineRequest, { operation: 'query' }>;
 
-const isWidgetQuery = (request: QueryEngineRequest): request is IsolatedQueryRequest =>
-  request.operation === 'isolatedQuery' && !request.sql.startsWith('EXPLAIN ');
+const isWidgetQuery = (request: QueryEngineRequest): request is QueryRequest =>
+  request.operation === 'query';
 
 let handler: EngineHandler = emptyResult;
 let calls: QueryEngineRequest[] = [];
@@ -59,8 +60,8 @@ export const queryEngine = {
   returnRows(rows: Record<string, unknown>[]) {
     handler = (request) =>
       isWidgetQuery(request)
-        ? { body: { ok: true, data: rows } }
-        : { body: { ok: true, data: [] } };
+        ? { body: { ok: true, data: rows, metrics } }
+        : { body: { ok: true, data: [], metrics } };
   },
 
   /** Reject widget queries the way the engine rejects invalid SQL. */
@@ -68,7 +69,7 @@ export const queryEngine = {
     handler = (request) =>
       isWidgetQuery(request)
         ? { status, body: { ok: false, error } }
-        : { body: { ok: true, data: [] } };
+        : { body: { ok: true, data: [], metrics } };
   },
 
   answerWith(next: EngineHandler) {

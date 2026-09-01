@@ -54,6 +54,33 @@ export const datasourceUploads = sqliteTable(
   (table) => [index('datasource_uploads_workspace_id_idx').on(table.workspaceId)],
 );
 
+export const ingestionTokens = sqliteTable(
+  'ingestion_tokens',
+  {
+    id: text().primaryKey(),
+    workspaceId: text('workspace_id').notNull(),
+    sourceKey: text('source_key').notNull(),
+    destinationKey: text('destination_key').notNull(),
+    expiresAt: text('expires_at').notNull(),
+    usedAt: text('used_at'),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [index('ingestion_tokens_workspace_id_idx').on(table.workspaceId)],
+);
+
+export const queryReadBudgets = sqliteTable(
+  'query_read_budgets',
+  {
+    id: text().primaryKey(),
+    workspaceId: text('workspace_id').notNull(),
+    scannedBytes: integer('scanned_bytes').notNull().default(0),
+    maximumBytes: integer('maximum_bytes').notNull(),
+    expiresAt: text('expires_at').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [index('query_read_budgets_workspace_id_idx').on(table.workspaceId)],
+);
+
 export const fields = sqliteTable(
   'fields',
   {

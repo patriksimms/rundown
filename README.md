@@ -5,9 +5,9 @@ through WebMCP tools, viewers use stored widgets and controls, and editors regis
 existing CSV and Parquet files from tenant-scoped R2 prefixes.
 
 The TanStack Start app and API run in a Cloudflare Worker. Query execution runs in a Bun Cloudflare
-Container with native DuckDB. The Worker authorizes the datasource and compiles SQL, then the
-container materializes only that source into a temporary table and disables external access before
-compiling user expressions.
+Container with native DuckDB. The Worker authorizes exact Parquet objects, compiles Rundown formulas
+to SQL, and gives DuckDB short-lived internal URLs for those objects. The container has no internet
+access or R2 credentials.
 
 ## Local development
 
@@ -17,7 +17,7 @@ bun run db:migrate:local
 bun run dev
 ```
 
-Docker must be running for local query execution. Upload files from the datasource registration
+Upload files from the datasource registration
 screen or place CSV and Parquet files in `dev-data/`. Local workspaces see those files under their
 tenant-scoped `ws/<workspaceId>/` prefix. Vite serves the files with upload, deletion, and range
 request support so the query container can read them without R2 credentials or a separate
@@ -29,8 +29,8 @@ For example:
 cp reporting_example.csv dev-data/
 ```
 
-Local D1 and KV data persist in `.wrangler/`. The application still uses R2 bindings and direct
-DuckDB R2 reads in built and deployed containers. To work only on routes that do not query data,
+Local D1 and KV data persist in `.wrangler/`. Built and deployed containers read authorized Parquet
+objects through the Worker's internal R2 handler. To work only on routes that do not query data,
 start the app without local containers:
 
 ```sh
@@ -137,26 +137,31 @@ fails with a list of what is missing until it is configured:
 The test user needs a `+clerk_test` email address, a password, and membership in a Clerk
 organization. The tests section above explains why.
 
-Each environment needs `CLERK_SECRET_KEY`, `R2_ACCESS_KEY_ID`, and `R2_SECRET_ACCESS_KEY`. The R2
-credentials come from an API token that can read the configured bucket and are passed to the private
-query container at startup. Cloudflare Builds needs `VITE_CLERK_PUBLISHABLE_KEY` as a build variable.
-Wrangler environments are separate Workers, so production secrets do not carry over to preview.
+Each environment needs `CLERK_SECRET_KEY`, `INTERNAL_R2_SIGNING_SECRET`,
+`UPLOAD_SIGNING_SECRET`, and `RESET_ADMIN_TOKEN`. Use independent random values. The first signs
+short-lived container capabilities, the second signs upload cleanup tokens, and the third protects
+the reset route. No R2 API credential belongs in the Worker or container. Cloudflare Builds needs
+`VITE_CLERK_PUBLISHABLE_KEY` as a build variable. Wrangler environments are separate Workers, so
+production secrets do not carry over to preview.
 
-Browser uploads use 15-minute presigned PUT URLs. Before deploying this feature, add this CORS policy
-to the production R2 bucket. Apply the equivalent policy to a preview bucket with its exact preview
-origin before testing uploads there.
+Browser uploads stream through the Worker into its R2 binding. No bucket CORS policy or presigned
+URL is needed. Managed CSV uploads convert to Parquet inside the query container before Rundown
+registers the datasource.
 
-```json
-[
-  {
-    "AllowedOrigins": ["https://rundown-app.dev"],
-    "AllowedMethods": ["PUT"],
-    "AllowedHeaders": ["Content-Type"],
-    "ExposeHeaders": ["ETag"],
-    "MaxAgeSeconds": 3600
-  }
-]
+## Environment reset
+
+The reset command requires an environment and `RESET_ADMIN_TOKEN`:
+
+```sh
+bun run reset development
+RUNDOWN_PREVIEW_URL=https://preview.example bun run reset preview
+bun run reset production
 ```
+
+Development and preview delete Rundown's D1 rows, R2 objects, and query-cache KV keys. Clerk users
+and organizations are outside these bindings and remain untouched. Production always returns the
+exact deletion plan and performs no deletion. Apply the committed D1 migrations before using a
+fresh environment.
 
 For an explicit production deployment from a local authenticated shell:
 

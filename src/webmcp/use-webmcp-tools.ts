@@ -172,7 +172,7 @@ export function useWebMcpTools(options: WebMcpOptions) {
             {
               action: 'upsertCalculatedField',
               description:
-                'Create or update a row-level DuckDB calculated field after compile and tenant-isolation validation.',
+                'Create or update a row-level Rundown formula after static syntax, field, and type validation.',
               readOnly: false,
               fixed,
             },

@@ -36,7 +36,7 @@ MetricSource:
     - kind: library
       libraryMetricId: string
     - kind: expression
-      expression: string     # DuckDB aggregate expression over columnNames of the widget's datasource
+      expression: string # Rundown aggregate formula over canonical field names
 
 Aggregation: sum | average | count | countDistinct | min | max | median | standardDeviation | variance
 
@@ -46,7 +46,9 @@ DisplayFormat:
   radix?: integer
 ```
 
-`kind: field` is the no-SQL path. `kind: library` reuses a workspace metric. `kind: expression` is the escape hatch for one-off formulas on a single widget. `dataType` defaults from the field's or library metric's `semanticType` and can be overridden.
+`kind: field` uses a stored aggregation. `kind: library` reuses a workspace metric.
+`kind: expression` stores a one-off Rundown formula. `dataType` defaults from the field's or library
+metric's `semanticType` and can be overridden.
 
 ## Dimension
 
@@ -72,7 +74,7 @@ DateRange:
   endDate: DateValue
 
 DateValue:
-  fixed?: string       # ISO 8601 date
+  fixed?: string # ISO 8601 date
   relative?: RelativeDate
 
 RelativeDate:
@@ -105,7 +107,7 @@ SortTarget:
     - kind: dimension
       fieldId: string
     - kind: metric
-      index: integer         # position in the card's metrics list
+      index: integer # position in the card's metrics list
 ```
 
 An ordered `sort` list is primary sort first, then secondary. Sort applies after aggregation and before the limit.

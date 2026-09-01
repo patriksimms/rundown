@@ -15,14 +15,6 @@ const mocks = vi.hoisted(() => ({
       samples: Record<string, unknown>[];
     }>
   >(),
-  explainIsolatedQuery:
-    vi.fn<
-      (
-        dataSource: DataSourceRecord,
-        sql: string,
-        parameters?: unknown[],
-      ) => Promise<Record<string, unknown>[]>
-    >(),
   headSourceObject: vi.fn<
     (key: string) => Promise<{
       key: string;
@@ -41,7 +33,7 @@ const mocks = vi.hoisted(() => ({
       cursor?: string;
     }>
   >(),
-  runIsolatedPreparedQuery:
+  runPreparedQuery:
     vi.fn<
       (
         dataSource: DataSourceRecord,
@@ -57,9 +49,8 @@ vi.mock('#/data/source.server', () => ({
 }));
 vi.mock('#/query/duckdb.server', () => ({
   describeDataSource: mocks.describeDataSource,
-  explainIsolatedQuery: mocks.explainIsolatedQuery,
   QueryEngineError: class QueryEngineError extends Error {},
-  runIsolatedPreparedQuery: mocks.runIsolatedPreparedQuery,
+  runPreparedQuery: mocks.runPreparedQuery,
 }));
 
 import { duckdbFileConnector } from './duckdb-file.server';
@@ -131,9 +122,9 @@ describe('duckdb-file datasource connector', () => {
   });
 
   it('executes the existing file datasource from a domain widget definition', async () => {
-    mocks.runIsolatedPreparedQuery.mockImplementation(
+    mocks.runPreparedQuery.mockImplementation(
       async (_dataSource: DataSourceRecord, compile: (source: string) => { sql: string }) => {
-        const compiled = compile('rundown_source');
+        const compiled = compile('"rundown_source"');
         expect(compiled.sql).toContain('FROM "rundown_source"');
         expect(compiled.sql).toContain('SUM("MediaCost")');
         return [{ metric_1: 42 }];
@@ -143,21 +134,26 @@ describe('duckdb-file datasource connector', () => {
     const rows = await duckdbFileConnector.executeQuery(dataSource, widgetQuery);
 
     expect(rows).toEqual([{ metric_1: 42 }]);
-    expect(mocks.runIsolatedPreparedQuery).toHaveBeenCalledWith(dataSource, expect.any(Function));
+    expect(mocks.runPreparedQuery).toHaveBeenCalledWith(dataSource, expect.any(Function));
   });
 
   it('explains and validates the same domain widget definition', async () => {
-    mocks.explainIsolatedQuery.mockResolvedValue([]);
-
     const explanation = duckdbFileConnector.explainQuery(dataSource, widgetQuery);
     await duckdbFileConnector.validateQuery(dataSource, widgetQuery);
 
     expect(explanation.sql).toContain('FROM "rundown_source"');
-    expect(mocks.explainIsolatedQuery).toHaveBeenCalledWith(
-      dataSource,
-      explanation.sql,
-      expect.any(Array),
-    );
+    expect(explanation.sql).toContain('SUM("MediaCost")');
+  });
+
+  it('rejects a calculated field whose declared type disagrees with its formula', async () => {
+    await expect(
+      duckdbFileConnector.validateExpression(dataSource, {
+        kind: 'calculatedField',
+        expression: 'lower(media_cost)',
+        semanticType: 'count',
+        metadata: { fields: [dateField, { ...costField, semanticType: 'text' }] },
+      }),
+    ).rejects.toThrow(/returns text/u);
   });
 
   it('inspects a file and returns a stable source version', async () => {

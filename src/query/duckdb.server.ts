@@ -1,9 +1,15 @@
 import { getContainer } from '@cloudflare/containers';
 import { env } from 'cloudflare:workers';
+import { finishQueryReadBudget } from '#/data/internal-r2';
 import { resolveDataSource } from '#/data/source.server';
-import type { QueryEngineRequest, QueryEngineResponse } from './engine-contract';
+import type {
+  QueryEngineMetrics,
+  QueryEngineRequest,
+  QueryEngineResponse,
+} from './engine-contract';
 import type { DataSourceRecord } from './types';
 import { safeQueryMessage } from './errors';
+import { recordProductMetric } from '#/observability';
 
 export class QueryEngineError extends Error {
   constructor(
@@ -15,49 +21,87 @@ export class QueryEngineError extends Error {
   }
 }
 
-export async function runIsolatedPreparedQuery<T extends Record<string, unknown>>(
+export async function runPreparedQuery<T extends Record<string, unknown>>(
   dataSource: DataSourceRecord,
-  compile: (sourceTableName: string) => { sql: string; parameters: unknown[] },
+  compile: (sourceSql: string) => { sql: string; parameters: unknown[] },
 ) {
-  const query = compile('rundown_source');
-  const source = await resolveDataSource(dataSource);
-  return queryEngineRequest<T[]>(dataSource.workspaceId, {
-    operation: 'isolatedQuery',
-    sourceSql: source.sql,
-    requiresR2Credentials: source.requiresR2Credentials,
-    sql: query.sql,
-    parameters: query.parameters,
+  const queryId = crypto.randomUUID();
+  const source = await resolveDataSource(dataSource, queryId);
+  let result;
+  let scannedBytes = 0;
+  try {
+    const query = compile(source.sql);
+    result = await queryEngineRequest<T[]>(dataSource.workspaceId, queryId, {
+      operation: 'query',
+      sql: query.sql,
+      parameters: query.parameters,
+    });
+  } finally {
+    scannedBytes = await finishSourceRead(source.queryBudgetId, queryId, dataSource.workspaceId);
+  }
+  console.info('rundown.query_execution', {
+    queryId,
+    workspaceId: dataSource.workspaceId,
+    sourceBytes: source.sourceBytes,
+    scannedBytes,
+    objectCount: source.objectKeys.length,
+    ...result.metrics,
   });
-}
-
-export async function explainIsolatedQuery(
-  dataSource: DataSourceRecord,
-  sql: string,
-  parameters: unknown[] = [],
-) {
-  const source = await resolveDataSource(dataSource);
-  return queryEngineRequest<Record<string, unknown>[]>(dataSource.workspaceId, {
-    operation: 'isolatedQuery',
-    sourceSql: source.sql,
-    requiresR2Credentials: source.requiresR2Credentials,
-    sql: `EXPLAIN ${sql}`,
-    parameters,
+  recordProductMetric('query_execution', {
+    labels: ['success'],
+    numbers: [
+      result.metrics.containerStartMs,
+      result.metrics.queryDurationMs,
+      scannedBytes,
+      result.metrics.resultBytes,
+    ],
+    index: dataSource.workspaceId,
   });
+  return result.data;
 }
 
 export async function describeDataSource(dataSource: DataSourceRecord) {
-  const source = await resolveDataSource(dataSource);
-  return queryEngineRequest<{
-    description: Array<{ column_name: string; column_type: string }>;
-    samples: Record<string, unknown>[];
-  }>(dataSource.workspaceId, {
-    operation: 'describeSource',
-    sourceSql: source.sql,
-    requiresR2Credentials: source.requiresR2Credentials,
-  });
+  const queryId = crypto.randomUUID();
+  const source = await resolveDataSource(dataSource, queryId);
+  try {
+    const result = await queryEngineRequest<{
+      description: Array<{ column_name: string; column_type: string }>;
+      samples: Record<string, unknown>[];
+    }>(dataSource.workspaceId, queryId, {
+      operation: 'describeSource',
+      sourceSql: source.sql,
+    });
+    return result.data;
+  } finally {
+    await finishSourceRead(source.queryBudgetId, queryId, dataSource.workspaceId);
+  }
 }
 
-async function queryEngineRequest<T>(workspaceId: string, body: QueryEngineRequest) {
+export async function ingestCsv(
+  workspaceId: string,
+  tokenId: string,
+  sourceUrl: string,
+  destinationUrl: string,
+) {
+  const result = await queryEngineRequest<{ size: number; etag: string | null }>(
+    workspaceId,
+    tokenId,
+    { operation: 'ingestCsv', sourceUrl, destinationUrl },
+  );
+  console.info('rundown.datasource_ingestion', {
+    workspaceId,
+    tokenId,
+    outputBytes: result.data.size,
+    ...result.metrics,
+  });
+  return result.data;
+}
+
+async function queryEngineRequest<T>(
+  workspaceId: string,
+  queryId: string,
+  body: QueryEngineRequest,
+) {
   const local = !env.DATA_SOURCE_BASE_URL.startsWith('r2://');
   const request = new Request(
     local ? new URL('/__query-engine', env.DATA_SOURCE_BASE_URL) : 'http://query-engine/query',
@@ -67,9 +111,11 @@ async function queryEngineRequest<T>(workspaceId: string, body: QueryEngineReque
       body: JSON.stringify(body),
     },
   );
+  const startedAt = performance.now();
   const response = local
     ? await fetch(request)
     : await getContainer(env.QUERY_ENGINE, workspaceId).fetch(request);
+  const totalDurationMs = performance.now() - startedAt;
   const responseText = await response.text();
   let result: QueryEngineResponse<T>;
   try {
@@ -81,6 +127,17 @@ async function queryEngineRequest<T>(workspaceId: string, body: QueryEngineReque
     );
   }
   if (!response.ok || !result.ok) {
+    console.warn('rundown.query_failure', {
+      queryId,
+      workspaceId,
+      totalDurationMs,
+      error: result.ok ? `HTTP ${response.status}` : safeQueryMessage(result.error),
+    });
+    recordProductMetric('query_execution', {
+      labels: ['error'],
+      numbers: [totalDurationMs],
+      index: workspaceId,
+    });
     if (!result.ok && response.status === 400)
       throw new QueryEngineError('invalid-query', safeQueryMessage(result.error));
     throw new QueryEngineError(
@@ -88,5 +145,40 @@ async function queryEngineRequest<T>(workspaceId: string, body: QueryEngineReque
       result.ok ? `Query engine returned HTTP ${response.status}.` : result.error,
     );
   }
-  return result.data;
+  return {
+    data: result.data,
+    metrics: queryMetrics(result.metrics, totalDurationMs),
+  };
+}
+
+function queryMetrics(metrics: QueryEngineMetrics, totalDurationMs: number) {
+  return {
+    queryDurationMs: metrics.queryDurationMs,
+    containerStartMs: Math.max(0, totalDurationMs - metrics.queryDurationMs),
+    resultBytes: metrics.resultBytes,
+  };
+}
+
+async function finishSourceRead(
+  budgetId: string | undefined,
+  queryId: string,
+  workspaceId: string,
+) {
+  if (!budgetId) return 0;
+  try {
+    const scannedBytes = await finishQueryReadBudget(budgetId, env);
+    console.info('rundown.query_scanned_bytes', { queryId, workspaceId, scannedBytes });
+    recordProductMetric('query_scanned_bytes', {
+      numbers: [scannedBytes],
+      index: workspaceId,
+    });
+    return scannedBytes;
+  } catch (error) {
+    console.warn('rundown.query_budget_cleanup_failed', {
+      queryId,
+      workspaceId,
+      error: error instanceof Error ? error.message : 'Unknown cleanup error.',
+    });
+    return 0;
+  }
 }

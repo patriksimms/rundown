@@ -3,8 +3,18 @@ import { and, count, eq, inArray, isNull, lt, or } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 import type { ApiRequest } from '#/api/contracts';
 import { createDatabase } from '#/db/client';
-import { deleteSourceObject, listSourceObjects, prepareSourceUpload } from '#/data/source.server';
-import { DatasourceError, DUCKDB_FILE_CONNECTOR } from '#/data/connectors/contract';
+import {
+  deleteSourceObject,
+  listSourceObjects,
+  localSourceUrl,
+  prepareSourceUpload,
+} from '#/data/source.server';
+import { capabilityUrl, createR2Capability } from '#/data/internal-r2';
+import {
+  DatasourceError,
+  DUCKDB_FILE_CONNECTOR,
+  type DatasourceExpression,
+} from '#/data/connectors/contract';
 import { datasourceConnector } from '#/data/connectors/index.server';
 import {
   calculatedFields,
@@ -13,6 +23,7 @@ import {
   dataSources,
   datasourceUploads,
   fields,
+  ingestionTokens,
   libraryMetrics,
   shareLinks,
 } from '#/db/schema';
@@ -47,7 +58,8 @@ import {
   MAX_DATASOURCE_FILE_BYTES,
   verifyDatasourceUploadCleanupToken,
 } from '#/domain/datasource-upload';
-import { referencedSqlIdentifiers } from '#/query/sql-identifiers';
+import { ingestCsv } from '#/query/duckdb.server';
+import { recordProductMetric } from '#/observability';
 import type { DataSourceRecord } from '#/query/types';
 import { requireSession, type SessionContext } from './auth.server';
 import { ApiError } from './errors';
@@ -66,6 +78,7 @@ export async function executeRequest(request: ApiRequest): Promise<unknown> {
       durationMs: Date.now() - startedAt,
       ...safeRequestIdentifiers(request),
     });
+    recordLatency(request.action, 'success', Date.now() - startedAt);
     return result;
   } catch (error) {
     console.warn('rundown.request', {
@@ -75,6 +88,7 @@ export async function executeRequest(request: ApiRequest): Promise<unknown> {
       errorCode: error instanceof ApiError ? error.code : 'unexpected_error',
       ...safeRequestIdentifiers(request),
     });
+    recordLatency(request.action, 'error', Date.now() - startedAt);
     throw error;
   }
 }
@@ -613,6 +627,7 @@ async function getControlOptions(
     connectorFor(dataSource).executeQuery<{ value: unknown }>(dataSource, {
       kind: 'controlOptions',
       field,
+      metadata,
       search,
       direction,
     }),
@@ -658,12 +673,20 @@ async function describeDatasource(dataSourceId: string, dashboardId?: string, sh
     : (await requireSession()).workspace.id;
   const dataSource = await loadDataSource(dataSourceId, workspaceId);
   const metadata = await loadQueryMetadata(dataSource.id, workspaceId);
-  const canonicalNames = new Set(
-    [...metadata.fields, ...metadata.calculatedFields].map((field) => field.canonicalName),
-  );
-  const applicableMetrics = metadata.libraryMetrics.filter((metric) =>
-    referencedSqlIdentifiers(metric.expression).every((name) => canonicalNames.has(name)),
-  );
+  const applicableMetrics = [];
+  for (const metric of metadata.libraryMetrics) {
+    if (
+      await datasourceOperation(() =>
+        libraryMetricApplies(dataSource, {
+          kind: 'libraryMetric',
+          expression: metric.expression,
+          semanticType: metric.semanticType,
+          metadata,
+        }),
+      )
+    )
+      applicableMetrics.push(metric);
+  }
   return {
     ...dataSource,
     fields: metadata.fields.filter((field) => !field.hidden),
@@ -812,17 +835,34 @@ async function registerDatasource(request: Extract<ApiRequest, { action: 'regist
     isManagedDatasourceUpload(session.workspace.r2Prefix, request.location.key)
       ? request.location.key
       : undefined;
+  if (
+    managedUploadKey &&
+    !managedUploadKey.toLocaleLowerCase('en-US').endsWith(`.${request.location.format}`)
+  )
+    throw new ApiError(
+      400,
+      'invalid_upload_format',
+      `Managed ${request.location.format} uploads need a .${request.location.format} key.`,
+    );
   const claimId = managedUploadKey
     ? await claimPendingUpload(session, managedUploadKey, request.cleanupToken)
     : undefined;
+  let convertedKey: string | undefined;
   try {
     const connector = connectorFor(DUCKDB_FILE_CONNECTOR);
+    const location =
+      managedUploadKey && request.location.format === 'csv'
+        ? await ingestManagedCsvUpload(session, managedUploadKey).then((converted) => {
+            convertedKey = converted.key;
+            return converted.location;
+          })
+        : request.location;
     const pendingDataSource: Omit<DataSourceRecord, 'version'> = {
       id: `ds_${crypto.randomUUID()}`,
       workspaceId: session.workspace.id,
       name: request.name,
       connectorType: connector.type,
-      location: request.location,
+      location,
     };
     const inspection = await datasourceOperation(() =>
       connector.inspect(pendingDataSource, {
@@ -870,17 +910,95 @@ async function registerDatasource(request: Extract<ApiRequest, { action: 'regist
       ),
       ...uploadCompletion,
     ]);
+    if (convertedKey && managedUploadKey)
+      await deleteSourceObject(managedUploadKey).catch((error: unknown) => {
+        console.warn('rundown.datasource_ingestion_cleanup_failed', {
+          workspaceId: session.workspace.id,
+          sourceKey: managedUploadKey,
+          error: error instanceof Error ? error.message : 'Unknown cleanup error.',
+        });
+      });
     return { ...dataSource, fields: discovered };
   } catch (error) {
+    if (convertedKey) await deleteSourceObject(convertedKey).catch(() => undefined);
     if (managedUploadKey && claimId)
       await restorePendingUpload(session, managedUploadKey, 'registering', claimId);
     throw error;
   }
 }
 
-function uploadCleanupSecret() {
-  return env.R2_SECRET_ACCESS_KEY || 'rundown-local-development-only';
+async function ingestManagedCsvUpload(session: SessionContext, sourceKey: string) {
+  const destinationKey = sourceKey.replace(/\.csv$/iu, '.parquet');
+  const tokenId = `ingest_${crypto.randomUUID()}`;
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 5 * 60 * 1000);
+  await database().insert(ingestionTokens).values({
+    id: tokenId,
+    workspaceId: session.workspace.id,
+    sourceKey,
+    destinationKey,
+    expiresAt: expiresAt.toISOString(),
+    usedAt: null,
+    createdAt: now.toISOString(),
+  });
+  let sourceUrl: string;
+  let destinationUrl: string;
+  if (env.DATA_SOURCE_BASE_URL.startsWith('r2://')) {
+    const token = await createR2Capability(
+      {
+        kind: 'ingestion',
+        tokenId,
+        sourceKey,
+        destinationKey,
+        expiresAt: Math.floor(expiresAt.getTime() / 1000),
+      },
+      env.INTERNAL_R2_SIGNING_SECRET,
+    );
+    sourceUrl = capabilityUrl(token);
+    // The ingestion capability selects its read and write object from the HTTP method.
+    destinationUrl = sourceUrl;
+  } else {
+    sourceUrl = localSourceUrl(sourceKey);
+    destinationUrl = localSourceUrl(destinationKey);
+  }
+  await ingestCsv(session.workspace.id, tokenId, sourceUrl, destinationUrl);
+  return {
+    key: destinationKey,
+    location: { kind: 'object' as const, key: destinationKey, format: 'parquet' as const },
+  };
 }
+
+function uploadCleanupSecret() {
+  return env.UPLOAD_SIGNING_SECRET;
+}
+
+function recordLatency(
+  action: ApiRequest['action'],
+  result: 'success' | 'error',
+  durationMs: number,
+) {
+  const event = dashboardSaveActions.has(action)
+    ? 'dashboard_save'
+    : action === 'previewWidget'
+      ? 'dashboard_preview'
+      : action === 'queryWidget'
+        ? 'widget_query'
+        : undefined;
+  if (!event) return;
+  console.info(`rundown.${event}`, { action, result, durationMs });
+  recordProductMetric(event, { labels: [action, result], numbers: [durationMs] });
+}
+
+const dashboardSaveActions = new Set<ApiRequest['action']>([
+  'createDashboard',
+  'updateDashboard',
+  'addWidget',
+  'updateWidget',
+  'removeWidget',
+  'moveWidget',
+  'updateLayout',
+  'copyWidget',
+]);
 
 async function isDatasourceObjectRegistered(workspaceId: string, key: string) {
   const registeredSources = await database()
@@ -1044,10 +1162,13 @@ async function upsertCalculatedField(
       );
   }
   const dataSource = await loadDataSource(request.dataSourceId, session.workspace.id);
+  const metadata = await loadQueryMetadata(dataSource.id, session.workspace.id);
   await datasourceOperation(() =>
     connectorFor(dataSource).validateExpression(dataSource, {
       kind: 'calculatedField',
       expression: request.expression,
+      semanticType: request.semanticType,
+      metadata,
     }),
   );
   const mutableValues = {
@@ -1114,21 +1235,19 @@ async function upsertLibraryMetric(
   for (const row of sourceRows) {
     const dataSource = await loadDataSource(row.id, session.workspace.id);
     const metadata = await loadQueryMetadata(row.id, session.workspace.id);
-    const names = new Set(
-      [...metadata.fields, ...metadata.calculatedFields].map((field) =>
-        field.canonicalName.toLocaleLowerCase('en-US'),
-      ),
-    );
-    if (!referencedSqlIdentifiers(request.expression).every((name) => names.has(name))) continue;
-    await datasourceOperation(() =>
-      connectorFor(dataSource).validateExpression(dataSource, {
-        kind: 'libraryMetric',
-        expression: request.expression,
-        metadata,
-      }),
-    );
-    validated = true;
-    break;
+    if (
+      await datasourceOperation(() =>
+        libraryMetricApplies(dataSource, {
+          kind: 'libraryMetric',
+          expression: request.expression,
+          semanticType: request.semanticType,
+          metadata,
+        }),
+      )
+    ) {
+      validated = true;
+      break;
+    }
   }
   if (!validated)
     throw new ApiError(
@@ -1702,6 +1821,19 @@ async function datasourceOperation<T>(operation: () => T | Promise<T>) {
     return await operation();
   } catch (error) {
     throwDatasourceError(error);
+  }
+}
+
+async function libraryMetricApplies(
+  dataSource: DataSourceRecord,
+  expression: Extract<DatasourceExpression, { kind: 'libraryMetric' }>,
+) {
+  try {
+    await connectorFor(dataSource).validateExpression(dataSource, expression);
+    return true;
+  } catch (error) {
+    if (error instanceof DatasourceError && error.code === 'invalid_query') return false;
+    throw error;
   }
 }
 

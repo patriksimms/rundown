@@ -6,7 +6,7 @@
 CardBase:
   title: string
   dataSourceId: string
-  dateRangeFieldId: string   # date field the dashboard date range applies to
+  dateRangeFieldId: string # date field the dashboard date range applies to
   filter?: Filter
   styling?: Styling
 ```
@@ -47,7 +47,7 @@ A manual limit wins if a renderer receives both.
 LineCard:
   type: line
   # CardBase
-  dimension: Dimension       # usually a date field
+  dimension: Dimension # usually a date field
   metrics: Metric[]
   comparison?: Comparison
 ```
@@ -96,7 +96,7 @@ Table:
 
 ResultLimit:
   mode: pagination | top
-  amount: integer            # page size in pagination mode, X in top mode
+  amount: integer # page size in pagination mode, X in top mode
 ```
 
 ## Card union
@@ -118,7 +118,7 @@ Every card compiles to one query of this shape, with control state applied. The 
 
 ```sql
 SELECT <dimensions>, <metric expressions>
-FROM read_parquet('r2://bucket/ws/<workspaceId>/...')
+FROM read_parquet(['http://r2.rundown.internal/capability/<token>', ...])
 WHERE <dateRangeFieldId> BETWEEN ? AND ?
   AND <card filter>
   AND <matching control values>

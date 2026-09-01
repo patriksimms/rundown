@@ -103,6 +103,20 @@ describe('workspace tenancy', () => {
     );
   });
 
+  test('managed upload keys must match their declared format', async () => {
+    const workspace = await signInToNewWorkspace();
+    const key = `${workspace.r2Prefix}uploads/2026-09-01/550e8400-e29b-41d4-a716-446655440000.parquet`;
+
+    await expectApiError(
+      callService({
+        action: 'registerDatasource',
+        name: 'Mismatched upload',
+        location: { kind: 'object', key, format: 'csv' },
+      }),
+      { status: 400, code: 'invalid_upload_format' },
+    );
+  });
+
   test('a request without a session or an organization never reaches a workspace', async () => {
     signOut();
     await expectApiError(callService({ action: 'bootstrap' }), {
