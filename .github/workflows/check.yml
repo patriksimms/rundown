@@ -30,6 +30,8 @@ jobs:
           fi
       - run: bun run check
       - uses: docker/setup-buildx-action@v3
+      # The only Vite production build in this pipeline; the dry run reads its output.
+      - run: bun run build
       - name: Validate the deployment package
         run: bun run deploy:dry-run
 

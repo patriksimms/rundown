@@ -5,10 +5,11 @@ RUN apt-get update -qq \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
-COPY package.json bun.lock ./
+WORKDIR /app/container
+# The query engine has its own manifest, so frontend dependency changes leave this layer cached.
+COPY container/package.json container/bun.lock ./
 RUN bun install --production --frozen-lockfile
-COPY container ./container
+COPY container ./
 
 EXPOSE 8080
-CMD ["bun", "run", "container/query-server.ts"]
+CMD ["bun", "run", "query-server.ts"]

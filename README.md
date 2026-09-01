@@ -112,7 +112,7 @@ The GitHub repository is connected with these Workers Builds settings:
 
 ```text
 Production branch: main
-Build command: bun run check && bun run build
+Build command: bun run build
 Deploy command: bun run deploy:built
 Non-production deploy command: bun run deploy:dry-run
 Non-production branch builds: disabled
@@ -120,6 +120,11 @@ Non-production branch builds: disabled
 
 Set the `BUN_VERSION` build variable to `1.3.10`. GitHub Actions validates pull requests, including
 the Wrangler deployment package, so Cloudflare does not need to build non-production branches.
+
+Cloudflare no longer repeats `bun run check`. `main` is protected instead, with the three `Check`
+jobs required, so only commits that already passed those checks can land on the production branch.
+Each pipeline now builds the app once: GitHub Actions builds it for the deployment dry run, and
+Cloudflare builds it for the release.
 
 The named preview environment remains available for deliberate preview deployments with
 `bun run deploy` or `bun run deploy:preview`, but is not used by pull-request checks. Production
@@ -180,6 +185,11 @@ The Worker expects these private resources:
 | D1       | `rundown-app`         | `rundown-app-preview`         |
 | KV       | `rundown-query-cache` | `rundown-query-cache-preview` |
 | R2       | `rundown-data`        | `rundown-data-preview`        |
+
+The query container has its own `container/package.json` and `container/bun.lock` holding only
+`@duckdb/node-api` and `zod`, so the image ships nothing from the frontend and its dependency layer
+stays cached when frontend dependencies change. `@duckdb/node-api` is also a root dev dependency
+because the container unit tests run from the repository root; bump both manifests together.
 
 The deployment provisions `QueryEngineContainer` as a SQLite-backed Durable Object namespace.
 Production permits five `basic` instances; preview permits two. Cloudflare Builds needs container
