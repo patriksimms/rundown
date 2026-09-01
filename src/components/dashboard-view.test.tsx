@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { QueryResultColumn } from '#/domain/query-result';
 import type { DashboardWidget } from '#/domain/schema';
-import { formatValue, Result } from './dashboard-view';
+import { formatValue, lineChartAxes, lineMetricAxis, Result } from './dashboard-view';
 
 type QueryDefinition = Extract<DashboardWidget['definition'], { title: string }>;
 const base = {
@@ -158,6 +158,18 @@ describe('widget result rendering', () => {
     expect(markup).toContain('--color-chart_series_1');
     expect(markup).toContain('--color-chart_series_2');
     expect(markup).toContain('--color-chart_series_3');
+  });
+
+  it('assigns two numeric line metrics to separate axes', () => {
+    const axes = lineChartAxes([
+      { ...currency, key: 'metric_1', label: 'Impressions', dataType: 'number' },
+      { ...currency, key: 'metric_2', label: 'Clicks', dataType: 'number' },
+    ]);
+    expect(axes.map(({ yAxisId, orientation }) => ({ yAxisId, orientation }))).toEqual([
+      { yAxisId: 'metric_0', orientation: 'left' },
+      { yAxisId: 'metric_1', orientation: 'right' },
+    ]);
+    expect(lineMetricAxis(2)).toBe('metric_1');
   });
 
   it('renders table summary, comparison label, and empty range', () => {

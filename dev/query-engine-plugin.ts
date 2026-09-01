@@ -1,10 +1,12 @@
 import { json } from 'node:stream/consumers';
 import type { Plugin } from 'vite';
 import { executeQueryEngineRequest } from '../container/query-engine.ts';
+import { createQueryExecutor } from '../container/query-executor.ts';
 
 const route = '/__query-engine';
 
 export function queryEnginePlugin(): Plugin {
+  const executeQuery = createQueryExecutor(executeQueryEngineRequest);
   return {
     name: 'rundown-query-engine',
     apply: 'serve',
@@ -24,14 +26,18 @@ export function queryEnginePlugin(): Plugin {
 
         try {
           const input: unknown = await json(request);
-          const startedAt = performance.now();
-          const data = await executeQueryEngineRequest(input);
-          const resultBytes = new TextEncoder().encode(JSON.stringify(data)).byteLength;
+          const deadlineHeader = request.headers['x-rundown-query-deadline'];
+          const deadline = Number(
+            Array.isArray(deadlineHeader) ? deadlineHeader[0] : deadlineHeader,
+          );
+          const result = await executeQuery(input, {
+            queryId: crypto.randomUUID(),
+            deadlineAt: Number.isFinite(deadline) ? deadline : undefined,
+          });
           response.end(
             JSON.stringify({
               ok: true,
-              data,
-              metrics: { queryDurationMs: performance.now() - startedAt, resultBytes },
+              ...result,
             }),
           );
         } catch (error) {

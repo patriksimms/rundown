@@ -11,6 +11,8 @@ import type { DataSourceRecord } from './types';
 import { safeQueryMessage } from './errors';
 import { recordProductMetric } from '#/observability';
 
+const QUERY_ENGINE_REQUEST_TIMEOUT_MS = 40_000;
+
 export class QueryEngineError extends Error {
   constructor(
     public readonly kind: 'invalid-query' | 'request-failed',
@@ -54,6 +56,7 @@ export async function runPreparedQuery<T extends Record<string, unknown>>(
       result.metrics.queryDurationMs,
       scannedBytes,
       result.metrics.resultBytes,
+      result.metrics.queueDurationMs,
     ],
     index: dataSource.workspaceId,
   });
@@ -103,20 +106,51 @@ async function queryEngineRequest<T>(
   body: QueryEngineRequest,
 ) {
   const local = !env.DATA_SOURCE_BASE_URL.startsWith('r2://');
+  const deadlineAt = Date.now() + QUERY_ENGINE_REQUEST_TIMEOUT_MS;
   const request = new Request(
     local ? new URL('/__query-engine', env.DATA_SOURCE_BASE_URL) : 'http://query-engine/query',
     {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        'x-rundown-query-id': queryId,
+        'x-rundown-query-deadline': String(deadlineAt),
+      },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(QUERY_ENGINE_REQUEST_TIMEOUT_MS),
     },
   );
   const startedAt = performance.now();
-  const response = local
-    ? await fetch(request)
-    : await getContainer(env.QUERY_ENGINE, workspaceId).fetch(request);
+  let response: Response;
+  let responseText: string;
+  try {
+    response = local
+      ? await fetch(request)
+      : await getContainer(env.QUERY_ENGINE, workspaceId).fetch(request);
+    responseText = await response.text();
+  } catch (error) {
+    const totalDurationMs = performance.now() - startedAt;
+    const timedOut = request.signal.aborted;
+    console.warn('rundown.query_failure', {
+      queryId,
+      workspaceId,
+      totalDurationMs,
+      error: timedOut ? 'Query engine request timed out.' : 'Query engine request failed.',
+    });
+    recordProductMetric('query_execution', {
+      labels: [timedOut ? 'timeout' : 'error'],
+      numbers: [totalDurationMs],
+      index: workspaceId,
+    });
+    throw new QueryEngineError(
+      'request-failed',
+      timedOut
+        ? 'The query engine did not respond within 40 seconds.'
+        : 'The query engine request failed.',
+      { cause: error },
+    );
+  }
   const totalDurationMs = performance.now() - startedAt;
-  const responseText = await response.text();
   let result: QueryEngineResponse<T>;
   try {
     result = JSON.parse(responseText) as QueryEngineResponse<T>;
@@ -152,9 +186,11 @@ async function queryEngineRequest<T>(
 }
 
 function queryMetrics(metrics: QueryEngineMetrics, totalDurationMs: number) {
+  const queueDurationMs = metrics.queueDurationMs ?? 0;
   return {
     queryDurationMs: metrics.queryDurationMs,
-    containerStartMs: Math.max(0, totalDurationMs - metrics.queryDurationMs),
+    queueDurationMs,
+    containerStartMs: Math.max(0, totalDurationMs - metrics.queryDurationMs - queueDurationMs),
     resultBytes: metrics.resultBytes,
   };
 }

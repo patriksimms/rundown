@@ -177,10 +177,10 @@ Editing a widget changes its hash, so old cache entries become unreachable and e
 
 `explainWidget` returns the compiled SQL plus the metric and calculated field definitions and descriptions, so a viewer or agent can see what a number means.
 
-Query-container constraints: each query has a 30 second execution timeout, a 192 MB DuckDB memory
-limit, two DuckDB threads, a cumulative 500 MB Parquet read budget across HTTP range requests, and
-a 5 MB JSON result limit. Container disks are ephemeral, and 64-bit integers are serialized
-losslessly.
+Query-container constraints: each workspace runs one query at a time. Each query has a 30 second
+execution timeout, a 192 MB DuckDB memory limit, two DuckDB threads, a cumulative 500 MB Parquet
+read budget across HTTP range requests, and a 5 MB JSON result limit. Container disks are ephemeral,
+and 64-bit integers are serialized losslessly.
 
 ## 9. Dashboards, widgets, controls
 
@@ -254,7 +254,7 @@ Input schemas are JSON Schema `type: object` documents generated from the same z
 - Sort applies after aggregation and before the limit. Secondary sort is allowed on every multi-row widget.
 - Gauge upper limit is a manual value or a library metric; manual wins when both are set.
 - Widgets cannot overlap.
-- Line chart axis assignment derives from `dataType` (numbers left, percents right); no override yet.
+- Line charts put the first metric on the left axis and additional metrics on the right axis; no override yet.
 - Styling stays an open object owned by each renderer.
 - Rich text is stored as the editor's versioned JSON, never as HTML.
 - Cache TTL 24 hours; datasource version in the key handles data refreshes.

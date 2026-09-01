@@ -1,4 +1,7 @@
-import { executeQueryEngineRequest } from './query-engine';
+import { executeQueryEngineRequest } from './query-engine.ts';
+import { createQueryExecutor } from './query-executor.ts';
+
+const executeQuery = createQueryExecutor(executeQueryEngineRequest);
 
 const server = Bun.serve({
   port: 8080,
@@ -9,20 +12,34 @@ const server = Bun.serve({
       return Response.json({ ok: false, error: 'Not found.' }, { status: 404 });
 
     try {
-      const startedAt = performance.now();
-      const data = await executeQueryEngineRequest(await request.json());
-      const resultBytes = new TextEncoder().encode(JSON.stringify(data)).byteLength;
+      const queryId = request.headers.get('x-rundown-query-id') ?? crypto.randomUUID();
+      const result = await executeQuery(await request.json(), {
+        queryId,
+        signal: request.signal,
+        deadlineAt: queryDeadline(request.headers.get('x-rundown-query-deadline')),
+      });
       return Response.json({
         ok: true,
-        data,
-        metrics: { queryDurationMs: performance.now() - startedAt, resultBytes },
+        ...result,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown query engine error.';
       console.error('Query engine request failed', { message });
-      return Response.json({ ok: false, error: message }, { status: 400 });
+      return Response.json({ ok: false, error: message }, { status: timeoutStatus(error) });
     }
   },
 });
 
 console.log(`Query engine listening on port ${server.port}`);
+
+function timeoutStatus(error: unknown) {
+  return error instanceof DOMException && ['AbortError', 'TimeoutError'].includes(error.name)
+    ? 408
+    : 400;
+}
+
+function queryDeadline(value: string | null) {
+  if (value === null) return undefined;
+  const deadline = Number(value);
+  return Number.isFinite(deadline) ? deadline : undefined;
+}

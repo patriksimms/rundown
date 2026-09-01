@@ -23,4 +23,19 @@ describe('API client boundary', () => {
     );
     await expect(callApi({ action: 'bootstrap' })).rejects.toThrow('Invalid discriminator');
   });
+
+  it('passes cancellation through to fetch', async () => {
+    const fetchMock = vi.fn<
+      (input: string | URL | Request, init?: RequestInit) => Promise<Response>
+    >(() => Promise.resolve(Response.json({ ok: true, data: { ready: true } })));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    await callApi({ action: 'bootstrap' }, { signal: controller.signal });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/rundown',
+      expect.objectContaining({ signal: controller.signal }),
+    );
+  });
 });

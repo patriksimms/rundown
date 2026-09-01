@@ -13,7 +13,7 @@ interface EngineReply {
 
 type EngineHandler = (request: QueryEngineRequest) => EngineReply | Promise<EngineReply>;
 
-const metrics = { queryDurationMs: 1, resultBytes: 2 };
+const metrics = { queryDurationMs: 1, queueDurationMs: 0, resultBytes: 2 };
 const emptyResult: EngineHandler = () => ({ body: { ok: true, data: [], metrics } });
 
 type QueryRequest = Extract<QueryEngineRequest, { operation: 'query' }>;

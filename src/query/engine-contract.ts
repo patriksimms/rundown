@@ -16,6 +16,7 @@ export type QueryEngineRequest =
 
 export interface QueryEngineMetrics {
   queryDurationMs: number;
+  queueDurationMs?: number;
   resultBytes: number;
 }
 

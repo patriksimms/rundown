@@ -467,6 +467,11 @@ function QueryCard({
   useEffect(() => setPage(0), [controlState, dashboardId, widget.definition, widget.id]);
   useEffect(() => {
     let current = true;
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(new Error('The widget query did not respond within 45 seconds.')),
+      45_000,
+    );
     // Keep the last result usable if loading a new page fails.
     setError(undefined);
     void callApi<{
@@ -484,6 +489,7 @@ function QueryCard({
         shareToken,
         page,
       }),
+      { signal: controller.signal },
     )
       .then((result) => {
         if (!current) return;
@@ -496,9 +502,14 @@ function QueryCard({
       })
       .catch((caught: unknown) => {
         if (current) setError(caught instanceof Error ? caught.message : String(caught));
+      })
+      .finally(() => {
+        clearTimeout(timeout);
       });
     return () => {
       current = false;
+      clearTimeout(timeout);
+      controller.abort();
     };
   }, [controlState, dashboardId, page, preview, retry, shareToken, widget.definition, widget.id]);
   const definition = widget.definition;
@@ -724,6 +735,7 @@ export function Result({
       sourceKey: column.key,
       column,
       colorIndex: index,
+      yAxisId: lineMetricAxis(index),
       isComparison: false,
       label: column.label,
     })),
@@ -733,6 +745,7 @@ export function Result({
         sourceKey,
         column,
         colorIndex: index,
+        yAxisId: lineMetricAxis(index),
         isComparison: true,
         label: `Previous ${column.label}`,
       };
@@ -805,6 +818,7 @@ export function Result({
         </BarChart>
       </ChartContainer>
     );
+  const axes = lineChartAxes(chartMetrics);
   return (
     <ChartContainer className="h-72 w-full" config={config}>
       <LineChart data={chartRows}>
@@ -813,30 +827,20 @@ export function Result({
           dataKey={dimension.key}
           tickFormatter={(value) => formatAxisValue(value, dimension)}
         />
-        {metricColumns.some((metric) => metric.dataType !== 'percent') ? (
-          <YAxis yAxisId="number" />
-        ) : null}
-        {metricColumns.some((metric) => metric.dataType === 'percent') ? (
+        {axes.map(({ metric, yAxisId, orientation }) => (
           <YAxis
-            yAxisId="percent"
-            orientation={
-              metricColumns.some((metric) => metric.dataType !== 'percent') ? 'right' : 'left'
-            }
-            tickFormatter={(value) =>
-              new Intl.NumberFormat(undefined, {
-                style: 'percent',
-                notation: 'compact',
-                maximumFractionDigits: 1,
-              }).format(Number(value))
-            }
+            key={metric.key}
+            yAxisId={yAxisId}
+            orientation={orientation}
+            tickFormatter={(value) => formatAxisValue(value, metric)}
           />
-        ) : null}
+        ))}
         {tooltip}
         {series.map((item) => (
           <Line
             key={item.key}
             dataKey={item.key}
-            yAxisId={item.column.dataType === 'percent' ? 'percent' : 'number'}
+            yAxisId={item.yAxisId}
             stroke={`var(--color-${item.key})`}
             strokeDasharray={item.isComparison ? '4 4' : undefined}
             dot={false}
@@ -845,6 +849,18 @@ export function Result({
       </LineChart>
     </ChartContainer>
   );
+}
+
+export function lineMetricAxis(index: number) {
+  return `metric_${Math.min(index, 1)}`;
+}
+
+export function lineChartAxes(metrics: QueryResultColumn[]) {
+  return metrics.slice(0, 2).map((metric, index) => ({
+    metric,
+    yAxisId: lineMetricAxis(index),
+    orientation: index === 0 ? ('left' as const) : ('right' as const),
+  }));
 }
 
 export function initialControlState(dashboard: DashboardDocument): ControlState {
