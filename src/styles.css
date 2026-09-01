@@ -53,21 +53,17 @@
   --sidebar-ring: oklch(0.708 0 0);
 }
 
-.react-grid-item > .react-resizable-handle {
+/* Resize by dragging the edges still works; the arrow indicators stay hidden,
+   overriding the library's hover reveal. Exact sizes are also editable in the
+   widget settings form. */
+.react-grid-item > .react-resizable-handle,
+.react-grid-item:hover > .react-resizable-handle {
   opacity: 0;
-  transition: opacity 120ms ease-out;
-}
-
-.react-grid-item:hover > .react-resizable-handle,
-.react-grid-item:focus-within > .react-resizable-handle,
-.react-grid-item.react-resizable-resizing > .react-resizable-handle {
-  opacity: 1;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .react-grid-item,
-  .react-grid-placeholder,
-  .react-grid-item > .react-resizable-handle {
+  .react-grid-placeholder {
     transition: none !important;
   }
 }

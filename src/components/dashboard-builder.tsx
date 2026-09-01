@@ -160,6 +160,8 @@ export function DashboardBuilder({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [chartRevision, setChartRevision] = useState(0);
   const [pendingWidgets, setPendingWidgets] = useState<Record<string, number>>({});
+  const [removeTarget, setRemoveTarget] = useState<DashboardWidget>();
+  const [removing, setRemoving] = useState(false);
   const [desktop, setDesktop] = useState<boolean>();
   const dashboardRef = useRef(initialDashboard);
   const mutationQueueRef = useRef(createSerialQueue());
@@ -465,7 +467,6 @@ export function DashboardBuilder({
           ),
         )
       }
-      onRemove={() => removeWidget(selected)}
     />
   ) : (
     <WidgetCatalog
@@ -563,21 +564,27 @@ export function DashboardBuilder({
                         )}
                         onClick={() => setSelectedId(widget.id)}
                       >
-                        {/* Pointer-only affordance; keyboard users move a widget from its settings form. */}
-                        <span
-                          className="widget-drag-handle absolute top-2 left-1/2 z-10 -translate-x-1/2 rounded-md bg-background/90 p-1 opacity-0 shadow-sm ring-1 ring-foreground/10 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-                          aria-hidden="true"
-                        >
-                          <GripVerticalIcon className="size-4" />
-                        </span>
+                        {/* Pointer users drag it; Enter selects the widget for the settings form. */}
                         <Button
-                          className="absolute top-2 right-2 z-10 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-                          variant="outline"
-                          size="sm"
+                          className="widget-drag-handle absolute top-2 left-1/2 z-10 -translate-x-1/2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                          variant="ghost"
+                          size="icon-sm"
                           aria-label={`Edit ${widgetLabel(widget)}`}
                           onClick={() => setSelectedId(widget.id)}
                         >
-                          Edit
+                          <GripVerticalIcon />
+                        </Button>
+                        <Button
+                          className="absolute top-2 right-2 z-10 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={`Remove ${widgetLabel(widget)}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setRemoveTarget(widget);
+                          }}
+                        >
+                          <Trash2Icon />
                         </Button>
                         <div
                           key={`${widget.id}-${chartRevision}`}
@@ -609,18 +616,27 @@ export function DashboardBuilder({
                     key={widget.id}
                     className="relative rounded-xl ring-1 ring-foreground/10 focus-within:ring-2 focus-within:ring-ring"
                   >
-                    <Button
-                      className="absolute top-2 right-2 z-10"
-                      variant="outline"
-                      size="sm"
-                      aria-label={`Edit ${widgetLabel(widget)}`}
-                      onClick={() => {
-                        setSelectedId(widget.id);
-                        setMobileOpen(true);
-                      }}
-                    >
-                      Edit
-                    </Button>
+                    <div className="absolute top-2 right-2 z-10 flex gap-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        aria-label={`Edit ${widgetLabel(widget)}`}
+                        onClick={() => {
+                          setSelectedId(widget.id);
+                          setMobileOpen(true);
+                        }}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="icon-sm"
+                        aria-label={`Remove ${widgetLabel(widget)}`}
+                        onClick={() => setRemoveTarget(widget)}
+                      >
+                        <Trash2Icon />
+                      </Button>
+                    </div>
                     <DashboardWidgetView
                       dashboard={dashboard}
                       widget={widget}
@@ -639,6 +655,42 @@ export function DashboardBuilder({
           </aside>
         ) : null}
       </div>
+      <Dialog
+        open={Boolean(removeTarget)}
+        onOpenChange={(open) => {
+          if (!open) setRemoveTarget(undefined);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove {removeTarget ? widgetLabel(removeTarget) : 'widget'}?</DialogTitle>
+            <DialogDescription>
+              The widget and its settings are deleted from this dashboard. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />} disabled={removing}>
+              Keep widget
+            </DialogClose>
+            <Button
+              variant="destructive"
+              disabled={removing}
+              onClick={async () => {
+                if (!removeTarget) return;
+                setRemoving(true);
+                try {
+                  await removeWidget(removeTarget);
+                } finally {
+                  setRemoving(false);
+                  setRemoveTarget(undefined);
+                }
+              }}
+            >
+              {removing ? 'Removing...' : 'Remove widget'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -728,7 +780,6 @@ function WidgetSettings({
   onBack,
   onChange,
   onLayoutChange,
-  onRemove,
 }: {
   dashboardId: string;
   widget: DashboardWidget;
@@ -736,15 +787,12 @@ function WidgetSettings({
   onBack: () => void;
   onChange: (definition: WidgetDefinition) => Promise<void>;
   onLayoutChange: (placement: DashboardWidget['layout']) => Promise<void>;
-  onRemove: () => Promise<void>;
 }) {
   const [definition, setDefinition] = useState(widget.definition);
   const [source, setSource] = useState<SourceDescription>();
   const [sourceOpen, setSourceOpen] = useState(false);
   const [formulaOpen, setFormulaOpen] = useState(false);
   const [dimensionOpen, setDimensionOpen] = useState(false);
-  const [removeOpen, setRemoveOpen] = useState(false);
-  const [removing, setRemoving] = useState(false);
   const [settingsError, setSettingsError] = useState<string>();
   const sourceRequestRef = useRef(0);
   const definitionRef = useRef(widget.definition);
@@ -815,45 +863,7 @@ function WidgetSettings({
           <h2 className="truncate font-medium">{widgetLabel(widget)}</h2>
           <p className="text-xs text-muted-foreground">{definition.type}</p>
         </div>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={`Remove ${widgetLabel(widget)}`}
-          onClick={() => setRemoveOpen(true)}
-        >
-          <Trash2Icon />
-        </Button>
       </div>
-      <Dialog open={removeOpen} onOpenChange={setRemoveOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Remove {widgetLabel(widget)}?</DialogTitle>
-            <DialogDescription>
-              The widget and its settings are deleted from this dashboard. This cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" />} disabled={removing}>
-              Keep widget
-            </DialogClose>
-            <Button
-              variant="destructive"
-              disabled={removing}
-              onClick={async () => {
-                setRemoving(true);
-                try {
-                  await onRemove();
-                } finally {
-                  setRemoving(false);
-                  setRemoveOpen(false);
-                }
-              }}
-            >
-              {removing ? 'Removing...' : 'Remove widget'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
       {settingsError ? (
         <Alert variant="destructive">
           <AlertDescription>{settingsError}</AlertDescription>
