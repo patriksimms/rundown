@@ -70,6 +70,7 @@ import { withDefaultDateRange, withoutWidgetControlState } from '#/domain/contro
 import { canonicalMetricExpression } from '#/domain/library-metric';
 import { createSerialQueue } from '#/domain/serial-queue';
 import { rollbackFailedLayout } from '#/domain/layout';
+import { fieldRoleSchema } from '#/domain/schema';
 import type {
   ControlState,
   Aggregation,
@@ -934,7 +935,7 @@ function WidgetSettings({
               <FieldPicker
                 label="Date field"
                 value={definition.dateRangeFieldId}
-                fields={fields.filter((field) => field.role === 'date')}
+                fields={fields.filter((field) => field.semanticType === 'date')}
                 onChange={(dateRangeFieldId) => void commit({ ...definition, dateRangeFieldId })}
               />
               <DimensionSettings definition={definition} fields={fields} commit={commit} />
@@ -1068,7 +1069,9 @@ function LayoutNumberInput({
 }
 
 function DimensionSettings({ definition, fields, commit }: QuerySettingsProps) {
-  const dimensions = fields.filter((field) => field.role !== 'metric' && field.role !== 'date');
+  const dimensions = fields.filter(
+    (field) => field.role === 'dimension' && field.semanticType !== 'date',
+  );
   if ('dimension' in definition)
     return (
       <FieldPicker
@@ -1482,7 +1485,9 @@ function TypeSettings({
   source,
   commit,
 }: QuerySettingsProps & { source?: SourceDescription }) {
-  const dimensions = fields.filter((field) => field.role !== 'metric' && field.role !== 'date');
+  const dimensions = fields.filter(
+    (field) => field.role === 'dimension' && field.semanticType !== 'date',
+  );
   switch (definition.type) {
     case 'scorecard':
     case 'line':
@@ -1940,7 +1945,7 @@ function DatasourceFieldRow({
           value={value.role}
           onChange={(event) => setValue({ ...value, role: event.target.value as FieldRole })}
         >
-          {['dimension', 'metric', 'date', 'id'].map((item) => (
+          {fieldRoleSchema.options.map((item) => (
             <NativeSelectOption key={item} value={item}>
               {item}
             </NativeSelectOption>
@@ -2000,8 +2005,6 @@ function DatasourceFieldRow({
 const fieldRoleStyles: Record<FieldRole, string> = {
   dimension: 'border-l-blue-500',
   metric: 'border-l-emerald-500',
-  date: 'border-l-amber-500',
-  id: 'border-l-violet-500',
 };
 
 function MetricFormulaDialog({
@@ -2207,8 +2210,10 @@ async function defaultDefinition(
   if (!source) throw new Error('Register a datasource before adding a data widget.');
   const description = await describeSource(source.id);
   const fields = [...description.fields, ...description.calculatedFields];
-  const date = fields.find((field) => field.role === 'date');
-  const dimension = fields.find((field) => field.role === 'dimension' || field.role === 'id');
+  const date = fields.find((field) => field.semanticType === 'date');
+  const dimension = fields.find(
+    (field) => field.role === 'dimension' && field.semanticType !== 'date',
+  );
   const metricField = fields.find((field) => field.role === 'metric');
   if (type === 'control') {
     if (!dimension) throw new Error('This datasource has no dimension for a filter control.');

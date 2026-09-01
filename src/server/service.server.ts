@@ -1,5 +1,5 @@
 import { clerkClient } from '@clerk/tanstack-react-start/server';
-import { and, eq, inArray, isNull, lt, or } from 'drizzle-orm';
+import { and, count, eq, inArray, isNull, lt, or } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 import type { ApiRequest } from '#/api/contracts';
 import { createDatabase } from '#/db/client';
@@ -26,7 +26,7 @@ import {
   type WidgetDefinition,
 } from '#/domain/schema';
 import { appendPlacement, placementFits, validateLayoutUpdate } from '#/domain/layout';
-import { canUpdateFieldMetadata } from '#/domain/field-metadata';
+import { canUpdateFieldMetadata, detectFieldSemantics } from '#/domain/field-metadata';
 import { hashJson } from '#/domain/hash';
 import { comparisonDateRange, resolveDateRange } from '#/domain/dates';
 import { queryCacheState, widgetDependencyState } from '#/domain/cache';
@@ -622,10 +622,26 @@ async function getControlOptions(
 
 async function listDataSources() {
   const session = await requireSession();
-  return database()
-    .select()
-    .from(dataSources)
-    .where(eq(dataSources.workspaceId, session.workspace.id));
+  const db = database();
+  const workspace = eq(dataSources.workspaceId, session.workspace.id);
+  const [sourceRows, rawCounts, calculatedCounts] = await Promise.all([
+    db.select().from(dataSources).where(workspace),
+    // Hidden fields are excluded so the count matches what the detail page lists.
+    db
+      .select({ dataSourceId: fields.dataSourceId, total: count() })
+      .from(fields)
+      .where(and(eq(fields.workspaceId, session.workspace.id), eq(fields.hidden, false)))
+      .groupBy(fields.dataSourceId),
+    db
+      .select({ dataSourceId: calculatedFields.dataSourceId, total: count() })
+      .from(calculatedFields)
+      .where(eq(calculatedFields.workspaceId, session.workspace.id))
+      .groupBy(calculatedFields.dataSourceId),
+  ]);
+  const totals = new Map<string, number>();
+  for (const row of [...rawCounts, ...calculatedCounts])
+    totals.set(row.dataSourceId, (totals.get(row.dataSourceId) ?? 0) + row.total);
+  return sourceRows.map((row) => ({ ...row, fieldCount: totals.get(row.id) ?? 0 }));
 }
 
 async function listLibraryMetrics() {
@@ -1579,9 +1595,6 @@ function seedField(
   column: { column_name: string; column_type: string },
   samples: Record<string, unknown>[],
 ) {
-  const idLike = /id$/iu.test(column.column_name);
-  const dateLike = /DATE|TIMESTAMP/u.test(column.column_type);
-  const numeric = /INT|DECIMAL|DOUBLE|FLOAT|REAL|HUGE/u.test(column.column_type);
   const values = [
     ...new Set(
       samples
@@ -1598,12 +1611,9 @@ function seedField(
     columnName: column.column_name,
     canonicalName: slug(column.column_name),
     label: humanize(column.column_name),
-    role: idLike ? 'id' : dateLike ? 'date' : numeric ? 'metric' : 'dimension',
-    semanticType: idLike ? 'id' : dateLike ? 'date' : numeric ? 'count' : 'text',
-    defaultAggregation: numeric ? 'sum' : null,
+    ...detectFieldSemantics(column.column_name, column.column_type),
     description: null,
     hidden: false,
-    castTo: idLike ? 'VARCHAR' : null,
     sampleValues: values,
     cardinality: null,
   };

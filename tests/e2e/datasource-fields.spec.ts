@@ -1,50 +1,63 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { mockRundownApi } from './support/rundown-api';
 
 test.use({ viewport: { width: 375, height: 812 } });
 
-const fieldCard = (page: Page, column: string) =>
-  page.getByRole('listitem').filter({ hasText: column });
-
-test('searching the field list keeps unsaved edits and keeps focus after a save', async ({
+test('a phone browses datasources and edits a field without scrolling sideways', async ({
   page,
 }) => {
   await mockRundownApi(page);
   await page.goto('/datasources');
 
-  const search = page.getByLabel('Find a field');
-  await expect(search).toBeVisible({ timeout: 20_000 });
-  const campaignLabel = fieldCard(page, 'Campaign').getByLabel('Label');
-  const costCard = fieldCard(page, 'MediaCost');
-  const costLabel = costCard.getByLabel('Label');
+  // Below sm the table becomes stacked cards, so nothing is clipped off-screen.
+  const card = page.getByRole('listitem').filter({ hasText: 'Reporting example' });
+  await expect(card).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('table')).toBeHidden();
+  const documentWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+  expect(documentWidth).toBeLessThanOrEqual(375);
 
-  // A draft edit survives searching the field out of view and back.
-  await campaignLabel.fill('Campaign name');
-  await search.fill('cost');
-  await expect(page.getByText('1 of 5 fields')).toBeVisible();
-  await expect(campaignLabel).toBeHidden();
-  await search.fill('');
-  await expect(campaignLabel).toHaveValue('Campaign name');
+  await page.getByRole('link', { name: 'Reporting example' }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Reporting example' })).toBeVisible();
 
-  // Editing a field out of its own search result keeps focus on the control that did it.
-  await search.fill('media cost');
-  await expect(page.getByText('1 of 5 fields')).toBeVisible();
-  await costLabel.fill('Spend');
-  const save = costCard.getByRole('button', { name: 'Save MediaCost' });
-  await save.focus();
-  // Focus is already on the button, so the save has to land before the assertion means anything.
+  // Search narrows the same rows the cards are built from.
+  const fieldCard = (name: string) => page.getByRole('listitem').filter({ hasText: name });
+  await expect(fieldCard('Campaign')).toBeVisible();
+  await page.getByLabel('Search fields').fill('media cost');
+  await expect(fieldCard('Campaign')).toBeHidden();
+  await expect(fieldCard('Media cost')).toBeVisible();
+  await page.getByLabel('Search fields').fill('');
+
+  // Sorting stays reachable without column headers to click.
+  await page.getByLabel('Sort fields by').selectOption('label');
+  await expect(page.getByRole('listitem').first()).toContainText('Campaign');
+  await page.getByRole('button', { name: 'Sort descending' }).click();
+  await expect(page.getByRole('listitem').first()).toContainText('Platform');
+
   const saved = page.waitForResponse(
     (response) =>
       response.url().includes('/api/rundown') &&
       response.request().postDataJSON()?.action === 'updateFieldMetadata',
   );
-  await page.keyboard.press('Enter');
+  await page.getByRole('button', { name: 'Edit Media cost' }).click();
+  await expect(page.getByRole('heading', { name: 'Edit Media cost' })).toBeVisible();
+  await page.getByLabel('Label', { exact: true }).fill('Spend');
+  await page.getByRole('button', { name: 'Save field' }).click();
   await saved;
-  await expect(page.getByText('0 of 5 fields')).toBeVisible();
-  await expect(save).toBeFocused();
-  await expect(costLabel).toBeVisible();
 
-  // It leaves the filtered list once focus moves on.
-  await search.focus();
-  await expect(costLabel).toBeHidden();
+  // The dialog closes onto the saved value without dropping focus to the document.
+  await expect(page.getByRole('button', { name: 'Save field' })).toBeHidden();
+  await expect(fieldCard('Spend')).toBeVisible();
+  await expect(page.locator('body')).not.toBeFocused();
+});
+
+test('the full table returns once there is room for it', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await mockRundownApi(page);
+  await page.goto('/datasources');
+
+  await expect(page.getByRole('columnheader', { name: 'Last updated' })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.getByRole('cell', { name: 'Reporting example' })).toBeVisible();
+  await expect(page.getByLabel('Sort datasources by')).toBeHidden();
 });

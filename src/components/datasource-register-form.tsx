@@ -1,8 +1,5 @@
-import { createFileRoute } from '@tanstack/react-router';
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ApiClientError, callApi } from '#/api/client';
-import { AppShell } from '#/components/app-shell';
-import { ErrorState, LoadingState } from '#/components/request-state';
 import { Alert, AlertDescription, AlertTitle } from '#/components/ui/alert';
 import { Button } from '#/components/ui/button';
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '#/components/ui/field';
@@ -10,7 +7,6 @@ import { Input } from '#/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '#/components/ui/native-select';
 import { Progress, ProgressLabel, ProgressValue } from '#/components/ui/progress';
 import { Switch } from '#/components/ui/switch';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '#/components/ui/tabs';
 import {
   datasourceNameFromFileName,
   datasourceUploadFormat,
@@ -18,312 +14,17 @@ import {
   type DatasourceUploadEvent,
   type DatasourceUploadFormat,
 } from '#/domain/datasource-upload';
-import { useWebMcpTools } from '#/webmcp/use-webmcp-tools';
 
-export const Route = createFileRoute('/datasources')({ component: DatasourcesPage });
-interface Bootstrap {
-  isAdmin: boolean;
-  dataSources: Array<{ id: string; name: string }>;
-}
-interface Description {
+interface RegisteredDatasource {
   id: string;
   name: string;
-  fields: FieldRecord[];
-  calculatedFields: Array<{
-    id: string;
-    label: string;
-    canonicalName: string;
-    expression: string;
-    role: string;
-    semanticType: string;
-    description?: string;
-  }>;
-  libraryMetrics: Array<{
-    id: string;
-    name: string;
-    canonicalName: string;
-    expression: string;
-    semanticType: string;
-    description?: string;
-  }>;
-}
-interface FieldRecord {
-  id: string;
-  columnName: string;
-  canonicalName: string;
-  label: string;
-  role: 'dimension' | 'metric' | 'date' | 'id';
-  semanticType: 'currency' | 'count' | 'ratio' | 'text' | 'date' | 'id';
-  description: string | null;
-  hidden: boolean;
-  castTo: string | null;
-  sampleValues: unknown[] | null;
 }
 
-function DatasourcesPage() {
-  return (
-    <AppShell requireWorkspace>
-      <DatasourcesContent />
-    </AppShell>
-  );
-}
-
-function DatasourcesContent() {
-  const [bootstrap, setBootstrap] = useState<Bootstrap>();
-  const [selected, setSelected] = useState<string>();
-  const [description, setDescription] = useState<Description>();
-  const [error, setError] = useState<string>();
-  const refresh = useCallback(async () => {
-    try {
-      const data = await callApi<Bootstrap>({ action: 'bootstrap' });
-      setBootstrap(data);
-      const id = selected ?? data.dataSources[0]?.id;
-      if (id && data.isAdmin) {
-        setSelected(id);
-        setDescription(
-          await callApi<Description>({ action: 'describeDatasource', dataSourceId: id }),
-        );
-      }
-      setError(undefined);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    }
-  }, [selected]);
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-  useWebMcpTools({
-    canManageDataSources: Boolean(bootstrap),
-    isAdmin: bootstrap?.isAdmin,
-    onMutation: refresh,
-  });
-  return (
-    <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6">
-      {error ? (
-        <ErrorState error={error} />
-      ) : !bootstrap ? (
-        <LoadingState />
-      ) : (
-        <div className="flex flex-col gap-6">
-          <div>
-            <h1 className="text-3xl font-semibold tracking-tight">Datasources</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Upload a CSV or Parquet file, or register data already in this workspace.
-            </p>
-          </div>
-          <Tabs defaultValue={bootstrap.isAdmin ? 'fields' : 'register'}>
-            <TabsList>
-              {bootstrap.isAdmin ? <TabsTrigger value="fields">Fields</TabsTrigger> : null}
-              <TabsTrigger value="register">Register</TabsTrigger>
-            </TabsList>
-            {bootstrap.isAdmin ? (
-              <TabsContent value="fields" className="pt-5">
-                <Field className="mb-5 max-w-sm">
-                  <FieldLabel htmlFor="source-picker">Datasource</FieldLabel>
-                  <NativeSelect
-                    id="source-picker"
-                    value={selected ?? ''}
-                    onChange={(event) => setSelected(event.target.value)}
-                  >
-                    {bootstrap.dataSources.map((source) => (
-                      <NativeSelectOption key={source.id} value={source.id}>
-                        {source.name}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </Field>
-                {description ? <FieldTable source={description} refresh={refresh} /> : null}
-              </TabsContent>
-            ) : null}
-            <TabsContent value="register" className="pt-5">
-              <RegisterForm refresh={refresh} />
-            </TabsContent>
-          </Tabs>
-        </div>
-      )}
-    </main>
-  );
-}
-
-function FieldTable({ source, refresh }: { source: Description; refresh: () => Promise<void> }) {
-  const [search, setSearch] = useState('');
-  const needle = search.trim().toLowerCase();
-  const matches = new Set(
-    needle
-      ? source.fields
-          .filter((field) =>
-            [field.columnName, field.label, field.canonicalName, field.description ?? ''].some(
-              (value) => value.toLowerCase().includes(needle),
-            ),
-          )
-          .map((field) => field.id)
-      : source.fields.map((field) => field.id),
-  );
-  return (
-    <div className="flex flex-col gap-4">
-      <Field className="max-w-sm">
-        <FieldLabel htmlFor="field-search">Find a field</FieldLabel>
-        <Input
-          id="field-search"
-          type="search"
-          placeholder="Column, label, canonical name, or description"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
-        <FieldDescription aria-live="polite">
-          {matches.size} of {source.fields.length} fields
-        </FieldDescription>
-      </Field>
-      {/*
-        Every field stays mounted so filtering never throws away an unsaved edit. A row that no
-        longer matches only disappears once it stops holding focus, so saving a field out of its
-        own search result does not drop the caret to the document.
-      */}
-      <ul className="flex flex-col gap-3">
-        {source.fields.map((field) => (
-          <li
-            key={field.id}
-            className={matches.has(field.id) ? undefined : 'not-focus-within:hidden'}
-          >
-            <FieldRow sourceId={source.id} field={field} refresh={refresh} />
-          </li>
-        ))}
-      </ul>
-      {matches.size ? null : (
-        <p className="text-sm text-muted-foreground">No field matches that search.</p>
-      )}
-    </div>
-  );
-}
-function FieldRow({
-  sourceId,
-  field,
-  refresh,
+export function DatasourceRegisterForm({
+  onRegistered,
 }: {
-  sourceId: string;
-  field: FieldRecord;
-  refresh: () => Promise<void>;
+  onRegistered: (dataSource: RegisteredDatasource) => void;
 }) {
-  const [value, setValue] = useState(field);
-  const [error, setError] = useState<string>();
-  const [saving, setSaving] = useState(false);
-  async function save() {
-    if (saving) return;
-    setSaving(true);
-    setError(undefined);
-    try {
-      await callApi({
-        action: 'updateFieldMetadata',
-        dataSourceId: sourceId,
-        columnName: field.columnName,
-        patch: {
-          label: value.label,
-          canonicalName: value.canonicalName,
-          role: value.role,
-          semanticType: value.semanticType,
-          description: value.description,
-          hidden: value.hidden,
-          castTo: value.castTo,
-        },
-      });
-      await refresh();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setSaving(false);
-    }
-  }
-  return (
-    /*
-      One card per field. The inputs stack on a phone and only fan out into columns from lg up,
-      so editing never depends on scrolling a very wide row sideways.
-    */
-    <div className="rounded-lg bg-muted/60 p-3">
-      <p className="font-mono text-xs break-all text-muted-foreground">{field.columnName}</p>
-      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(8rem,1fr)_minmax(8rem,1fr)_9rem_9rem_minmax(10rem,2fr)_auto] lg:items-end">
-        <Field>
-          <FieldLabel htmlFor={`${field.id}-label`}>Label</FieldLabel>
-          <Input
-            id={`${field.id}-label`}
-            value={value.label}
-            onChange={(event) => setValue({ ...value, label: event.target.value })}
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={`${field.id}-canonical`}>Canonical name</FieldLabel>
-          <Input
-            id={`${field.id}-canonical`}
-            value={value.canonicalName}
-            onChange={(event) => setValue({ ...value, canonicalName: event.target.value })}
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={`${field.id}-role`}>Role</FieldLabel>
-          <NativeSelect
-            id={`${field.id}-role`}
-            value={value.role}
-            onChange={(event) =>
-              setValue({ ...value, role: event.target.value as FieldRecord['role'] })
-            }
-          >
-            {['dimension', 'metric', 'date', 'id'].map((item) => (
-              <NativeSelectOption key={item} value={item}>
-                {item}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={`${field.id}-type`}>Type</FieldLabel>
-          <NativeSelect
-            id={`${field.id}-type`}
-            value={value.semanticType}
-            onChange={(event) =>
-              setValue({
-                ...value,
-                semanticType: event.target.value as FieldRecord['semanticType'],
-              })
-            }
-          >
-            {['currency', 'count', 'ratio', 'text', 'date', 'id'].map((item) => (
-              <NativeSelectOption key={item} value={item}>
-                {item}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={`${field.id}-description`}>Description</FieldLabel>
-          <Input
-            id={`${field.id}-description`}
-            value={value.description ?? ''}
-            onChange={(event) => setValue({ ...value, description: event.target.value })}
-          />
-        </Field>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={saving}
-          // Stay focusable while the save runs, so the keyboard caret is not dropped to the
-          // document and the row keeps the focus that holds it in a narrowed search.
-          focusableWhenDisabled
-          className="aria-disabled:pointer-events-none aria-disabled:opacity-50"
-          aria-label={`Save ${field.columnName}`}
-          onClick={save}
-        >
-          {saving ? 'Saving…' : 'Save'}
-        </Button>
-      </div>
-      {error ? (
-        <p role="alert" className="mt-2 text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-function RegisterForm({ refresh }: { refresh: () => Promise<void> }) {
   const [useExistingData, setUseExistingData] = useState(false);
   const [objects, setObjects] = useState<Array<{ key: string }>>([]);
   const [objectsCursor, setObjectsCursor] = useState<string>();
@@ -387,13 +88,12 @@ function RegisterForm({ refresh }: { refresh: () => Promise<void> }) {
     if (useExistingData) {
       setPhase('registering');
       try {
-        await callApi({
+        const registered = await callApi<RegisteredDatasource>({
           action: 'registerDatasource',
           name,
           location: { kind, key, format: inferredExistingFormat ?? format },
         });
-        setMessage(`${name} registered.`);
-        await refresh();
+        onRegistered(registered);
       } catch (caught) {
         setFormError(caught instanceof Error ? caught.message : String(caught));
       } finally {
@@ -454,7 +154,7 @@ function RegisterForm({ refresh }: { refresh: () => Promise<void> }) {
     }
 
     try {
-      await callApi({
+      const registered = await callApi<RegisteredDatasource>({
         action: 'registerDatasource',
         name,
         location: { kind: 'object', key: prepared.key, format: uploadFormat },
@@ -466,7 +166,6 @@ function RegisterForm({ refresh }: { refresh: () => Promise<void> }) {
         uploadFormat,
         Date.now() - uploadStartedAt.current,
       );
-      setMessage(`${name} uploaded and registered.`);
       setFile(undefined);
       if (fileInput.current) fileInput.current.value = '';
       setUploadedKey(undefined);
@@ -474,7 +173,7 @@ function RegisterForm({ refresh }: { refresh: () => Promise<void> }) {
       setRegistrationFailure(undefined);
       setProgress(0);
       setPhase('idle');
-      await refresh();
+      onRegistered(registered);
     } catch (caught) {
       setPhase('idle');
       const inspectionFailed =

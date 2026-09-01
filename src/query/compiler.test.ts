@@ -23,7 +23,7 @@ const fields: FieldRecord[] = [
     columnName: 'DateStart',
     canonicalName: 'date',
     label: 'Date',
-    role: 'date',
+    role: 'dimension',
     semanticType: 'date',
     description: null,
     hidden: false,

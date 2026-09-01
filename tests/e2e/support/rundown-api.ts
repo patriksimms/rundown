@@ -98,7 +98,7 @@ const fields = [
     id: 'f_date',
     label: 'Date start',
     canonicalName: 'date_start',
-    role: 'date',
+    role: 'dimension',
     semanticType: 'date',
     columnName: 'DateStart',
   },
@@ -122,9 +122,12 @@ const fields = [
   },
 ];
 
+const location = { kind: 'object', key: 'ws/demo/report.csv', format: 'csv' } as const;
+
 const description = () => ({
   id: dataSourceId,
   name: 'Reporting example',
+  location,
   fields: fields.map((field) => ({ ...field })),
   calculatedFields: [],
   libraryMetrics: [],
@@ -171,6 +174,16 @@ export async function mockRundownApi(page: Page, options: MockOptions = {}) {
           dataSources: [{ id: dataSourceId, name: state.source.name }],
           sharing: { links: [], grants: [] },
         });
+      case 'listDataSources':
+        return ok(route, [
+          {
+            id: dataSourceId,
+            name: state.source.name,
+            location,
+            fieldCount: state.source.fields.length,
+            updatedAt: '2026-08-01T00:00:00.000Z',
+          },
+        ]);
       case 'describeDatasource':
         return ok(route, state.source);
       case 'updateFieldMetadata':
@@ -243,8 +256,20 @@ export async function mockRundownApi(page: Page, options: MockOptions = {}) {
         return ok(route, []);
       case 'listR2Objects':
         return ok(route, { objects: [] });
+      // A blanket success would let a test pass against an action the mock never
+      // implemented. Failing loudly points at the missing case instead.
       default:
-        return ok(route, {});
+        return route.fulfill({
+          status: 501,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            ok: false,
+            error: {
+              code: 'mock_action_not_implemented',
+              message: `The Rundown API mock does not implement ${request.action}.`,
+            },
+          }),
+        });
     }
   });
 

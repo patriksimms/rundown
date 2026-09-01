@@ -14,11 +14,24 @@ import {
 } from '#/components/ui/sheet';
 import { WorkspaceGate } from '#/components/workspace-gate';
 
+// Dashboards live at the root, so only an exact match may mark it active. The
+// others stay active on their detail routes, such as /datasources/:datasourceId.
 const navigation = [
-  { to: '/', label: 'Dashboards' },
-  { to: '/datasources', label: 'Datasources' },
-  { to: '/metrics', label: 'Metrics' },
+  { to: '/', label: 'Dashboards', exact: true },
+  { to: '/datasources', label: 'Datasources', exact: false },
+  { to: '/metrics', label: 'Metrics', exact: false },
 ] as const;
+
+// Active and inactive styling are kept apart so the two never both apply and
+// leave the winning border colour to stylesheet order.
+const barLink = 'flex h-full items-center border-b-2 transition-colors hover:text-foreground';
+const barLinkActive = { className: 'border-foreground text-foreground' };
+const barLinkInactive = { className: 'border-transparent text-muted-foreground' };
+
+const sheetLink =
+  'flex min-h-11 items-center rounded-lg px-2 text-sm hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none';
+const sheetLinkActive = { className: 'bg-muted font-medium text-foreground' };
+const sheetLinkInactive = { className: 'text-muted-foreground' };
 
 export function AppShell({
   children,
@@ -38,12 +51,18 @@ export function AppShell({
             Rundown
           </Link>
           {/* Links collapse into the sheet below sm so the bar still fits a 320 px screen. */}
-          <nav aria-label="Main" className="hidden flex-1 items-center gap-4 text-sm sm:flex">
+          <nav
+            aria-label="Main"
+            className="hidden h-full flex-1 items-center gap-4 text-sm sm:flex"
+          >
             <Show when="signed-in">
               {navigation.map((item) => (
                 <Link
                   key={item.to}
-                  className="text-muted-foreground hover:text-foreground"
+                  className={barLink}
+                  activeProps={barLinkActive}
+                  inactiveProps={barLinkInactive}
+                  activeOptions={{ exact: item.exact }}
                   to={item.to}
                 >
                   {item.label}
@@ -91,7 +110,10 @@ function MobileNavigation() {
           {navigation.map((item) => (
             <li key={item.to}>
               <Link
-                className="flex min-h-11 items-center rounded-lg px-2 text-sm hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                className={sheetLink}
+                activeProps={sheetLinkActive}
+                inactiveProps={sheetLinkInactive}
+                activeOptions={{ exact: item.exact }}
                 to={item.to}
                 onClick={() => setOpen(false)}
               >
