@@ -111,9 +111,11 @@ Production branch: main
 Build command: bun run check && bun run build
 Deploy command: bun run deploy:built
 Non-production deploy command: bun run deploy:dry-run
+Non-production branch builds: disabled
 ```
 
-Set the `BUN_VERSION` build variable to `1.3.10`. Enable non-production branch builds to validate pull requests without uploading a Worker version.
+Set the `BUN_VERSION` build variable to `1.3.10`. GitHub Actions validates pull requests, including
+the Wrangler deployment package, so Cloudflare does not need to build non-production branches.
 
 The named preview environment remains available for deliberate preview deployments with
 `bun run deploy` or `bun run deploy:preview`, but is not used by pull-request checks. Production
@@ -121,9 +123,9 @@ deployments normally come from pushes to `main`.
 
 ### GitHub Actions
 
-The `Check` workflow runs three jobs: lint, types, and unit tests; Worker integration tests; and
-browser tests. The browser job needs a Clerk development instance and fails with a list of what is
-missing until it is configured:
+The `Check` workflow runs three jobs: lint, types, unit tests, and a Wrangler deployment dry run;
+Worker integration tests; and browser tests. The browser job needs a Clerk development instance and
+fails with a list of what is missing until it is configured:
 
 | Name                         | Kind                | Purpose                           |
 | ---------------------------- | ------------------- | --------------------------------- |
