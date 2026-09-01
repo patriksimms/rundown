@@ -4,13 +4,13 @@ import { mockRundownApi } from './support/rundown-api';
 test.use({ viewport: { width: 1280, height: 900 }, isMobile: false, hasTouch: false });
 
 /** Walks the tab order to `target`, proving the control is reachable without a pointer. */
-async function tabTo(page: Page, target: Locator, limit = 80) {
+async function tabTo(page: Page, target: Locator, key: 'Tab' | 'Shift+Tab' = 'Tab', limit = 80) {
   await expect(target).toBeAttached();
   for (let step = 0; step < limit; step += 1) {
     if (await target.evaluate((element) => element === document.activeElement)) return;
-    await page.keyboard.press('Tab');
+    await page.keyboard.press(key);
   }
-  throw new Error(`Could not reach ${await target.getAttribute('aria-label')} with Tab`);
+  throw new Error(`Could not reach ${await target.getAttribute('aria-label')} with ${key}`);
 }
 
 test('a keyboard-only editor selects, edits, moves, and removes a widget', async ({ page }) => {
@@ -43,9 +43,9 @@ test('a keyboard-only editor selects, edits, moves, and removes a widget', async
     .poll(() => state.dashboard.widgets.find((widget) => widget.id === 'w_spend')?.layout.x)
     .toBe(6);
 
-  // Removing asks first, and Escape backs out with focus restored
-  const remove = settings.getByRole('button', { name: 'Remove Spend to date' });
-  await tabTo(page, remove);
+  // Removing happens on the widget card now; it asks first, and Escape backs out with focus restored
+  const remove = page.getByRole('button', { name: 'Remove Spend to date' });
+  await tabTo(page, remove, 'Shift+Tab');
   await page.keyboard.press('Enter');
   const confirmation = page.getByRole('dialog');
   await expect(confirmation.getByText('Remove Spend to date?')).toBeVisible();
@@ -75,13 +75,11 @@ test('a keyboard-only editor adds a widget from the catalog', async ({ page }) =
   await expect
     .poll(() => state.dashboard.widgets.filter((widget) => widget.id.startsWith('w_added')).length)
     .toBe(1);
-  await expect(
-    page.getByRole('complementary').getByRole('button', { name: /^Remove / }),
-  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Remove New scorecard' })).toBeVisible();
 });
 
-// The keyboard "Edit" button shares the widget chrome with the pointer drag handle, so the
-// pointer path is worth pinning down alongside it.
+// The drag handle doubles as the keyboard "Edit" button, so the pointer path is worth
+// pinning down alongside it.
 test('the pointer drag handle still moves a widget', async ({ page }) => {
   const state = await mockRundownApi(page, { role: 'editor' });
   await page.goto('/dashboards/dash_demo');
@@ -100,4 +98,11 @@ test('the pointer drag handle still moves a widget', async ({ page }) => {
   await expect
     .poll(() => state.dashboard.widgets.find((widget) => widget.id === 'w_spend')?.layout.x)
     .toBeGreaterThan(0);
+
+  // A plain click on the handle selects the widget instead of starting a drag.
+  await card.hover();
+  await handle.click();
+  await expect(
+    page.getByRole('complementary').getByRole('heading', { name: 'Media spend' }),
+  ).toBeVisible();
 });

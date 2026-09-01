@@ -37,9 +37,10 @@ function DashboardContent() {
       setError(undefined);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
+      throw caught;
     }
   }, [dashboardId]);
-  useEffect(() => void refresh(), [refresh]);
+  useEffect(() => void refresh().catch(() => undefined), [refresh]);
   const canEdit = payload?.role === 'admin' || payload?.role === 'editor';
   useWebMcpTools({
     dashboardId,
