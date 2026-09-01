@@ -29,6 +29,9 @@ jobs:
             exit 1
           fi
       - run: bun run check
+      - uses: docker/setup-buildx-action@v3
+      - name: Validate the deployment package
+        run: bun run deploy:dry-run
 
   integration:
     name: Worker integration tests
