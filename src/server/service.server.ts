@@ -448,7 +448,7 @@ async function queryWidget(
   const widget = widgetById(access.document, widgetId);
   const defaults = defaultControlState(access.document);
   const controlState = validateControlState(access.document, mergeControlState(defaults, state));
-  if (!('dataSourceId' in widget.definition)) return { rows: [], controlState };
+  if (!compilesToQuery(widget.definition)) return { rows: [], controlState };
   const dataSource = await loadDataSource(
     widget.definition.dataSourceId,
     access.document.workspaceId,
@@ -560,7 +560,7 @@ async function queryWidget(
 async function explainWidget(dashboardId: string, widgetId: string, shareToken?: string) {
   const access = await authorizeDashboard(dashboardId, 'viewer', shareToken);
   const widget = widgetById(access.document, widgetId);
-  if (!('dataSourceId' in widget.definition)) return { sql: null, definitions: [] };
+  if (!compilesToQuery(widget.definition)) return { sql: null, definitions: [] };
   const dataSource = await loadDataSource(
     widget.definition.dataSourceId,
     access.document.workspaceId,
@@ -1361,6 +1361,7 @@ async function validateDefinition(dashboard: DashboardDocument, definition: Widg
       'unknown_field',
       'The widget references a field that does not belong to its datasource.',
     );
+  if (!compilesToQuery(definition)) return;
   await datasourceOperation(() =>
     connectorFor(dataSource).validateQuery(dataSource, {
       kind: 'widget',
@@ -1379,7 +1380,7 @@ async function runDefinition(
 ) {
   const defaults = defaultControlState(dashboard);
   const controlState = validateControlState(dashboard, mergeControlState(defaults, state));
-  if (!('dataSourceId' in definition)) return { rows: [], controlState };
+  if (!compilesToQuery(definition)) return { rows: [], controlState };
   const dataSource = await loadDataSource(definition.dataSourceId, dashboard.workspaceId);
   const metadata = await loadQueryMetadata(dataSource.id, dashboard.workspaceId);
   const columns = queryResultColumns(definition, metadata);
@@ -1439,7 +1440,7 @@ async function runDefinition(
 }
 
 async function compiledSql(dashboard: DashboardDocument, widget: DashboardWidget) {
-  if (!('dataSourceId' in widget.definition)) return null;
+  if (!compilesToQuery(widget.definition)) return null;
   const dataSource = await loadDataSource(widget.definition.dataSourceId, dashboard.workspaceId);
   const metadata = await loadQueryMetadata(dataSource.id, dashboard.workspaceId);
   return datasourceOperation(
@@ -1533,6 +1534,14 @@ async function resolveControls(
 
 function compatibleSemanticTypes(left: string, right: string) {
   return left === right || (left === 'text' && right === 'text');
+}
+
+/**
+ * Text, date controls, and filter controls have no query of their own. Filter controls do name a
+ * datasource, so a datasource check alone is not enough to keep them out of the compiler.
+ */
+function compilesToQuery(definition: WidgetDefinition) {
+  return 'dataSourceId' in definition && 'dateRangeFieldId' in definition;
 }
 
 function definitionFieldIds(definition: WidgetDefinition) {
@@ -1696,6 +1705,12 @@ function throwDatasourceError(error: unknown): never {
     unsupported_datasource_connector: 400,
     datasource_connector_failed: 502,
   }[error.code];
+  if (error.code === 'datasource_connector_failed') {
+    // A connector that failed to answer reports whatever the transport said, which can name
+    // container addresses and object keys. That belongs in the log, not in the response.
+    console.warn('rundown.datasource_connector_failed', { error: error.message });
+    throw new ApiError(status, error.code, 'The query service is unavailable. Try again.');
+  }
   throw new ApiError(status, error.code, error.message);
 }
 
