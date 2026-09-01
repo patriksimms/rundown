@@ -9,7 +9,6 @@ Container with native DuckDB. The Worker authorizes exact Parquet objects, compi
 to SQL, and gives DuckDB short-lived internal URLs for those objects. The container has no internet
 access or R2 credentials.
 
-
 ## Local development
 
 ```sh
