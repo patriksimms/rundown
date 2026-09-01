@@ -9,6 +9,7 @@ import { queryEnginePlugin } from './dev/query-engine-plugin.ts';
 // Browser tests run the dev server on their own port; the dev data service must follow it.
 const devPort = resolveDevPort(process.env.RUNDOWN_PORT);
 const devDataBaseUrl = `http://localhost:${devPort}/__dev-data`;
+const enableDevContainers = process.env.RUNDOWN_ENABLE_CONTAINERS === '1';
 
 function resolveDevPort(value: string | undefined) {
   if (!value) return 3000;
@@ -40,16 +41,24 @@ export default defineConfig(({ command }) => ({
         dev: {
           ...config.dev,
           // Cloudflare images are amd64. DuckDB's native binding crashes when Docker emulates
-          // that architecture on Apple Silicon, so local queries run in Vite instead.
-          enable_containers: command !== 'serve',
+          // that architecture on Apple Silicon, so local queries run in Vite instead. Linux CI
+          // opts in to the real container and local R2 bindings.
+          enable_containers: command !== 'serve' || enableDevContainers,
         },
         ...(command === 'serve'
           ? {
               vars: {
                 APP_ENV: 'development',
                 QUERY_CACHE_NAME: 'rundown-query-cache-development',
-                DATA_SOURCE_BASE_URL: devDataBaseUrl,
-                QUERY_DATA_SOURCE_BASE_URL: devDataBaseUrl,
+                ...(enableDevContainers
+                  ? {
+                      DATA_SOURCE_BASE_URL: 'r2://rundown-data',
+                      QUERY_DATA_SOURCE_BASE_URL: 'r2://rundown-data',
+                    }
+                  : {
+                      DATA_SOURCE_BASE_URL: devDataBaseUrl,
+                      QUERY_DATA_SOURCE_BASE_URL: devDataBaseUrl,
+                    }),
                 INTERNAL_R2_SIGNING_SECRET:
                   process.env.INTERNAL_R2_SIGNING_SECRET ?? 'rundown-local-internal-r2-only',
                 UPLOAD_SIGNING_SECRET:

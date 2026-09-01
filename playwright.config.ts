@@ -5,6 +5,7 @@ const baseURL = `http://localhost:${port}`;
 // Attaching to whatever already listens on the port has produced runs against a stale build,
 // so reuse is opt-in even locally.
 const reuseExistingServer = process.env.RUNDOWN_E2E_REUSE_SERVER === '1';
+const enableQueryContainers = Boolean(process.env.CI);
 
 function resolvePort(value: string | undefined) {
   if (!value) return 3140;
@@ -47,7 +48,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'RUNDOWN_DISABLE_CONTAINERS=1 bun run dev',
+    command: `${enableQueryContainers ? 'RUNDOWN_ENABLE_CONTAINERS=1 ' : ''}bun run dev`,
     url: `${baseURL}/health`,
     reuseExistingServer,
     timeout: 120_000,

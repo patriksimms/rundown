@@ -48,8 +48,10 @@ export async function executeQueryEngineRequest(input: unknown) {
       const destination = join(directory, 'datasource.parquet');
       try {
         await runWithTimeout(connection, async () => {
+          const source = `read_csv_auto(${sqlString(request.sourceUrl)}, header = true)`;
+          const projection = await csvIngestionProjection(connection, source);
           await connection.run(
-            `COPY (SELECT * FROM read_csv_auto(${sqlString(request.sourceUrl)}, header = true)) TO ${sqlString(destination)} (FORMAT PARQUET, COMPRESSION ZSTD)`,
+            `COPY (SELECT ${projection} FROM ${source}) TO ${sqlString(destination)} (FORMAT PARQUET, COMPRESSION ZSTD)`,
           );
         });
         const file = await openAsBlob(destination);
@@ -107,4 +109,41 @@ async function runWithTimeout<T>(
 
 function sqlString(value: string) {
   return `'${value.replaceAll("'", "''")}'`;
+}
+
+const javascriptDatePattern =
+  '^[A-Za-z]{3} [A-Za-z]{3} [0-9]{2} [0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2} GMT[+-][0-9]{4}( \\(.*\\))?$';
+
+/** Converts columns containing only JavaScript Date.toString() values to physical Parquet dates. */
+async function csvIngestionProjection(
+  connection: {
+    runAndReadAll(sql: string): Promise<{ getRowObjectsJson(): Record<string, unknown>[] }>;
+  },
+  source: string,
+) {
+  const description = await connection.runAndReadAll(`DESCRIBE SELECT * FROM ${source}`);
+  const varcharColumns = description
+    .getRowObjectsJson()
+    .filter((column) => column.column_type === 'VARCHAR')
+    .map((column) => String(column.column_name));
+  if (varcharColumns.length === 0) return '*';
+
+  const checks = varcharColumns.map((column, index) => {
+    const identifier = quoteIdentifier(column);
+    return `COALESCE(BOOL_AND(${identifier} IS NULL OR TRIM(${identifier}) = '' OR (REGEXP_FULL_MATCH(${identifier}, ${sqlString(javascriptDatePattern)}) AND TRY_STRPTIME(SUBSTR(${identifier}, 1, 15), '%a %b %d %Y') IS NOT NULL)), FALSE) AND COUNT_IF(${identifier} IS NOT NULL AND TRIM(${identifier}) <> '') > 0 AS ${quoteIdentifier(`date_${index}`)}`;
+  });
+  const result = await connection.runAndReadAll(`SELECT ${checks.join(', ')} FROM ${source}`);
+  const detected = result.getRowObjectsJson()[0] ?? {};
+  const replacements = varcharColumns.flatMap((column, index) =>
+    detected[`date_${index}`] === true
+      ? [
+          `CAST(TRY_STRPTIME(SUBSTR(${quoteIdentifier(column)}, 1, 15), '%a %b %d %Y') AS DATE) AS ${quoteIdentifier(column)}`,
+        ]
+      : [],
+  );
+  return replacements.length === 0 ? '*' : `* REPLACE (${replacements.join(', ')})`;
+}
+
+function quoteIdentifier(value: string) {
+  return `"${value.replaceAll('"', '""')}"`;
 }

@@ -68,6 +68,10 @@ grants, share links, control validation, and query caching all run for real.
 because attaching to an unrelated process on the port produced misleading runs; the suite also
 refuses to start when the port does not answer as Rundown.
 
+Local browser tests execute the container's DuckDB query handler inside Vite because Cloudflare's
+amd64 development container is not reliable under Apple Silicon emulation. Linux CI starts the
+real query container and uses local R2 for uploaded test data.
+
 The `authenticated` Playwright project signs a real Clerk user in with
 [Clerk testing tokens](https://clerk.com/docs/testing/overview). It is skipped unless the
 environment provides `VITE_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `E2E_CLERK_USER_USERNAME`,

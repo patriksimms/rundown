@@ -133,7 +133,9 @@ and semantic type like any column.
 
 Datasource version is the R2 object etag (or the concatenated etags of the prefix listing). It is part of every cache key.
 
-Known problems in `reporting_example.csv`: `Date` is a JavaScript `toString()` dump and will not parse, use `DateStart`. `AccountId`, `CampaignId`, `AdSetId`, `AdId` exceed 2^53 and must be `VARCHAR`.
+Known problems in `reporting_example.csv`: `Date` is a JavaScript `Date.toString()` dump. Managed
+CSV ingestion recognizes this format and stores its local calendar day as a physical Parquet `DATE`.
+`AccountId`, `CampaignId`, `AdSetId`, `AdId` exceed 2^53 and must be `VARCHAR`.
 
 ## 7. Formulas and validation
 

@@ -45,7 +45,14 @@ describe('native query engine', () => {
   });
 
   it('converts HTTP CSV input to queryable Parquet and uploads it with PUT', async () => {
-    const csv = Buffer.from('day,spend\n1,10\n2,20\n');
+    const csv = Buffer.from(
+      [
+        'Date,label,spend',
+        'Mon Feb 16 2026 00:00:00 GMT+0100 (Mitteleuropäische Normalzeit),north,10',
+        'Tue Feb 17 2026 00:00:00 GMT+0100 (Mitteleuropäische Normalzeit),south,20',
+        '',
+      ].join('\n'),
+    );
     let uploaded: Buffer | undefined;
     const server = createServer(async (request, response) => {
       if (
@@ -90,10 +97,22 @@ describe('native query engine', () => {
       await expect(
         executeQueryEngineRequest({
           operation: 'query',
-          sql: `SELECT count(*) AS rows, sum(spend) AS spend FROM read_parquet('${path.replaceAll("'", "''")}')`,
+          sql: `SELECT count(*) AS rows, sum(spend) AS spend, min("Date") AS first_date FROM read_parquet('${path.replaceAll("'", "''")}') WHERE "Date" BETWEEN DATE '2026-02-16' AND DATE '2026-02-17'`,
           parameters: [],
         }),
-      ).resolves.toEqual([{ rows: '2', spend: '30' }]);
+      ).resolves.toEqual([{ rows: '2', spend: '30', first_date: '2026-02-16' }]);
+      await expect(
+        executeQueryEngineRequest({
+          operation: 'describeSource',
+          sourceSql: `read_parquet('${path.replaceAll("'", "''")}')`,
+        }),
+      ).resolves.toMatchObject({
+        description: [
+          { column_name: 'Date', column_type: 'DATE' },
+          { column_name: 'label', column_type: 'VARCHAR' },
+          { column_name: 'spend', column_type: 'BIGINT' },
+        ],
+      });
     } finally {
       await new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),

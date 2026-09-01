@@ -10,6 +10,7 @@ export interface SeededField {
   id: string;
   columnName: string;
   role: string;
+  semanticType: string;
 }
 
 export interface SeededDataSource {
@@ -19,11 +20,11 @@ export interface SeededDataSource {
 }
 
 const reportCsv = [
-  'region,day,revenue',
-  'north,2026-01-05,120',
-  'south,2026-01-06,80',
-  'north,2026-01-07,200',
-  'south,2026-01-08,45',
+  'region,Date,revenue,impressions',
+  'north,Mon Jan 05 2026 00:00:00 GMT+0100 (Central European Standard Time),120,12340',
+  'south,Tue Jan 06 2026 00:00:00 GMT+0100 (Central European Standard Time),80,9870',
+  'north,Wed Jan 07 2026 00:00:00 GMT+0100 (Central European Standard Time),200,15210',
+  'south,Thu Jan 08 2026 00:00:00 GMT+0100 (Central European Standard Time),45,7080',
   '',
 ].join('\n');
 
@@ -83,7 +84,7 @@ export async function seedDashboard(page: Page, name: string, source: SeededData
       type: 'scorecard',
       title: 'Revenue',
       dataSourceId: source.id,
-      dateRangeFieldId: fieldId(source, 'day'),
+      dateRangeFieldId: fieldId(source, 'Date'),
       metric: {
         source: { kind: 'field', fieldId: fieldId(source, 'revenue'), aggregation: 'sum' },
         dataType: 'number',
@@ -102,6 +103,60 @@ export async function seedDashboard(page: Page, name: string, source: SeededData
       userDefinedName: 'Region',
       allowMultiple: true,
     },
+    width: 4,
+    height: 2,
+  });
+  return dashboard;
+}
+
+/** Creates a date-controlled impressions scorecard and time series over the uploaded CSV. */
+export async function seedImpressionsDashboard(page: Page, name: string, source: SeededDataSource) {
+  const dashboard = await callApi<{ id: string }>(page, {
+    action: 'createDashboard',
+    name,
+    dataSourceIds: [source.id],
+    timezone: 'Europe/Berlin',
+    defaultDateRange: { startDate: { fixed: '2026-01-01' }, endDate: { fixed: '2026-01-31' } },
+  });
+  const metric = {
+    source: {
+      kind: 'field' as const,
+      fieldId: fieldId(source, 'impressions'),
+      aggregation: 'sum' as const,
+    },
+    dataType: 'number' as const,
+  };
+  await callApi(page, {
+    action: 'addWidget',
+    dashboardId: dashboard.id,
+    definition: {
+      type: 'scorecard',
+      title: 'Impressions',
+      dataSourceId: source.id,
+      dateRangeFieldId: fieldId(source, 'Date'),
+      metric,
+    },
+    width: 4,
+    height: 3,
+  });
+  await callApi(page, {
+    action: 'addWidget',
+    dashboardId: dashboard.id,
+    definition: {
+      type: 'line',
+      title: 'Impressions over time',
+      dataSourceId: source.id,
+      dateRangeFieldId: fieldId(source, 'Date'),
+      dimension: { fieldId: fieldId(source, 'Date') },
+      metrics: [metric],
+    },
+    width: 8,
+    height: 5,
+  });
+  await callApi(page, {
+    action: 'addWidget',
+    dashboardId: dashboard.id,
+    definition: { type: 'dateControl' },
     width: 4,
     height: 2,
   });

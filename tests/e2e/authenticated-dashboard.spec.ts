@@ -1,13 +1,15 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { clerkCredentials, missingClerkCredentials } from './support/clerk-credentials';
 import { signInWithClerk } from './support/clerk-session';
-import { callApi, seedDashboard, seedDataSource } from './support/seed';
+import { callApi, seedDashboard, seedDataSource, seedImpressionsDashboard } from './support/seed';
 
 const credentials = clerkCredentials();
 
 // The seeded CSV totals 445 across both regions and 320 in the north.
 const TOTAL_REVENUE = '445';
 const NORTH_REVENUE = '320';
+const TOTAL_IMPRESSIONS = '44,500';
+const NARROWED_IMPRESSIONS = '25,080';
 
 test.describe('signed-in dashboard flow', () => {
   test.skip(!credentials, missingClerkCredentials);
@@ -93,13 +95,40 @@ test.describe('signed-in dashboard flow', () => {
     const bootstrap = await callApi<{ workspace: { id: string } }>(page, { action: 'bootstrap' });
     expect(bootstrap.workspace.id).toMatch(/^ws_/);
   });
+
+  test('an impressions dashboard shows the total calculated from its uploaded CSV', async ({
+    page,
+  }) => {
+    test.slow();
+    await signIn(page);
+
+    const suffix = Date.now().toString(36);
+    const source = await seedDataSource(page, `e2e-impressions-${suffix}`);
+    expect(source.fields.find((field) => field.columnName === 'Date')).toMatchObject({
+      role: 'dimension',
+      semanticType: 'date',
+    });
+    const dashboard = await seedImpressionsDashboard(page, `E2E impressions ${suffix}`, source);
+
+    await page.goto(`/dashboards/${dashboard.id}`);
+    const scorecard = widget(page, 'Impressions');
+    const line = widget(page, 'Impressions over time');
+    await expect(scorecard.getByText(TOTAL_IMPRESSIONS, { exact: true })).toBeVisible();
+    await expect(line.locator('.recharts-line-curve')).toBeVisible();
+    await expect(line.getByText('No rows for this date range.')).toHaveCount(0);
+
+    await page.getByLabel('Start').fill('2026-01-06');
+    await page.getByLabel('End').fill('2026-01-07');
+    await expect(scorecard.getByText(NARROWED_IMPRESSIONS, { exact: true })).toBeVisible();
+    await expect(line.locator('.recharts-line-curve')).toBeVisible();
+  });
 });
 
 /** The builder grid item holding the widget with this title. */
 function widget(page: Page, title: string): Locator {
   return page
     .locator('.react-grid-item')
-    .filter({ has: page.getByRole('button', { name: `Edit ${title}` }) });
+    .filter({ has: page.getByRole('button', { name: `Edit ${title}`, exact: true }) });
 }
 
 /** Signs the Clerk test user in and makes sure an organization is active. */
