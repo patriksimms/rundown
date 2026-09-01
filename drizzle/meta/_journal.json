@@ -50,6 +50,13 @@
       "when": 1788203390217,
       "tag": "0006_narrow-field-roles",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1788265445347,
+      "tag": "0007_early_bastion",
+      "breakpoints": true
     }
   ]
 }

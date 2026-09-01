@@ -6,7 +6,7 @@ import type {
   FieldRecord,
   LibraryMetricRecord,
 } from './types';
-import { rewriteSqlIdentifiers } from './sql-identifiers';
+import { compileFormula, formulaTypeForSemanticType, type FormulaField } from './formula';
 
 export interface QueryContext {
   dashboard: DashboardDocument;
@@ -17,7 +17,7 @@ export interface QueryContext {
   libraryMetrics: LibraryMetricRecord[];
   controlState: ControlState;
   bucketName: string;
-  sourceTableName?: string;
+  sourceSql?: string;
   resolvedControls?: Array<{ fieldId: string; values: unknown[] }>;
   offset?: number;
 }
@@ -26,11 +26,6 @@ export interface CompiledQuery {
   sql: string;
   parameters: unknown[];
   definitions: Array<{ name: string; expression: string; description: string | null }>;
-}
-
-export function assertSingleExpression(expression: string) {
-  if (expression.includes(';') || /--|\/\*/u.test(expression) || hasTopLevelAlias(expression))
-    throw new Error('Expressions must contain one SQL expression without comments.');
 }
 
 export function compileWidgetQuery(context: QueryContext): CompiledQuery {
@@ -75,8 +70,8 @@ export function compileWidgetQuery(context: QueryContext): CompiledQuery {
     parameters.push(...control.values);
     conditions.push(`${field} IN (${control.values.map(() => '?').join(', ')})`);
   }
-  const source = context.sourceTableName
-    ? quoteIdentifier(context.sourceTableName)
+  const source = context.sourceSql
+    ? context.sourceSql
     : compileSourceSql(context.dataSource, context.bucketName);
   const groupBy = dimensions.length
     ? ` GROUP BY ${dimensions.map((_, index) => index + 1).join(', ')}`
@@ -94,17 +89,6 @@ export function compileWidgetQuery(context: QueryContext): CompiledQuery {
     parameters,
     definitions,
   };
-}
-
-export function compileExpressionProbe(
-  expression: string,
-  context: Omit<QueryContext, 'definition' | 'controlState' | 'dashboard'>,
-) {
-  assertSingleExpression(expression);
-  const source = context.sourceTableName
-    ? quoteIdentifier(context.sourceTableName)
-    : compileSourceSql(context.dataSource, context.bucketName);
-  return `EXPLAIN SELECT ${expression} FROM ${source} LIMIT 1`;
 }
 
 function widgetDimensions(definition: WidgetDefinition) {
@@ -152,24 +136,29 @@ function metricExpression(
       : `${aggregation}(${expression})`;
   }
   if (metric.source.kind === 'expression') {
-    assertSingleExpression(metric.source.expression);
+    const compiled = compileFormula(metric.source.expression, {
+      mode: 'aggregate',
+      fields: formulaFields(context),
+    });
     definitions.push({
       name: metric.userDefinedName ?? 'Widget expression',
       expression: metric.source.expression,
       description: null,
     });
-    return metric.source.expression;
+    return compiled.sql;
   }
   const libraryMetricId = metric.source.libraryMetricId;
   const library = context.libraryMetrics.find((item) => item.id === libraryMetricId);
   if (!library) throw new Error(`Unknown library metric ${libraryMetricId}.`);
-  assertSingleExpression(library.expression);
   definitions.push({
     name: library.name,
     expression: library.expression,
     description: library.description,
   });
-  return rewriteCanonicalNames(library.expression, context);
+  return compileFormula(library.expression, {
+    mode: 'aggregate',
+    fields: formulaFields(context),
+  }).sql;
 }
 
 function fieldExpression(fieldId: string, context: QueryContext) {
@@ -180,37 +169,21 @@ function fieldExpression(fieldId: string, context: QueryContext) {
   }
   const calculated = context.calculatedFields.find((item) => item.id === fieldId);
   if (!calculated) throw new Error(`Unknown field ${fieldId}.`);
-  assertSingleExpression(calculated.expression);
-  return `(${calculated.expression})`;
-}
-
-function rewriteCanonicalNames(expression: string, context: QueryContext) {
-  const fieldsByCanonicalName = new Map(
-    [...context.calculatedFields, ...context.fields].map((field) => [
-      field.canonicalName.toLocaleLowerCase('en-US'),
-      field,
-    ]),
-  );
-  return rewriteSqlIdentifiers(expression, (identifier) => {
-    const field = fieldsByCanonicalName.get(identifier.toLocaleLowerCase('en-US'));
-    return field ? fieldExpression(field.id, context) : undefined;
-  });
+  return `(${compileFormula(calculated.expression, { mode: 'row', fields: rawFormulaFields(context.fields) }).sql})`;
 }
 
 export function compileLibraryExpression(
   expression: string,
   context: Pick<QueryContext, 'fields' | 'calculatedFields'>,
 ) {
-  assertSingleExpression(expression);
-  const replacements = new Map(
-    [...context.calculatedFields, ...context.fields].map((field) => [
-      field.canonicalName.toLocaleLowerCase('en-US'),
-      'columnName' in field ? quoteIdentifier(field.columnName) : `(${field.expression})`,
-    ]),
-  );
-  return rewriteSqlIdentifiers(expression, (identifier) =>
-    replacements.get(identifier.toLocaleLowerCase('en-US')),
-  );
+  return compileFormula(expression, {
+    mode: 'aggregate',
+    fields: formulaFields(context),
+  }).sql;
+}
+
+export function validateRowFormula(expression: string, context: Pick<QueryContext, 'fields'>) {
+  return compileFormula(expression, { mode: 'row', fields: rawFormulaFields(context.fields) });
 }
 
 function compileFilter(
@@ -280,7 +253,14 @@ export function compileSourceSqlFromBaseUrl(
       ? `${dataSource.location.key}*.${dataSource.location.format}`
       : dataSource.location.key;
   const keys = objectKeys ?? [key];
-  const uris = keys.map((objectKey) => sqlString(sourceUrl(baseUrl, objectKey)));
+  return compileSourceSqlFromUrls(
+    dataSource,
+    keys.map((objectKey) => sourceUrl(baseUrl, objectKey)),
+  );
+}
+
+export function compileSourceSqlFromUrls(dataSource: DataSourceRecord, urls: string[]) {
+  const uris = urls.map((url) => sqlString(url));
   const source = uris.length === 1 ? uris[0] : `[${uris.join(', ')}]`;
   return dataSource.location.format === 'csv'
     ? `read_csv_auto(${source}, header = true)`
@@ -305,55 +285,27 @@ function safeCast(value: string) {
   return value;
 }
 
-function hasTopLevelAlias(expression: string) {
-  let depth = 0;
-  for (let index = 0; index < expression.length;) {
-    const character = expression[index];
-    if (character === "'" || character === '"') {
-      index = quotedEnd(expression, index, character);
-      continue;
-    }
-    if (character === '$') {
-      const end = dollarQuotedEnd(expression, index);
-      if (end !== undefined) {
-        index = end;
-        continue;
-      }
-    }
-    if (character === '(') depth += 1;
-    else if (character === ')') depth = Math.max(0, depth - 1);
-    else if (depth === 0) {
-      const word = expression.slice(index).match(/^[A-Za-z_][A-Za-z0-9_]*/u)?.[0];
-      if (word) {
-        if (word.toLocaleLowerCase('en-US') === 'as') return true;
-        index += word.length;
-        continue;
-      }
-    }
-    index += 1;
-  }
-  return false;
+function rawFormulaFields(fields: FieldRecord[]): FormulaField[] {
+  return fields.map((field) => ({
+    canonicalName: field.canonicalName,
+    sql: field.castTo
+      ? `CAST(${quoteIdentifier(field.columnName)} AS ${safeCast(field.castTo)})`
+      : quoteIdentifier(field.columnName),
+    type: formulaTypeForSemanticType(field.semanticType),
+  }));
 }
 
-function dollarQuotedEnd(expression: string, start: number) {
-  const tag = expression.slice(start).match(/^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/u)?.[0];
-  if (!tag) return undefined;
-  const closing = expression.indexOf(tag, start + tag.length);
-  return closing === -1 ? expression.length : closing + tag.length;
-}
-
-function quotedEnd(expression: string, start: number, quote: "'" | '"') {
-  let index = start + 1;
-  while (index < expression.length) {
-    if (expression[index] !== quote) {
-      index += 1;
-      continue;
-    }
-    if (expression[index + 1] === quote) {
-      index += 2;
-      continue;
-    }
-    return index + 1;
-  }
-  return expression.length;
+function formulaFields(context: Pick<QueryContext, 'fields' | 'calculatedFields'>): FormulaField[] {
+  const raw = rawFormulaFields(context.fields);
+  const rawNames = new Set(raw.map((field) => field.canonicalName.toLocaleLowerCase('en-US')));
+  return [
+    ...raw,
+    ...context.calculatedFields
+      .filter((field) => !rawNames.has(field.canonicalName.toLocaleLowerCase('en-US')))
+      .map((field) => ({
+        canonicalName: field.canonicalName,
+        sql: `(${compileFormula(field.expression, { mode: 'row', fields: raw }).sql})`,
+        type: formulaTypeForSemanticType(field.semanticType),
+      })),
+  ];
 }

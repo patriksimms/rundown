@@ -90,7 +90,7 @@ function MetricsContent() {
           <div>
             <h1 className="text-3xl font-semibold tracking-tight">Metric library</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Reusable aggregate expressions available to every compatible datasource.
+              Reusable aggregate formulas available to every compatible datasource.
             </p>
           </div>
           {isAdmin ? (
@@ -105,7 +105,7 @@ function MetricsContent() {
                   />
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="metric-expression">Aggregate expression</FieldLabel>
+                  <FieldLabel htmlFor="metric-expression">Aggregate formula</FieldLabel>
                   <Textarea
                     id="metric-expression"
                     value={form.expression}

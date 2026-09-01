@@ -24,8 +24,16 @@ export function queryEnginePlugin(): Plugin {
 
         try {
           const input: unknown = await json(request);
-          const data = await executeQueryEngineRequest(input, process.env);
-          response.end(JSON.stringify({ ok: true, data }));
+          const startedAt = performance.now();
+          const data = await executeQueryEngineRequest(input);
+          const resultBytes = new TextEncoder().encode(JSON.stringify(data)).byteLength;
+          response.end(
+            JSON.stringify({
+              ok: true,
+              data,
+              metrics: { queryDurationMs: performance.now() - startedAt, resultBytes },
+            }),
+          );
         } catch (error) {
           response.statusCode = 400;
           response.end(

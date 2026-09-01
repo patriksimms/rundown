@@ -46,6 +46,8 @@ export default defineConfig(({ command }) => ({
         ...(command === 'serve'
           ? {
               vars: {
+                APP_ENV: 'development',
+                QUERY_CACHE_NAME: 'rundown-query-cache-development',
                 DATA_SOURCE_BASE_URL: devDataBaseUrl,
                 QUERY_DATA_SOURCE_BASE_URL: devDataBaseUrl,
               },

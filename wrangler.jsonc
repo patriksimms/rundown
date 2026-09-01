@@ -6,13 +6,20 @@
   "compatibility_date": "2026-08-29",
   "compatibility_flags": ["nodejs_compat"],
   "vars": {
+    "APP_ENV": "production",
+    "QUERY_CACHE_NAME": "rundown-query-cache",
     "CLOUDFLARE_ACCOUNT_ID": "17c619232f5d84567cd69896e892f326",
     "R2_BUCKET_NAME": "rundown-data",
     "DATA_SOURCE_BASE_URL": "r2://rundown-data",
     "QUERY_DATA_SOURCE_BASE_URL": "r2://rundown-data",
   },
   "secrets": {
-    "required": ["CLERK_SECRET_KEY", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"],
+    "required": [
+      "CLERK_SECRET_KEY",
+      "INTERNAL_R2_SIGNING_SECRET",
+      "UPLOAD_SIGNING_SECRET",
+      "RESET_ADMIN_TOKEN",
+    ],
   },
   "d1_databases": [
     {
@@ -28,6 +35,12 @@
       "binding": "QUERY_CACHE",
       "id": "54b4bb2fee024effa8e3bc5f995aea17",
       "preview_id": "47783b0d496e4257bb1fe168cfbf28f6",
+    },
+  ],
+  "analytics_engine_datasets": [
+    {
+      "binding": "PRODUCT_ANALYTICS",
+      "dataset": "rundown_product",
     },
   ],
   "r2_buckets": [
@@ -83,13 +96,20 @@
       "name": "rundown-preview",
       "routes": [],
       "vars": {
+        "APP_ENV": "preview",
+        "QUERY_CACHE_NAME": "rundown-query-cache-preview",
         "CLOUDFLARE_ACCOUNT_ID": "17c619232f5d84567cd69896e892f326",
         "R2_BUCKET_NAME": "rundown-data-preview",
         "DATA_SOURCE_BASE_URL": "r2://rundown-data-preview",
         "QUERY_DATA_SOURCE_BASE_URL": "r2://rundown-data-preview",
       },
       "secrets": {
-        "required": ["CLERK_SECRET_KEY", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"],
+        "required": [
+          "CLERK_SECRET_KEY",
+          "INTERNAL_R2_SIGNING_SECRET",
+          "UPLOAD_SIGNING_SECRET",
+          "RESET_ADMIN_TOKEN",
+        ],
       },
       "d1_databases": [
         {
@@ -103,6 +123,12 @@
         {
           "binding": "QUERY_CACHE",
           "id": "47783b0d496e4257bb1fe168cfbf28f6",
+        },
+      ],
+      "analytics_engine_datasets": [
+        {
+          "binding": "PRODUCT_ANALYTICS",
+          "dataset": "rundown_product_preview",
         },
       ],
       "r2_buckets": [

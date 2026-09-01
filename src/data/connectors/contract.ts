@@ -27,6 +27,7 @@ export interface WidgetDatasourceQuery {
 export interface ControlOptionsDatasourceQuery {
   kind: 'controlOptions';
   field: FieldRecord | CalculatedFieldRecord;
+  metadata: Pick<DatasourceQueryMetadata, 'fields'>;
   search?: string;
   direction: 'ASC' | 'DESC';
 }
@@ -34,7 +35,11 @@ export interface ControlOptionsDatasourceQuery {
 export type DatasourceQuery = WidgetDatasourceQuery | ControlOptionsDatasourceQuery;
 
 export type DatasourceExpression =
-  | { kind: 'calculatedField'; expression: string }
+  | {
+      kind: 'calculatedField';
+      expression: string;
+      metadata: Pick<DatasourceQueryMetadata, 'fields'>;
+    }
   | {
       kind: 'libraryMetric';
       expression: string;

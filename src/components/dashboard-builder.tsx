@@ -67,7 +67,6 @@ import {
 import { remapWidgetDefinition } from '#/domain/remap';
 import { replacePlainTextDocument, textDocument } from '#/domain/text-content';
 import { withDefaultDateRange, withoutWidgetControlState } from '#/domain/control-state';
-import { canonicalMetricExpression } from '#/domain/library-metric';
 import { createSerialQueue } from '#/domain/serial-queue';
 import { rollbackFailedLayout } from '#/domain/layout';
 import { fieldRoleSchema } from '#/domain/schema';
@@ -2046,17 +2045,13 @@ function MetricFormulaDialog({
           ? { ...definition, metrics: [...definition.metrics, metric] }
           : definition;
     try {
-      await callApi({ action: 'previewWidget', dashboardId, definition: next });
       if (saveLibrary) {
         if (!source) throw new Error('Datasource fields are still loading.');
         await callApi({
           action: 'upsertLibraryMetric',
           dashboardId,
           name,
-          expression: canonicalMetricExpression(expression, [
-            ...source.fields,
-            ...source.calculatedFields,
-          ]),
+          expression,
           semanticType: 'count',
         });
       }
@@ -2075,7 +2070,7 @@ function MetricFormulaDialog({
         <DialogHeader>
           <DialogTitle>Add metric</DialogTitle>
           <DialogDescription>
-            Rundown previews the expression before saving the widget.
+            Use canonical field names. Saving only checks the formula.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit}>
@@ -2090,11 +2085,11 @@ function MetricFormulaDialog({
               <Input value={name} onChange={(event) => setName(event.target.value)} />
             </Field>
             <Field>
-              <FieldLabel>Aggregate expression</FieldLabel>
+              <FieldLabel>Aggregate formula</FieldLabel>
               <Textarea
                 value={expression}
                 onChange={(event) => setExpression(event.target.value)}
-                placeholder={'SUM("MediaCost") / SUM("Impressions")'}
+                placeholder="sum(media_cost) / sum(impressions)"
               />
             </Field>
             <label className="flex items-center gap-2 text-sm">
@@ -2106,7 +2101,7 @@ function MetricFormulaDialog({
               Save to workspace library
             </label>
             <Button type="submit" disabled={submitting || !name.trim() || !expression.trim()}>
-              {submitting ? 'Adding...' : 'Preview and add'}
+              {submitting ? 'Adding...' : 'Add metric'}
             </Button>
           </FieldGroup>
         </form>
@@ -2173,7 +2168,7 @@ function CalculatedFieldDialog({
               <Input value={name} onChange={(event) => setName(event.target.value)} />
             </Field>
             <Field>
-              <FieldLabel>Expression</FieldLabel>
+              <FieldLabel>Formula</FieldLabel>
               <Textarea
                 value={expression}
                 onChange={(event) => setExpression(event.target.value)}

@@ -54,9 +54,8 @@ describe('widget queries', () => {
     expect(result.rows).toEqual([{ revenue: 4200 }]);
     expect(queryEngine.queryCalls).toHaveLength(1);
     const [call] = queryEngine.queryCalls;
-    expect(call.sql).toContain('rundown_source');
-    // Local mode resolves the file itself, so the engine never receives R2 credentials.
-    expect(call.requiresR2Credentials).toBe(false);
+    expect(call.sql).toContain('/__dev-data/');
+    expect(call).not.toHaveProperty('requiresR2Credentials');
   });
 
   test('an identical query is served from KV and a changed control is not', async () => {
@@ -242,7 +241,7 @@ describe('query engine failures', () => {
     expect(error.message).not.toContain('10.0.0.4');
   });
 
-  test('a widget definition that the engine cannot explain is not persisted', async () => {
+  test('saving a valid widget never waits for the query engine', async () => {
     const workspace = await signInToNewWorkspace();
     const source = await seedDataSource(workspace);
     const dashboard = await createDashboard();
@@ -251,22 +250,48 @@ describe('query engine failures', () => {
       body: { ok: false, error: 'Binder Error: unknown aggregate' },
     }));
 
-    await expect(
-      callService({
-        action: 'addWidget',
-        dashboardId: dashboard.id,
-        definition: scorecardDefinition(source),
-        width: 4,
-        height: 3,
-      }),
-    ).rejects.toThrow('Binder Error: unknown aggregate');
+    await callService({
+      action: 'addWidget',
+      dashboardId: dashboard.id,
+      definition: scorecardDefinition(source),
+      width: 4,
+      height: 3,
+    });
+    expect(queryEngine.calls).toHaveLength(0);
 
     queryEngine.reset();
     queryEngine.install();
     const opened = (await callService({ action: 'getDashboard', dashboardId: dashboard.id })) as {
       dashboard: { widgets: unknown[] };
     };
-    expect(opened.dashboard.widgets).toEqual([]);
+    expect(opened.dashboard.widgets).toHaveLength(1);
+  });
+
+  test('saving rejects invalid formula syntax without calling the query engine', async () => {
+    const workspace = await signInToNewWorkspace();
+    const source = await seedDataSource(workspace);
+    const dashboard = await createDashboard();
+
+    await expectApiError(
+      callService({
+        action: 'addWidget',
+        dashboardId: dashboard.id,
+        definition: {
+          ...scorecardDefinition(source),
+          metric: {
+            source: {
+              kind: 'expression',
+              expression: `read_parquet('https://example.com/other.parquet')`,
+            },
+            dataType: 'currency',
+          },
+        },
+        width: 4,
+        height: 3,
+      }),
+      { status: 400, code: 'invalid_query' },
+    );
+    expect(queryEngine.calls).toHaveLength(0);
   });
 
   test('a filter control answers every compiler entry point without a query', async () => {

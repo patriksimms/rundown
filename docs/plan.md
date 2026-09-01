@@ -43,20 +43,22 @@ From the spec ([webmachinelearning.github.io/webmcp](https://webmachinelearning.
 1. Stack: TanStack Start + React, shadcn/ui including shadcn charts, Tailwind. Playwright for e2e. Bun for tooling.
 2. Hosting: Cloudflare Workers, paid plan (already upgraded). One deploy for the app, API, and query
    engine container.
-3. Query engine: native DuckDB in a Bun Cloudflare Container, reading parquet and CSV from R2 over
-   httpfs. The DuckDB/WASM implementation hit the Worker's memory limit. No DuckDB runs in the
-   browser.
+3. Query engine: native DuckDB in a Bun Cloudflare Container, reading authorized Parquet URLs over
+   HTTPFS. Container egress intercepts the internal hostname and reads R2 through the Worker's
+   binding. The container has no internet access or storage credentials.
 4. Application data: Cloudflare D1 with Drizzle.
 5. Auth: Clerk. Workspaces map to Clerk Organizations.
 6. Security model: viewers can only trigger queries the dashboard already defines. Column secrecy is explicitly not a goal, because a derived metric next to its denominator makes the numerator derivable anyway (CPM and impressions give spend).
 7. Clients never send SQL or column names. The one query endpoint is `queryWidget(widgetId, controlState)`, used by both the UI and the WebMCP tool.
-8. Formulas are DuckDB SQL expressions at two levels: row-level calculated fields on the datasource, aggregate metric expressions on widgets and in a workspace-level metric library. No custom formula language.
+8. Formulas use Rundown's parsed text syntax at two levels: row-level calculated fields and
+   aggregate metrics. The backend validates an AST and compiles it to SQL. Users cannot submit SQL.
 9. Field semantics come from a lookup table per datasource that users maintain. A real catalog is deferred.
 10. Metric library is workspace-level data, configurable in the UI and via a tool. Nothing domain-specific is hardcoded.
 11. Caching is lazy. Key = hash(widget definition and referenced calculated fields) + normalized control state + datasource version. No cron.
 12. Multi-tenant from the start. Every row carries a `workspaceId`; R2 keys live under a per-workspace prefix.
-13. Editors can upload one CSV or Parquet file up to 100 MB directly to R2. Existing workspace
-    objects and prefixes can also be registered. Transformations remain out of scope.
+13. Editors can upload one CSV or Parquet file up to 100 MB through the Worker. The query container
+    converts managed CSV uploads to Parquet before registration. Existing workspace objects and
+    prefixes can also be registered.
 14. Controls across datasources behave like Looker Studio: a control applies to every widget whose datasource has a matching field, matched on canonical name from the lookup table.
 15. Every builder action and every consumption question is a WebMCP tool, and the GUI exposes the same actions. Login is not a tool.
 16. No AI agent inside the app. Intent inference is done by the external agent (ChatGPT, Chrome) using what `describeDatasource` returns.
@@ -71,8 +73,8 @@ Components, deployed as one Worker and its query container:
 - D1. Workspaces, memberships, datasources, field metadata, calculated fields, library metrics, dashboards, dashboard grants, share links, query cache index.
 - R2. One bucket. Data files under `ws/<workspaceId>/...`. Optionally cached query results as objects if KV turns out too small.
 - KV. Query result cache keyed by hash. Global, eventually consistent, fine for dashboard results.
-- DuckDB query container. One named container per workspace, with an in-memory database per request.
-  It reads R2 through credentials passed from Worker secrets.
+- DuckDB query container. One named container per workspace. It reads exact, short-lived internal
+  object URLs and has no credentials or general internet access.
 
 Request flow for a viewer opening a dashboard:
 
@@ -97,13 +99,16 @@ Per dashboard, D1 holds grants: `editor` or `viewer` for a Clerk user id. The cr
 
 Unlisted links. A share link is a random, non-guessable token stored in D1 that resolves to exactly one dashboard. Anyone with the link reads the dashboard and calls `queryWidget` for its widgets, nothing else. Editors create and revoke links. Links are workspace-independent from the viewer's perspective; the server derives the workspace from the dashboard.
 
-R2 isolation. Datasource registration lists objects under `ws/<workspaceId>/` via the R2 binding and refuses any key outside it. The Worker's R2 credential sees the whole bucket, so formula validation (section 7) must prevent cross-prefix reads. If that turns out too weak, the fallback is one bucket per workspace with a bucket-scoped token per workspace. Not needed initially.
+R2 isolation. Datasource registration lists objects under `ws/<workspaceId>/` via the R2 binding and
+refuses any key outside it. Each query gets signed capabilities for the resolved object list. The
+internal handler rejects any other object and all query writes.
 
 Judging access. Provide a test account with editor rights and at least one unlisted dashboard in the submission.
 
 ## 6. Datasources and field metadata
 
-A datasource points at one R2 object or a prefix glob (partitioned files, `read_parquet('r2://bucket/ws/x/reports/*.parquet')`). CSV and parquet both read directly, no conversion.
+A datasource points at one R2 object or a prefix. The backend resolves prefixes to explicit object
+lists before compiling `read_parquet(['url-a', 'url-b'])`. DuckDB never lists or globs R2.
 
 Registration: an editor or admin uploads a CSV or Parquet file or picks an existing object or prefix.
 The Worker runs `DESCRIBE` and seeds the lookup table automatically. Numeric columns become metrics,
@@ -121,7 +126,10 @@ Lookup table, one row per column:
 - `hidden`: exclude from `describeDatasource` and from the field picker.
 - `castTo`: optional override for the inferred type, needed for 64-bit ids that must stay `VARCHAR`.
 
-Calculated fields belong to the datasource. Row-level, evaluated before aggregation. Examples from the esome guide that belong here: `CASE WHEN "DSP" = 'PI' THEN "OutboundClicks" ELSE "Clicks" END` as `effective_clicks`, `CASE WHEN "Platform" IN ('FB','FAN') THEN 'FB' ELSE "Platform" END`, `regexp_extract("Creative / Ad Name", '^(.*)_.*_.*_.*', 1)`. They appear in the field list with a role and semantic type like any column.
+Calculated fields belong to the datasource. They use the custom row-level formula language and are
+evaluated before aggregation. Examples include `if(dsp = 'PI', outbound_clicks, clicks)` and
+`if(platform = 'FB' or platform = 'FAN', 'FB', platform)`. They appear in the field list with a role
+and semantic type like any column.
 
 Datasource version is the R2 object etag (or the concatenated etags of the prefix listing). It is part of every cache key.
 
@@ -131,23 +139,25 @@ Known problems in `reporting_example.csv`: `Date` is a JavaScript `toString()` d
 
 Two levels, mirroring Looker Studio and the esome calculated fields guide:
 
-- Row-level calculated fields on the datasource (section 6). Any scalar expression over columns.
-- Aggregate metric expressions on widgets. Examples: `SUM("MediaCost") / SUM("Impressions") * 1000` (CPM), `SUM("VideoComplete") / SUM("Impressions")` (VTR), `SUM("VideoComplete" * IF(contains("Campaign", 'Kampagne2023'), 0.108, 0.117)) / SUM("Impressions") * 1000`.
+- Row-level calculated fields on the datasource. Example: `if(dsp = 'PI', outbound_clicks, clicks)`.
+- Aggregate metric formulas on widgets. Example: `sum(media_cost) / sum(impressions) * 1000`.
 
-Metric library. Workspace-level list of named aggregate expressions written against canonical names (`SUM(media_cost) / SUM(impressions) * 1000`). A library metric applies to a datasource when every canonical name it references exists there. The compiler rewrites canonical names to the datasource's columns. Seed the esome workspace with CTR, CPM, VTR, CPV, effective clicks, platform consolidation, from the guide. Seeding is data, editable in the UI and via `upsertLibraryMetric`.
+Metric library. Workspace-level list of named aggregate expressions written against canonical names
+(`sum(media_cost) / sum(impressions) * 1000`). A library metric applies to a datasource when every
+canonical name it references exists there. The compiler rewrites canonical names to the datasource's
+columns. Seed the esome workspace with CTR, CPM, VTR, and CPV. Effective clicks and platform
+consolidation are row-level calculated fields. Seeding is data, editable in the UI and via
+`upsertLibraryMetric`.
 
-Language: DuckDB SQL expressions, verbatim. Only editors and admins write them. Viewers never submit expressions.
+The language supports literals, canonical field names, arithmetic, comparisons, boolean operators,
+and allowlisted functions. Aggregate formulas require field references to sit inside `sum`, `avg`,
+`min`, `max`, `count`, or `count_distinct`.
 
 Validation, in this order:
 
-1. Structural. The expression is embedded in a server-side template as one statement. Semicolons and multiple statements are rejected.
-2. Compile. The compiled query runs with `EXPLAIN` against the datasource. Syntax and unknown columns fail here and the error text goes back to the editor or agent.
-3. Isolation. The Worker generates the only external scan from a datasource already authorized to
-   the workspace. The query container materializes it into `rundown_source`, then runs
-   `SET enable_external_access = false` before compiling or executing user expressions. A regression
-   test proves a user expression cannot read a local file.
-
-Later option, not now: a small expression grammar with a function allowlist, which would also power a no-SQL formula editor.
+1. Parse into an AST. SQL statements, comments, paths, table functions, and unknown functions fail.
+2. Resolve identifiers against stored field metadata and check operand and return types.
+3. Compile the validated AST with trusted column identifiers. Saving never starts DuckDB.
 
 ## 8. Query pipeline
 
@@ -165,9 +175,8 @@ Editing a widget changes its hash, so old cache entries become unreachable and e
 
 `explainWidget` returns the compiled SQL plus the metric and calculated field definitions and descriptions, so a viewer or agent can see what a number means.
 
-Query-container constraints to respect: datasource materialization is in-memory, container disks are
-ephemeral, and 64-bit integers are serialized losslessly. The configured `basic` instance has 1 GiB
-of memory.
+Query-container constraints: queries have time, memory, source-size, and result-size limits. Container
+disks are ephemeral, and 64-bit integers are serialized losslessly.
 
 ## 9. Dashboards, widgets, controls
 

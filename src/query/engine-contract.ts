@@ -1,15 +1,24 @@
 export type QueryEngineRequest =
   | {
-      operation: 'isolatedQuery';
-      sourceSql: string;
-      requiresR2Credentials: boolean;
+      operation: 'query';
       sql: string;
       parameters: unknown[];
     }
   | {
       operation: 'describeSource';
       sourceSql: string;
-      requiresR2Credentials: boolean;
+    }
+  | {
+      operation: 'ingestCsv';
+      sourceUrl: string;
+      destinationUrl: string;
     };
 
-export type QueryEngineResponse<T> = { ok: true; data: T } | { ok: false; error: string };
+export interface QueryEngineMetrics {
+  queryDurationMs: number;
+  resultBytes: number;
+}
+
+export type QueryEngineResponse<T> =
+  | { ok: true; data: T; metrics: QueryEngineMetrics }
+  | { ok: false; error: string };
