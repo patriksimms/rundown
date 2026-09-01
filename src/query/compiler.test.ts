@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { defaultDateRange, type DashboardDocument } from '#/domain/schema';
+import { defaultDateRange, type DashboardDocument, type WidgetDefinition } from '#/domain/schema';
 import {
   compileLibraryExpression,
   compileSourceSqlFromBaseUrl,
   compileWidgetQuery,
 } from './compiler';
-import type { DataSourceRecord, FieldRecord } from './types';
+import type { DataSourceRecord, FieldRecord, LibraryMetricRecord } from './types';
 
 const dataSource: DataSourceRecord = {
   id: 'source',
@@ -72,6 +72,29 @@ const dashboard: DashboardDocument = {
   createdAt: '2026-08-29T00:00:00.000Z',
   updatedAt: '2026-08-29T00:00:00.000Z',
 };
+
+function compileScorecard(
+  metric: Extract<WidgetDefinition, { type: 'scorecard' }>['metric'],
+  libraryMetrics: LibraryMetricRecord[] = [],
+) {
+  return compileWidgetQuery({
+    dashboard,
+    definition: {
+      type: 'scorecard',
+      title: 'Metric',
+      dataSourceId: 'source',
+      dateRangeFieldId: 'date',
+      metric,
+    },
+    dataSource,
+    fields,
+    calculatedFields: [],
+    libraryMetrics,
+    controlState: {},
+    bucketName: 'bucket',
+    sourceSql: '"rundown_source"',
+  });
+}
 
 describe('query compiler', () => {
   it('compiles explicit local files into an HTTP source', () => {
@@ -182,29 +205,46 @@ describe('query compiler', () => {
     );
   });
 
-  it('rejects numeric aggregations over text fields during static validation', () => {
+  it.each(['sum', 'min', 'max'] as const)(
+    'rejects %s over text fields during static validation',
+    (aggregation) => {
+      expect(() =>
+        compileScorecard({
+          source: { kind: 'field', fieldId: 'campaign', aggregation },
+          dataType: 'number',
+        }),
+      ).toThrow(/requires a numeric field/u);
+    },
+  );
+
+  it('rejects text widget expressions during static validation', () => {
     expect(() =>
-      compileWidgetQuery({
-        dashboard,
-        definition: {
-          type: 'scorecard',
-          title: 'Campaign sum',
-          dataSourceId: 'source',
-          dateRangeFieldId: 'date',
-          metric: {
-            source: { kind: 'field', fieldId: 'campaign', aggregation: 'sum' },
-            dataType: 'number',
-          },
-        },
-        dataSource,
-        fields,
-        calculatedFields: [],
-        libraryMetrics: [],
-        controlState: {},
-        bucketName: 'bucket',
-        sourceSql: '"rundown_source"',
+      compileScorecard({
+        source: { kind: 'expression', expression: "'not a number'" },
+        dataType: 'currency',
       }),
-    ).toThrow(/requires a numeric field/u);
+    ).toThrow(/must return a number/u);
+  });
+
+  it('rejects text library metrics during static validation', () => {
+    expect(() =>
+      compileScorecard(
+        {
+          source: { kind: 'library', libraryMetricId: 'text-metric' },
+          dataType: 'number',
+        },
+        [
+          {
+            id: 'text-metric',
+            name: 'Text metric',
+            canonicalName: 'text_metric',
+            expression: "'not a number'",
+            semanticType: 'text',
+            description: null,
+          },
+        ],
+      ),
+    ).toThrow(/must return a number/u);
   });
 
   it('does not rewrite canonical names inside formula string literals', () => {

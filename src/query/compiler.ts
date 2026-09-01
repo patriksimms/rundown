@@ -12,7 +12,12 @@ import type {
   FieldRecord,
   LibraryMetricRecord,
 } from './types';
-import { compileFormula, formulaTypeForSemanticType, type FormulaField } from './formula';
+import {
+  compileFormula,
+  formulaTypeForSemanticType,
+  type FormulaField,
+  type FormulaType,
+} from './formula';
 
 export interface QueryContext {
   dashboard: DashboardDocument;
@@ -147,6 +152,7 @@ function metricExpression(
       mode: 'aggregate',
       fields: formulaFields(context),
     });
+    assertNumericMetric(compiled.type, 'Widget expression');
     definitions.push({
       name: metric.userDefinedName ?? 'Widget expression',
       expression: metric.source.expression,
@@ -162,10 +168,12 @@ function metricExpression(
     expression: library.expression,
     description: library.description,
   });
-  return compileFormula(library.expression, {
+  const compiled = compileFormula(library.expression, {
     mode: 'aggregate',
     fields: formulaFields(context),
-  }).sql;
+  });
+  assertNumericMetric(compiled.type, `Library metric ${library.name}`);
+  return compiled.sql;
 }
 
 function fieldExpression(fieldId: string, context: QueryContext) {
@@ -353,7 +361,6 @@ function assertAggregationType(
   context: Pick<QueryContext, 'fields' | 'calculatedFields'>,
 ) {
   if (aggregation === 'count' || aggregation === 'countDistinct') return;
-  if (aggregation === 'min' || aggregation === 'max') return;
   const field = context.fields.find((item) => item.id === fieldId);
   const calculated = context.calculatedFields.find((item) => item.id === fieldId);
   const type = field
@@ -367,4 +374,8 @@ function assertAggregationType(
   if (!type) throw new Error(`Unknown field ${fieldId}.`);
   if (type !== 'number')
     throw new Error(`${aggregation} requires a numeric field, received ${type}.`);
+}
+
+function assertNumericMetric(type: FormulaType, name: string) {
+  if (type !== 'number') throw new Error(`${name} must return a number, received ${type}.`);
 }

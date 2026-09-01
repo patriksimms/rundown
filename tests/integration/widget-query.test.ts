@@ -294,7 +294,34 @@ describe('query engine failures', () => {
     expect(queryEngine.calls).toHaveLength(0);
   });
 
-  test('saving rejects numeric aggregation over a text field without querying', async () => {
+  test.each(['sum', 'min', 'max'] as const)(
+    'saving rejects %s over a text field without querying',
+    async (aggregation) => {
+      const workspace = await signInToNewWorkspace();
+      const source = await seedDataSource(workspace);
+      const dashboard = await createDashboard();
+
+      await expectApiError(
+        callService({
+          action: 'addWidget',
+          dashboardId: dashboard.id,
+          definition: {
+            ...scorecardDefinition(source),
+            metric: {
+              source: { kind: 'field', fieldId: source.fieldIds.region, aggregation },
+              dataType: 'number',
+            },
+          },
+          width: 4,
+          height: 3,
+        }),
+        { status: 400, code: 'invalid_query' },
+      );
+      expect(queryEngine.calls).toHaveLength(0);
+    },
+  );
+
+  test('saving rejects a text widget expression without querying', async () => {
     const workspace = await signInToNewWorkspace();
     const source = await seedDataSource(workspace);
     const dashboard = await createDashboard();
@@ -306,7 +333,43 @@ describe('query engine failures', () => {
         definition: {
           ...scorecardDefinition(source),
           metric: {
-            source: { kind: 'field', fieldId: source.fieldIds.region, aggregation: 'sum' },
+            source: { kind: 'expression', expression: "'not a number'" },
+            dataType: 'currency',
+          },
+        },
+        width: 4,
+        height: 3,
+      }),
+      { status: 400, code: 'invalid_query' },
+    );
+    expect(queryEngine.calls).toHaveLength(0);
+  });
+
+  test('saving rejects a legacy text library metric without querying', async () => {
+    const workspace = await signInToNewWorkspace();
+    const source = await seedDataSource(workspace);
+    const dashboard = await createDashboard();
+    const { createDatabase } = await import('#/db/client');
+    const { libraryMetrics } = await import('#/db/schema');
+    await createDatabase(env.DB).insert(libraryMetrics).values({
+      id: 'legacy-text-metric',
+      workspaceId: workspace.workspaceId,
+      name: 'Legacy text metric',
+      canonicalName: 'legacy_text_metric',
+      expression: "'not a number'",
+      semanticType: 'text',
+      description: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    await expectApiError(
+      callService({
+        action: 'addWidget',
+        dashboardId: dashboard.id,
+        definition: {
+          ...scorecardDefinition(source),
+          metric: {
+            source: { kind: 'library', libraryMetricId: 'legacy-text-metric' },
             dataType: 'number',
           },
         },
