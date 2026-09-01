@@ -660,7 +660,7 @@ export function DashboardBuilder({
       <Dialog
         open={Boolean(removeTarget)}
         onOpenChange={(open) => {
-          if (!open) setRemoveTarget(undefined);
+          if (!open && !removing) setRemoveTarget(undefined);
         }}
       >
         <DialogContent>
