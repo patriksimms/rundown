@@ -1,0 +1,46 @@
+import { fileURLToPath } from 'node:url';
+import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-workers';
+import { defineConfig } from 'vitest/config';
+
+const fromRoot = (path: string) => fileURLToPath(new URL(path, import.meta.url));
+
+const migrations = await readD1Migrations(fromRoot('./drizzle'));
+
+export default defineConfig({
+  resolve: {
+    tsconfigPaths: true,
+    alias: {
+      // The suite drives the real service; only Clerk's network boundary is replaced.
+      '@clerk/tanstack-react-start/server': fromRoot('./tests/integration/doubles/clerk.ts'),
+    },
+  },
+  plugins: [
+    cloudflareTest({
+      miniflare: {
+        // The pinned test runtime supports no later date. Flags match wrangler.jsonc.
+        compatibilityDate: '2026-08-22',
+        compatibilityFlags: ['nodejs_compat'],
+        d1Databases: ['DB'],
+        kvNamespaces: ['QUERY_CACHE'],
+        r2Buckets: ['DATA'],
+        bindings: {
+          TEST_MIGRATIONS: migrations,
+          CLOUDFLARE_ACCOUNT_ID: 'test-account',
+          R2_BUCKET_NAME: 'rundown-data-test',
+          // Local mode keeps queries on the HTTP boundary the query-engine double owns.
+          DATA_SOURCE_BASE_URL: 'http://query-engine.test/__dev-data',
+          QUERY_DATA_SOURCE_BASE_URL: 'http://query-engine.test/__dev-data',
+          CLERK_SECRET_KEY: 'sk_test_integration',
+          R2_ACCESS_KEY_ID: 'test-access-key-id',
+          R2_SECRET_ACCESS_KEY: 'test-secret-access-key',
+        },
+      },
+    }),
+  ],
+  test: {
+    include: ['tests/integration/**/*.test.ts'],
+    setupFiles: ['./tests/integration/setup.ts'],
+    // The service logs every request; keep that output for failures only.
+    silent: 'passed-only',
+  },
+});

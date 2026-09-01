@@ -1,8 +1,5 @@
-import { createFileRoute } from '@tanstack/react-router';
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ApiClientError, callApi } from '#/api/client';
-import { AppShell } from '#/components/app-shell';
-import { ErrorState, LoadingState } from '#/components/request-state';
 import { Alert, AlertDescription, AlertTitle } from '#/components/ui/alert';
 import { Button } from '#/components/ui/button';
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '#/components/ui/field';
@@ -11,275 +8,23 @@ import { NativeSelect, NativeSelectOption } from '#/components/ui/native-select'
 import { Progress, ProgressLabel, ProgressValue } from '#/components/ui/progress';
 import { Switch } from '#/components/ui/switch';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '#/components/ui/table';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '#/components/ui/tabs';
-import {
   datasourceNameFromFileName,
   datasourceUploadFormat,
   MAX_DATASOURCE_FILE_BYTES,
   type DatasourceUploadEvent,
   type DatasourceUploadFormat,
 } from '#/domain/datasource-upload';
-import { useWebMcpTools } from '#/webmcp/use-webmcp-tools';
 
-export const Route = createFileRoute('/datasources')({ component: DatasourcesPage });
-interface Bootstrap {
-  isAdmin: boolean;
-  dataSources: Array<{ id: string; name: string }>;
-}
-interface Description {
+interface RegisteredDatasource {
   id: string;
   name: string;
-  fields: FieldRecord[];
-  calculatedFields: Array<{
-    id: string;
-    label: string;
-    canonicalName: string;
-    expression: string;
-    role: string;
-    semanticType: string;
-    description?: string;
-  }>;
-  libraryMetrics: Array<{
-    id: string;
-    name: string;
-    canonicalName: string;
-    expression: string;
-    semanticType: string;
-    description?: string;
-  }>;
-}
-interface FieldRecord {
-  id: string;
-  columnName: string;
-  canonicalName: string;
-  label: string;
-  role: 'dimension' | 'metric' | 'date' | 'id';
-  semanticType: 'currency' | 'count' | 'ratio' | 'text' | 'date' | 'id';
-  description: string | null;
-  hidden: boolean;
-  castTo: string | null;
-  sampleValues: unknown[] | null;
 }
 
-function DatasourcesPage() {
-  return (
-    <AppShell requireWorkspace>
-      <DatasourcesContent />
-    </AppShell>
-  );
-}
-
-function DatasourcesContent() {
-  const [bootstrap, setBootstrap] = useState<Bootstrap>();
-  const [selected, setSelected] = useState<string>();
-  const [description, setDescription] = useState<Description>();
-  const [error, setError] = useState<string>();
-  const refresh = useCallback(async () => {
-    try {
-      const data = await callApi<Bootstrap>({ action: 'bootstrap' });
-      setBootstrap(data);
-      const id = selected ?? data.dataSources[0]?.id;
-      if (id && data.isAdmin) {
-        setSelected(id);
-        setDescription(
-          await callApi<Description>({ action: 'describeDatasource', dataSourceId: id }),
-        );
-      }
-      setError(undefined);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    }
-  }, [selected]);
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-  useWebMcpTools({
-    canManageDataSources: Boolean(bootstrap),
-    isAdmin: bootstrap?.isAdmin,
-    onMutation: refresh,
-  });
-  return (
-    <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6">
-      {error ? (
-        <ErrorState error={error} />
-      ) : !bootstrap ? (
-        <LoadingState />
-      ) : (
-        <div className="flex flex-col gap-6">
-          <div>
-            <h1 className="text-3xl font-semibold tracking-tight">Datasources</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Upload a CSV or Parquet file, or register data already in this workspace.
-            </p>
-          </div>
-          <Tabs defaultValue={bootstrap.isAdmin ? 'fields' : 'register'}>
-            <TabsList>
-              {bootstrap.isAdmin ? <TabsTrigger value="fields">Fields</TabsTrigger> : null}
-              <TabsTrigger value="register">Register</TabsTrigger>
-            </TabsList>
-            {bootstrap.isAdmin ? (
-              <TabsContent value="fields" className="pt-5">
-                <Field className="mb-5 max-w-sm">
-                  <FieldLabel htmlFor="source-picker">Datasource</FieldLabel>
-                  <NativeSelect
-                    id="source-picker"
-                    value={selected ?? ''}
-                    onChange={(event) => setSelected(event.target.value)}
-                  >
-                    {bootstrap.dataSources.map((source) => (
-                      <NativeSelectOption key={source.id} value={source.id}>
-                        {source.name}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </Field>
-                {description ? <FieldTable source={description} refresh={refresh} /> : null}
-              </TabsContent>
-            ) : null}
-            <TabsContent value="register" className="pt-5">
-              <RegisterForm refresh={refresh} />
-            </TabsContent>
-          </Tabs>
-        </div>
-      )}
-    </main>
-  );
-}
-
-function FieldTable({ source, refresh }: { source: Description; refresh: () => Promise<void> }) {
-  return (
-    <div className="overflow-x-auto">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Column</TableHead>
-            <TableHead>Label</TableHead>
-            <TableHead>Canonical name</TableHead>
-            <TableHead>Role</TableHead>
-            <TableHead>Type</TableHead>
-            <TableHead>Description</TableHead>
-            <TableHead />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {source.fields.map((field) => (
-            <FieldRow key={field.id} sourceId={source.id} field={field} refresh={refresh} />
-          ))}
-        </TableBody>
-      </Table>
-    </div>
-  );
-}
-function FieldRow({
-  sourceId,
-  field,
-  refresh,
+export function DatasourceRegisterForm({
+  onRegistered,
 }: {
-  sourceId: string;
-  field: FieldRecord;
-  refresh: () => Promise<void>;
+  onRegistered: (dataSource: RegisteredDatasource) => void;
 }) {
-  const [value, setValue] = useState(field);
-  const [error, setError] = useState<string>();
-  const [saving, setSaving] = useState(false);
-  async function save() {
-    if (saving) return;
-    setSaving(true);
-    setError(undefined);
-    try {
-      await callApi({
-        action: 'updateFieldMetadata',
-        dataSourceId: sourceId,
-        columnName: field.columnName,
-        patch: {
-          label: value.label,
-          canonicalName: value.canonicalName,
-          role: value.role,
-          semanticType: value.semanticType,
-          description: value.description,
-          hidden: value.hidden,
-          castTo: value.castTo,
-        },
-      });
-      await refresh();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setSaving(false);
-    }
-  }
-  return (
-    <TableRow>
-      <TableCell className="font-mono text-xs">{field.columnName}</TableCell>
-      <TableCell>
-        <Input
-          aria-label={`${field.columnName} label`}
-          value={value.label}
-          onChange={(event) => setValue({ ...value, label: event.target.value })}
-        />
-      </TableCell>
-      <TableCell>
-        <Input
-          aria-label={`${field.columnName} canonical name`}
-          value={value.canonicalName}
-          onChange={(event) => setValue({ ...value, canonicalName: event.target.value })}
-        />
-      </TableCell>
-      <TableCell>
-        <NativeSelect
-          aria-label={`${field.columnName} role`}
-          value={value.role}
-          onChange={(event) =>
-            setValue({ ...value, role: event.target.value as FieldRecord['role'] })
-          }
-        >
-          {['dimension', 'metric', 'date', 'id'].map((item) => (
-            <NativeSelectOption key={item} value={item}>
-              {item}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-      </TableCell>
-      <TableCell>
-        <NativeSelect
-          aria-label={`${field.columnName} semantic type`}
-          value={value.semanticType}
-          onChange={(event) =>
-            setValue({ ...value, semanticType: event.target.value as FieldRecord['semanticType'] })
-          }
-        >
-          {['currency', 'count', 'ratio', 'text', 'date', 'id'].map((item) => (
-            <NativeSelectOption key={item} value={item}>
-              {item}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-      </TableCell>
-      <TableCell>
-        <Input
-          aria-label={`${field.columnName} description`}
-          value={value.description ?? ''}
-          onChange={(event) => setValue({ ...value, description: event.target.value })}
-        />
-      </TableCell>
-      <TableCell>
-        <Button variant="outline" size="sm" disabled={saving} onClick={save}>
-          {saving ? 'Saving…' : 'Save'}
-        </Button>
-        {error ? <p className="mt-1 text-xs text-destructive">{error}</p> : null}
-      </TableCell>
-    </TableRow>
-  );
-}
-
-function RegisterForm({ refresh }: { refresh: () => Promise<void> }) {
   const [useExistingData, setUseExistingData] = useState(false);
   const [objects, setObjects] = useState<Array<{ key: string }>>([]);
   const [objectsCursor, setObjectsCursor] = useState<string>();
@@ -343,13 +88,12 @@ function RegisterForm({ refresh }: { refresh: () => Promise<void> }) {
     if (useExistingData) {
       setPhase('registering');
       try {
-        await callApi({
+        const registered = await callApi<RegisteredDatasource>({
           action: 'registerDatasource',
           name,
           location: { kind, key, format: inferredExistingFormat ?? format },
         });
-        setMessage(`${name} registered.`);
-        await refresh();
+        onRegistered(registered);
       } catch (caught) {
         setFormError(caught instanceof Error ? caught.message : String(caught));
       } finally {
@@ -410,7 +154,7 @@ function RegisterForm({ refresh }: { refresh: () => Promise<void> }) {
     }
 
     try {
-      await callApi({
+      const registered = await callApi<RegisteredDatasource>({
         action: 'registerDatasource',
         name,
         location: { kind: 'object', key: prepared.key, format: uploadFormat },
@@ -422,7 +166,6 @@ function RegisterForm({ refresh }: { refresh: () => Promise<void> }) {
         uploadFormat,
         Date.now() - uploadStartedAt.current,
       );
-      setMessage(`${name} uploaded and registered.`);
       setFile(undefined);
       if (fileInput.current) fileInput.current.value = '';
       setUploadedKey(undefined);
@@ -430,7 +173,7 @@ function RegisterForm({ refresh }: { refresh: () => Promise<void> }) {
       setRegistrationFailure(undefined);
       setProgress(0);
       setPhase('idle');
-      await refresh();
+      onRegistered(registered);
     } catch (caught) {
       setPhase('idle');
       const inspectionFailed =

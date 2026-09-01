@@ -37,18 +37,46 @@ start the app without local containers:
 RUNDOWN_DISABLE_CONTAINERS=1 bun run dev
 ```
 
-The app runs at `http://localhost:3000`. `GET /health` verifies the Worker can serve requests.
+The app runs at `http://localhost:3000`. Set `RUNDOWN_PORT` to move the dev server; the local data
+service follows it, so nothing stays pinned to `3000`.
 
-Run all checks and create the production build with:
+Create the production build with:
 
 ```sh
-bun run check
 bun run build
 bun run deploy:dry-run
-bun run test:e2e
 ```
 
 `GET /health` checks that the Worker can serve requests. `GET /ready` also reads D1, KV, and R2. It returns `503` and logs the failed dependency when any binding is unavailable.
+
+## Tests
+
+Three suites run separately, fastest first.
+
+```sh
+bun run check            # formatting, lint, types, migrations, and unit tests
+bun run test:integration # the service and API route against Worker bindings
+bun run test:e2e         # browser tests
+```
+
+`bun run test:integration` runs the request path inside `workerd` with isolated D1, KV, and R2
+bindings. Clerk and the DuckDB query container are replaced at their network boundaries; tenancy,
+grants, share links, control validation, and query caching all run for real.
+
+`bun run test:e2e` starts its own dev server on port `3140`. Set `RUNDOWN_E2E_PORT` to change it, and
+`RUNDOWN_E2E_REUSE_SERVER=1` to attach to a server you already started. Reuse is off by default
+because attaching to an unrelated process on the port produced misleading runs; the suite also
+refuses to start when the port does not answer as Rundown.
+
+The `authenticated` Playwright project signs a real Clerk user in with
+[Clerk testing tokens](https://clerk.com/docs/testing/overview). It is skipped unless the
+environment provides `VITE_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `E2E_CLERK_USER_USERNAME`,
+and `E2E_CLERK_USER_PASSWORD` for a Clerk development instance. The test user needs:
+
+- an email address using Clerk's `+clerk_test` convention, so the sign-in settles the new-device
+  check with Clerk's fixed test code instead of a real inbox
+- a password
+- membership in a Clerk organization, because the app shows nothing until one is active
 
 ## Database
 
@@ -90,6 +118,22 @@ Set the `BUN_VERSION` build variable to `1.3.10`. Enable non-production branch b
 The named preview environment remains available for deliberate preview deployments with
 `bun run deploy` or `bun run deploy:preview`, but is not used by pull-request checks. Production
 deployments normally come from pushes to `main`.
+
+### GitHub Actions
+
+The `Check` workflow runs three jobs: lint, types, and unit tests; Worker integration tests; and
+browser tests. The browser job needs a Clerk development instance and fails with a list of what is
+missing until it is configured:
+
+| Name                         | Kind                | Purpose                           |
+| ---------------------------- | ------------------- | --------------------------------- |
+| `VITE_CLERK_PUBLISHABLE_KEY` | Repository variable | Loads Clerk in the browser        |
+| `CLERK_SECRET_KEY`           | Repository secret   | Lets the Worker verify sessions   |
+| `E2E_CLERK_USER_USERNAME`    | Repository secret   | Identifier of the Clerk test user |
+| `E2E_CLERK_USER_PASSWORD`    | Repository secret   | Password of the Clerk test user   |
+
+The test user needs a `+clerk_test` email address, a password, and membership in a Clerk
+organization. The tests section above explains why.
 
 Each environment needs `CLERK_SECRET_KEY`, `R2_ACCESS_KEY_ID`, and `R2_SECRET_ACCESS_KEY`. The R2
 credentials come from an API token that can read the configured bucket and are passed to the private

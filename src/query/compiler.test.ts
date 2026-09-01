@@ -12,6 +12,7 @@ const dataSource: DataSourceRecord = {
   id: 'source',
   workspaceId: 'workspace',
   name: 'Report',
+  connectorType: 'duckdb-file',
   location: { kind: 'object', key: 'ws/workspace/report.csv', format: 'csv' },
   version: 'v1',
 };
@@ -22,7 +23,7 @@ const fields: FieldRecord[] = [
     columnName: 'DateStart',
     canonicalName: 'date',
     label: 'Date',
-    role: 'date',
+    role: 'dimension',
     semanticType: 'date',
     description: null,
     hidden: false,

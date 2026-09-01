@@ -10,12 +10,13 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as DatasourcesRouteImport } from './routes/datasources'
 import { Route as HealthRouteImport } from './routes/health'
 import { Route as MetricsRouteImport } from './routes/metrics'
 import { Route as ReadyRouteImport } from './routes/ready'
 import { Route as ApiRundownRouteImport } from './routes/api.rundown'
 import { Route as DashboardsDashboardIdRouteImport } from './routes/dashboards.$dashboardId'
+import { Route as DatasourcesIndexRouteImport } from './routes/datasources.index'
+import { Route as DatasourcesDatasourceIdRouteImport } from './routes/datasources.$datasourceId'
 import { Route as ShareTokenRouteImport } from './routes/share.$token'
 import { Route as SignInSplatRouteImport } from './routes/sign-in.$'
 import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
@@ -23,11 +24,6 @@ import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DatasourcesRoute = DatasourcesRouteImport.update({
-  id: '/datasources',
-  path: '/datasources',
   getParentRoute: () => rootRouteImport,
 } as any)
 const HealthRoute = HealthRouteImport.update({
@@ -55,6 +51,16 @@ const DashboardsDashboardIdRoute = DashboardsDashboardIdRouteImport.update({
   path: '/dashboards/$dashboardId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DatasourcesIndexRoute = DatasourcesIndexRouteImport.update({
+  id: '/datasources/',
+  path: '/datasources/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DatasourcesDatasourceIdRoute = DatasourcesDatasourceIdRouteImport.update({
+  id: '/datasources/$datasourceId',
+  path: '/datasources/$datasourceId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ShareTokenRoute = ShareTokenRouteImport.update({
   id: '/share/$token',
   path: '/share/$token',
@@ -73,91 +79,98 @@ const SignUpSplatRoute = SignUpSplatRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/datasources': typeof DatasourcesRoute
   '/health': typeof HealthRoute
   '/metrics': typeof MetricsRoute
   '/ready': typeof ReadyRoute
   '/api/rundown': typeof ApiRundownRoute
   '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
+  '/datasources/$datasourceId': typeof DatasourcesDatasourceIdRoute
   '/share/$token': typeof ShareTokenRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/datasources/': typeof DatasourcesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/datasources': typeof DatasourcesRoute
   '/health': typeof HealthRoute
   '/metrics': typeof MetricsRoute
   '/ready': typeof ReadyRoute
   '/api/rundown': typeof ApiRundownRoute
   '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
+  '/datasources/$datasourceId': typeof DatasourcesDatasourceIdRoute
   '/share/$token': typeof ShareTokenRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/datasources': typeof DatasourcesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/datasources': typeof DatasourcesRoute
   '/health': typeof HealthRoute
   '/metrics': typeof MetricsRoute
   '/ready': typeof ReadyRoute
   '/api/rundown': typeof ApiRundownRoute
   '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
+  '/datasources/$datasourceId': typeof DatasourcesDatasourceIdRoute
   '/share/$token': typeof ShareTokenRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/datasources/': typeof DatasourcesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/datasources'
     | '/health'
     | '/metrics'
     | '/ready'
     | '/api/rundown'
     | '/dashboards/$dashboardId'
+    | '/datasources/$datasourceId'
     | '/share/$token'
     | '/sign-in/$'
     | '/sign-up/$'
+    | '/datasources/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/datasources'
     | '/health'
     | '/metrics'
     | '/ready'
     | '/api/rundown'
     | '/dashboards/$dashboardId'
+    | '/datasources/$datasourceId'
     | '/share/$token'
     | '/sign-in/$'
     | '/sign-up/$'
+    | '/datasources'
   id:
     | '__root__'
     | '/'
-    | '/datasources'
     | '/health'
     | '/metrics'
     | '/ready'
     | '/api/rundown'
     | '/dashboards/$dashboardId'
+    | '/datasources/$datasourceId'
     | '/share/$token'
     | '/sign-in/$'
     | '/sign-up/$'
+    | '/datasources/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  DatasourcesRoute: typeof DatasourcesRoute
   HealthRoute: typeof HealthRoute
   MetricsRoute: typeof MetricsRoute
   ReadyRoute: typeof ReadyRoute
   ApiRundownRoute: typeof ApiRundownRoute
   DashboardsDashboardIdRoute: typeof DashboardsDashboardIdRoute
+  DatasourcesDatasourceIdRoute: typeof DatasourcesDatasourceIdRoute
   ShareTokenRoute: typeof ShareTokenRoute
   SignInSplatRoute: typeof SignInSplatRoute
   SignUpSplatRoute: typeof SignUpSplatRoute
+  DatasourcesIndexRoute: typeof DatasourcesIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -167,13 +180,6 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/datasources': {
-      id: '/datasources'
-      path: '/datasources'
-      fullPath: '/datasources'
-      preLoaderRoute: typeof DatasourcesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/health': {
@@ -211,6 +217,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardsDashboardIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/datasources/': {
+      id: '/datasources/'
+      path: '/datasources'
+      fullPath: '/datasources/'
+      preLoaderRoute: typeof DatasourcesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/datasources/$datasourceId': {
+      id: '/datasources/$datasourceId'
+      path: '/datasources/$datasourceId'
+      fullPath: '/datasources/$datasourceId'
+      preLoaderRoute: typeof DatasourcesDatasourceIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/share/$token': {
       id: '/share/$token'
       path: '/share/$token'
@@ -237,15 +257,16 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  DatasourcesRoute: DatasourcesRoute,
   HealthRoute: HealthRoute,
   MetricsRoute: MetricsRoute,
   ReadyRoute: ReadyRoute,
   ApiRundownRoute: ApiRundownRoute,
   DashboardsDashboardIdRoute: DashboardsDashboardIdRoute,
+  DatasourcesDatasourceIdRoute: DatasourcesDatasourceIdRoute,
   ShareTokenRoute: ShareTokenRoute,
   SignInSplatRoute: SignInSplatRoute,
   SignUpSplatRoute: SignUpSplatRoute,
+  DatasourcesIndexRoute: DatasourcesIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

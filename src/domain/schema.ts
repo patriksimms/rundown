@@ -17,7 +17,7 @@ export const timezoneSchema = z
     { message: 'Use a valid IANA timezone name.' },
   );
 
-export const fieldRoleSchema = z.enum(['dimension', 'metric', 'date', 'id']);
+export const fieldRoleSchema = z.enum(['dimension', 'metric']);
 export const semanticTypeSchema = z.enum(['currency', 'count', 'ratio', 'text', 'date', 'id']);
 export const aggregationSchema = z.enum([
   'sum',

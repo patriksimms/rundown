@@ -10,5 +10,7 @@ export default defineConfig({
   },
   rules: {
     'eslint/no-unused-vars': 'error',
+    // Integration tests assert through shared helpers rather than inline `expect` calls.
+    'vitest/expect-expect': ['warn', { assertFunctionNames: ['expect', 'expectApiError'] }],
   },
 });

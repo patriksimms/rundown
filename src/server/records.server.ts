@@ -33,6 +33,7 @@ export async function loadDataSource(id: string, workspaceId: string): Promise<D
     id: row.id,
     workspaceId: row.workspaceId,
     name: row.name,
+    connectorType: row.connectorType,
     location: dataSourceLocationSchema.parse(row.location),
     version: row.version,
   };

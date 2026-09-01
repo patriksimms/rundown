@@ -1,15 +1,11 @@
 import { clerkClient } from '@clerk/tanstack-react-start/server';
-import { and, eq, inArray, isNull, lt, or } from 'drizzle-orm';
+import { and, count, eq, inArray, isNull, lt, or } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 import type { ApiRequest } from '#/api/contracts';
 import { createDatabase } from '#/db/client';
-import {
-  deleteSourceObject,
-  headSourceObject,
-  listSourceObjects,
-  prepareSourceUpload,
-} from '#/data/source.server';
-import { collectObjectPages, matchingSourceObjects } from '#/data/listing';
+import { deleteSourceObject, listSourceObjects, prepareSourceUpload } from '#/data/source.server';
+import { DatasourceError, DUCKDB_FILE_CONNECTOR } from '#/data/connectors/contract';
+import { datasourceConnector } from '#/data/connectors/index.server';
 import {
   calculatedFields,
   dashboardGrants,
@@ -30,7 +26,7 @@ import {
   type WidgetDefinition,
 } from '#/domain/schema';
 import { appendPlacement, placementFits, validateLayoutUpdate } from '#/domain/layout';
-import { canUpdateFieldMetadata } from '#/domain/field-metadata';
+import { canUpdateFieldMetadata, detectFieldSemantics } from '#/domain/field-metadata';
 import { hashJson } from '#/domain/hash';
 import { comparisonDateRange, resolveDateRange } from '#/domain/dates';
 import { queryCacheState, widgetDependencyState } from '#/domain/cache';
@@ -41,7 +37,6 @@ import {
   mergeControlState,
   singleValueControlWithMultipleSelections,
 } from '#/domain/control-state';
-import { controlOptionsQuery } from '#/domain/control-options';
 import { alignDateComparisonRows, tableSummaryDefinition } from '#/domain/widget-results';
 import { isWorkspaceR2Key, scopedR2Prefix } from '#/domain/tenancy';
 import {
@@ -52,17 +47,7 @@ import {
   MAX_DATASOURCE_FILE_BYTES,
   verifyDatasourceUploadCleanupToken,
 } from '#/domain/datasource-upload';
-import {
-  assertSingleExpression,
-  compileLibraryExpression,
-  compileWidgetQuery,
-} from '#/query/compiler';
 import { referencedSqlIdentifiers } from '#/query/sql-identifiers';
-import {
-  describeDataSource,
-  explainIsolatedQuery,
-  runIsolatedPreparedQuery,
-} from '#/query/duckdb.server';
 import type { DataSourceRecord } from '#/query/types';
 import { requireSession, type SessionContext } from './auth.server';
 import { ApiError } from './errors';
@@ -463,11 +448,12 @@ async function queryWidget(
   const widget = widgetById(access.document, widgetId);
   const defaults = defaultControlState(access.document);
   const controlState = validateControlState(access.document, mergeControlState(defaults, state));
-  if (!('dataSourceId' in widget.definition)) return { rows: [], controlState };
+  if (!compilesToQuery(widget.definition)) return { rows: [], controlState };
   const dataSource = await loadDataSource(
     widget.definition.dataSourceId,
     access.document.workspaceId,
   );
+  const connector = connectorFor(dataSource);
   const metadata = await loadQueryMetadata(dataSource.id, access.document.workspaceId);
   const columns = queryResultColumns(widget.definition, metadata);
   const resolvedControls = await resolveControls(
@@ -496,6 +482,7 @@ async function queryWidget(
       requestedDateRange: dateRange,
       resolvedDateRange,
       resolvedControls: normalize(resolvedControls),
+      dataSourceConnector: connector.type,
       dataSourceVersion: dataSource.version,
       timezone: access.document.timezone,
     }),
@@ -512,20 +499,17 @@ async function queryWidget(
     queryDefinition: WidgetDefinition,
     offset?: number,
   ) =>
-    runIsolatedPreparedQuery<Record<string, unknown>>(dataSource, (sourceTableName) => {
-      const compiled = compileWidgetQuery({
+    datasourceOperation(() =>
+      connector.executeQuery<Record<string, unknown>>(dataSource, {
+        kind: 'widget',
         dashboard: access.document,
         definition: queryDefinition,
-        dataSource,
-        ...metadata,
+        metadata,
         controlState: queryControlState,
-        bucketName: env.R2_BUCKET_NAME,
-        sourceTableName,
         resolvedControls,
         offset,
-      });
-      return { sql: compiled.sql, parameters: compiled.parameters };
-    });
+      }),
+    );
   const comparison = widgetComparison(widget.definition);
   const summaryDefinition = tableSummaryDefinition(widget.definition);
   const pageOffset = pageSize === undefined ? undefined : page * pageSize;
@@ -576,21 +560,21 @@ async function queryWidget(
 async function explainWidget(dashboardId: string, widgetId: string, shareToken?: string) {
   const access = await authorizeDashboard(dashboardId, 'viewer', shareToken);
   const widget = widgetById(access.document, widgetId);
-  if (!('dataSourceId' in widget.definition)) return { sql: null, definitions: [] };
+  if (!compilesToQuery(widget.definition)) return { sql: null, definitions: [] };
   const dataSource = await loadDataSource(
     widget.definition.dataSourceId,
     access.document.workspaceId,
   );
   const metadata = await loadQueryMetadata(dataSource.id, access.document.workspaceId);
-  const compiled = compileWidgetQuery({
-    dashboard: access.document,
-    definition: widget.definition,
-    dataSource,
-    ...metadata,
-    controlState: {},
-    bucketName: env.R2_BUCKET_NAME,
-    sourceTableName: 'rundown_source',
-  });
+  const explanation = await datasourceOperation(() =>
+    connectorFor(dataSource).explainQuery(dataSource, {
+      kind: 'widget',
+      dashboard: access.document,
+      definition: widget.definition,
+      metadata,
+      controlState: {},
+    }),
+  );
   const calculatedDefinitions = metadata.calculatedFields
     .filter((field) => definitionFieldIds(widget.definition).includes(field.id))
     .map((field) => ({
@@ -599,8 +583,8 @@ async function explainWidget(dashboardId: string, widgetId: string, shareToken?:
       description: field.description,
     }));
   return {
-    sql: compiled.sql,
-    definitions: [...calculatedDefinitions, ...compiled.definitions],
+    sql: explanation.sql,
+    definitions: [...calculatedDefinitions, ...explanation.definitions],
   };
 }
 
@@ -624,21 +608,40 @@ async function getControlOptions(
     metadata.fields.find((item) => item.id === controlDefinition.fieldId) ??
     metadata.calculatedFields.find((item) => item.id === controlDefinition.fieldId);
   if (!field) throw new ApiError(400, 'unknown_field', 'The control field no longer exists.');
-  const expression =
-    'columnName' in field ? quoteIdentifier(field.columnName) : `(${field.expression})`;
-  const direction = controlDefinition.optionsSortDirection?.toUpperCase() ?? 'ASC';
-  const rows = await runIsolatedPreparedQuery<{ value: unknown }>(dataSource, (sourceTableName) => {
-    return controlOptionsQuery(expression, search, direction, quoteIdentifier(sourceTableName));
-  });
+  const direction = controlDefinition.optionsSortDirection === 'desc' ? 'DESC' : 'ASC';
+  const rows = await datasourceOperation(() =>
+    connectorFor(dataSource).executeQuery<{ value: unknown }>(dataSource, {
+      kind: 'controlOptions',
+      field,
+      search,
+      direction,
+    }),
+  );
   return { values: rows.map((row) => normalize(row.value)) };
 }
 
 async function listDataSources() {
   const session = await requireSession();
-  return database()
-    .select()
-    .from(dataSources)
-    .where(eq(dataSources.workspaceId, session.workspace.id));
+  const db = database();
+  const workspace = eq(dataSources.workspaceId, session.workspace.id);
+  const [sourceRows, rawCounts, calculatedCounts] = await Promise.all([
+    db.select().from(dataSources).where(workspace),
+    // Hidden fields are excluded so the count matches what the detail page lists.
+    db
+      .select({ dataSourceId: fields.dataSourceId, total: count() })
+      .from(fields)
+      .where(and(eq(fields.workspaceId, session.workspace.id), eq(fields.hidden, false)))
+      .groupBy(fields.dataSourceId),
+    db
+      .select({ dataSourceId: calculatedFields.dataSourceId, total: count() })
+      .from(calculatedFields)
+      .where(eq(calculatedFields.workspaceId, session.workspace.id))
+      .groupBy(calculatedFields.dataSourceId),
+  ]);
+  const totals = new Map<string, number>();
+  for (const row of [...rawCounts, ...calculatedCounts])
+    totals.set(row.dataSourceId, (totals.get(row.dataSourceId) ?? 0) + row.total);
+  return sourceRows.map((row) => ({ ...row, fieldCount: totals.get(row.id) ?? 0 }));
 }
 
 async function listLibraryMetrics() {
@@ -813,35 +816,23 @@ async function registerDatasource(request: Extract<ApiRequest, { action: 'regist
     ? await claimPendingUpload(session, managedUploadKey, request.cleanupToken)
     : undefined;
   try {
-    const objects =
-      request.location.kind === 'object'
-        ? [await headSourceObject(request.location.key)].filter((item) => item !== null)
-        : matchingSourceObjects(
-            await collectObjectPages((cursor) => listSourceObjects(request.location.key, cursor)),
-            request.location.format,
-          );
-    if (!objects.length)
-      throw new ApiError(404, 'r2_object_not_found', 'No matching R2 objects were found.');
-    if (managedUploadKey && objects[0].size > MAX_DATASOURCE_FILE_BYTES)
-      throw new ApiError(
-        413,
-        'datasource_upload_too_large',
-        'The uploaded file is larger than 100 MB.',
-      );
-    const dataSource: DataSourceRecord = {
+    const connector = connectorFor(DUCKDB_FILE_CONNECTOR);
+    const pendingDataSource: Omit<DataSourceRecord, 'version'> = {
       id: `ds_${crypto.randomUUID()}`,
       workspaceId: session.workspace.id,
       name: request.name,
+      connectorType: connector.type,
       location: request.location,
-      version: await hashJson(objects.map((object) => [object.key, object.etag])),
     };
-    const inspection = await describeDataSource(dataSource).catch((error: unknown) => {
-      throw new ApiError(
-        422,
-        'datasource_inspection_failed',
-        error instanceof Error ? error.message : 'DuckDB could not inspect this file.',
-      );
-    });
+    const inspection = await datasourceOperation(() =>
+      connector.inspect(pendingDataSource, {
+        ...(managedUploadKey ? { maximumObjectBytes: MAX_DATASOURCE_FILE_BYTES } : {}),
+      }),
+    );
+    const dataSource: DataSourceRecord = {
+      ...pendingDataSource,
+      version: inspection.version,
+    };
     const discovered = inspection.description.map((column) =>
       seedField(dataSource.id, column, inspection.samples),
     );
@@ -868,6 +859,7 @@ async function registerDatasource(request: Extract<ApiRequest, { action: 'regist
         id: dataSource.id,
         workspaceId: dataSource.workspaceId,
         name: dataSource.name,
+        connectorType: dataSource.connectorType,
         location: dataSource.location,
         version: dataSource.version,
         createdAt: now,
@@ -1052,10 +1044,11 @@ async function upsertCalculatedField(
       );
   }
   const dataSource = await loadDataSource(request.dataSourceId, session.workspace.id);
-  assertSingleExpression(request.expression);
-  await explainIsolatedQuery(
-    dataSource,
-    `SELECT ${request.expression} FROM ${quoteIdentifier('rundown_source')} LIMIT 1`,
+  await datasourceOperation(() =>
+    connectorFor(dataSource).validateExpression(dataSource, {
+      kind: 'calculatedField',
+      expression: request.expression,
+    }),
   );
   const mutableValues = {
     canonicalName: request.canonicalName ?? slug(request.name),
@@ -1113,7 +1106,6 @@ async function upsertLibraryMetric(
       );
     await authorizeDashboard(request.dashboardId, 'editor');
   }
-  assertSingleExpression(request.expression);
   const sourceRows = await database()
     .select()
     .from(dataSources)
@@ -1128,10 +1120,12 @@ async function upsertLibraryMetric(
       ),
     );
     if (!referencedSqlIdentifiers(request.expression).every((name) => names.has(name))) continue;
-    const expression = compileLibraryExpression(request.expression, metadata);
-    await explainIsolatedQuery(
-      dataSource,
-      `SELECT ${expression} FROM ${quoteIdentifier('rundown_source')}`,
+    await datasourceOperation(() =>
+      connectorFor(dataSource).validateExpression(dataSource, {
+        kind: 'libraryMetric',
+        expression: request.expression,
+        metadata,
+      }),
     );
     validated = true;
     break;
@@ -1383,16 +1377,16 @@ async function validateDefinition(dashboard: DashboardDocument, definition: Widg
       'unknown_field',
       'The widget references a field that does not belong to its datasource.',
     );
-  const compiled = compileWidgetQuery({
-    dashboard,
-    definition,
-    dataSource,
-    ...metadata,
-    controlState: {},
-    bucketName: env.R2_BUCKET_NAME,
-    sourceTableName: 'rundown_source',
-  });
-  await explainIsolatedQuery(dataSource, compiled.sql, compiled.parameters);
+  if (!compilesToQuery(definition)) return;
+  await datasourceOperation(() =>
+    connectorFor(dataSource).validateQuery(dataSource, {
+      kind: 'widget',
+      dashboard,
+      definition,
+      metadata,
+      controlState: {},
+    }),
+  );
 }
 
 async function runDefinition(
@@ -1402,7 +1396,7 @@ async function runDefinition(
 ) {
   const defaults = defaultControlState(dashboard);
   const controlState = validateControlState(dashboard, mergeControlState(defaults, state));
-  if (!('dataSourceId' in definition)) return { rows: [], controlState };
+  if (!compilesToQuery(definition)) return { rows: [], controlState };
   const dataSource = await loadDataSource(definition.dataSourceId, dashboard.workspaceId);
   const metadata = await loadQueryMetadata(dataSource.id, dashboard.workspaceId);
   const columns = queryResultColumns(definition, metadata);
@@ -1422,19 +1416,16 @@ async function runDefinition(
     },
   };
   const run = (queryControlState: ControlState, queryDefinition: WidgetDefinition = definition) =>
-    runIsolatedPreparedQuery<Record<string, unknown>>(dataSource, (sourceTableName) => {
-      const compiled = compileWidgetQuery({
+    datasourceOperation(() =>
+      connectorFor(dataSource).executeQuery<Record<string, unknown>>(dataSource, {
+        kind: 'widget',
         dashboard,
         definition: queryDefinition,
-        dataSource,
-        ...metadata,
+        metadata,
         controlState: queryControlState,
-        bucketName: env.R2_BUCKET_NAME,
-        sourceTableName,
         resolvedControls,
-      });
-      return { sql: compiled.sql, parameters: compiled.parameters };
-    });
+      }),
+    );
   const comparison = widgetComparison(definition);
   const summaryDefinition = tableSummaryDefinition(definition);
   const [rows, comparisonRows, summaryRows] = await Promise.all([
@@ -1465,18 +1456,19 @@ async function runDefinition(
 }
 
 async function compiledSql(dashboard: DashboardDocument, widget: DashboardWidget) {
-  if (!('dataSourceId' in widget.definition)) return null;
+  if (!compilesToQuery(widget.definition)) return null;
   const dataSource = await loadDataSource(widget.definition.dataSourceId, dashboard.workspaceId);
   const metadata = await loadQueryMetadata(dataSource.id, dashboard.workspaceId);
-  return compileWidgetQuery({
-    dashboard,
-    definition: widget.definition,
-    dataSource,
-    ...metadata,
-    controlState: {},
-    bucketName: env.R2_BUCKET_NAME,
-    sourceTableName: 'rundown_source',
-  }).sql;
+  return datasourceOperation(
+    () =>
+      connectorFor(dataSource).explainQuery(dataSource, {
+        kind: 'widget',
+        dashboard,
+        definition: widget.definition,
+        metadata,
+        controlState: {},
+      }).sql,
+  );
 }
 
 async function definitionHash(definition: WidgetDefinition, workspaceId: string) {
@@ -1560,6 +1552,14 @@ function compatibleSemanticTypes(left: string, right: string) {
   return left === right || (left === 'text' && right === 'text');
 }
 
+/**
+ * Text, date controls, and filter controls have no query of their own. Filter controls do name a
+ * datasource, so a datasource check alone is not enough to keep them out of the compiler.
+ */
+function compilesToQuery(definition: WidgetDefinition) {
+  return 'dataSourceId' in definition && 'dateRangeFieldId' in definition;
+}
+
 function definitionFieldIds(definition: WidgetDefinition) {
   const ids: string[] = [];
   if ('dateRangeFieldId' in definition) ids.push(definition.dateRangeFieldId);
@@ -1595,9 +1595,6 @@ function seedField(
   column: { column_name: string; column_type: string },
   samples: Record<string, unknown>[],
 ) {
-  const idLike = /id$/iu.test(column.column_name);
-  const dateLike = /DATE|TIMESTAMP/u.test(column.column_type);
-  const numeric = /INT|DECIMAL|DOUBLE|FLOAT|REAL|HUGE/u.test(column.column_type);
   const values = [
     ...new Set(
       samples
@@ -1614,12 +1611,9 @@ function seedField(
     columnName: column.column_name,
     canonicalName: slug(column.column_name),
     label: humanize(column.column_name),
-    role: idLike ? 'id' : dateLike ? 'date' : numeric ? 'metric' : 'dimension',
-    semanticType: idLike ? 'id' : dateLike ? 'date' : numeric ? 'count' : 'text',
-    defaultAggregation: numeric ? 'sum' : null,
+    ...detectFieldSemantics(column.column_name, column.column_type),
     description: null,
     hidden: false,
-    castTo: idLike ? 'VARCHAR' : null,
     sampleValues: values,
     cardinality: null,
   };
@@ -1694,9 +1688,42 @@ function humanize(value: string) {
     .replace(/[_-]+/gu, ' ')
     .replace(/^./u, (letter) => letter.toUpperCase());
 }
-function quoteIdentifier(value: string) {
-  return `"${value.replaceAll('"', '""')}"`;
+
+function connectorFor(dataSource: DataSourceRecord | string) {
+  try {
+    return datasourceConnector(dataSource);
+  } catch (error) {
+    throwDatasourceError(error);
+  }
 }
+
+async function datasourceOperation<T>(operation: () => T | Promise<T>) {
+  try {
+    return await operation();
+  } catch (error) {
+    throwDatasourceError(error);
+  }
+}
+
+function throwDatasourceError(error: unknown): never {
+  if (!(error instanceof DatasourceError)) throw error;
+  const status = {
+    datasource_source_not_found: 404,
+    datasource_source_too_large: 413,
+    datasource_inspection_failed: 422,
+    invalid_query: 400,
+    unsupported_datasource_connector: 400,
+    datasource_connector_failed: 502,
+  }[error.code];
+  if (error.code === 'datasource_connector_failed') {
+    // A connector that failed to answer reports whatever the transport said, which can name
+    // container addresses and object keys. That belongs in the log, not in the response.
+    console.warn('rundown.datasource_connector_failed', { error: error.message });
+    throw new ApiError(status, error.code, 'The query service is unavailable. Try again.');
+  }
+  throw new ApiError(status, error.code, error.message);
+}
+
 function normalize(value: unknown): unknown {
   if (typeof value === 'bigint') return value.toString();
   if (value instanceof Date) return value.toISOString();

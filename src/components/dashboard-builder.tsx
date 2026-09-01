@@ -37,8 +37,10 @@ import {
 } from '#/components/ui/command';
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '#/components/ui/dialog';
@@ -68,6 +70,7 @@ import { withDefaultDateRange, withoutWidgetControlState } from '#/domain/contro
 import { canonicalMetricExpression } from '#/domain/library-metric';
 import { createSerialQueue } from '#/domain/serial-queue';
 import { rollbackFailedLayout } from '#/domain/layout';
+import { fieldRoleSchema } from '#/domain/schema';
 import type {
   ControlState,
   Aggregation,
@@ -555,18 +558,27 @@ export function DashboardBuilder({
                       <div
                         key={widget.id}
                         className={cn(
-                          'group overflow-hidden rounded-xl bg-card shadow-sm ring-1 ring-foreground/10',
+                          'group overflow-hidden rounded-xl bg-card shadow-sm ring-1 ring-foreground/10 focus-within:ring-2 focus-within:ring-ring',
                           selectedId === widget.id && 'ring-2 ring-primary',
                         )}
                         onClick={() => setSelectedId(widget.id)}
                       >
-                        <button
-                          type="button"
+                        {/* Pointer-only affordance; keyboard users move a widget from its settings form. */}
+                        <span
                           className="widget-drag-handle absolute top-2 left-1/2 z-10 -translate-x-1/2 rounded-md bg-background/90 p-1 opacity-0 shadow-sm ring-1 ring-foreground/10 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-                          aria-label={`Move ${widgetLabel(widget)}`}
+                          aria-hidden="true"
                         >
                           <GripVerticalIcon className="size-4" />
-                        </button>
+                        </span>
+                        <Button
+                          className="absolute top-2 right-2 z-10 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                          variant="outline"
+                          size="sm"
+                          aria-label={`Edit ${widgetLabel(widget)}`}
+                          onClick={() => setSelectedId(widget.id)}
+                        >
+                          Edit
+                        </Button>
                         <div
                           key={`${widget.id}-${chartRevision}`}
                           className="h-full [&>[data-slot=card]]:h-full"
@@ -593,11 +605,15 @@ export function DashboardBuilder({
                   (left, right) => left.layout.y - right.layout.y || left.layout.x - right.layout.x,
                 )
                 .map((widget) => (
-                  <div key={widget.id} className="relative rounded-xl ring-1 ring-foreground/10">
+                  <div
+                    key={widget.id}
+                    className="relative rounded-xl ring-1 ring-foreground/10 focus-within:ring-2 focus-within:ring-ring"
+                  >
                     <Button
                       className="absolute top-2 right-2 z-10"
                       variant="outline"
                       size="sm"
+                      aria-label={`Edit ${widgetLabel(widget)}`}
                       onClick={() => {
                         setSelectedId(widget.id);
                         setMobileOpen(true);
@@ -727,6 +743,8 @@ function WidgetSettings({
   const [sourceOpen, setSourceOpen] = useState(false);
   const [formulaOpen, setFormulaOpen] = useState(false);
   const [dimensionOpen, setDimensionOpen] = useState(false);
+  const [removeOpen, setRemoveOpen] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const [settingsError, setSettingsError] = useState<string>();
   const sourceRequestRef = useRef(0);
   const definitionRef = useRef(widget.definition);
@@ -800,12 +818,42 @@ function WidgetSettings({
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label="Remove widget"
-          onClick={() => void onRemove()}
+          aria-label={`Remove ${widgetLabel(widget)}`}
+          onClick={() => setRemoveOpen(true)}
         >
           <Trash2Icon />
         </Button>
       </div>
+      <Dialog open={removeOpen} onOpenChange={setRemoveOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove {widgetLabel(widget)}?</DialogTitle>
+            <DialogDescription>
+              The widget and its settings are deleted from this dashboard. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />} disabled={removing}>
+              Keep widget
+            </DialogClose>
+            <Button
+              variant="destructive"
+              disabled={removing}
+              onClick={async () => {
+                setRemoving(true);
+                try {
+                  await onRemove();
+                } finally {
+                  setRemoving(false);
+                  setRemoveOpen(false);
+                }
+              }}
+            >
+              {removing ? 'Removing...' : 'Remove widget'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {settingsError ? (
         <Alert variant="destructive">
           <AlertDescription>{settingsError}</AlertDescription>
@@ -887,7 +935,7 @@ function WidgetSettings({
               <FieldPicker
                 label="Date field"
                 value={definition.dateRangeFieldId}
-                fields={fields.filter((field) => field.role === 'date')}
+                fields={fields.filter((field) => field.semanticType === 'date')}
                 onChange={(dateRangeFieldId) => void commit({ ...definition, dateRangeFieldId })}
               />
               <DimensionSettings definition={definition} fields={fields} commit={commit} />
@@ -1021,7 +1069,9 @@ function LayoutNumberInput({
 }
 
 function DimensionSettings({ definition, fields, commit }: QuerySettingsProps) {
-  const dimensions = fields.filter((field) => field.role !== 'metric' && field.role !== 'date');
+  const dimensions = fields.filter(
+    (field) => field.role === 'dimension' && field.semanticType !== 'date',
+  );
   if ('dimension' in definition)
     return (
       <FieldPicker
@@ -1435,7 +1485,9 @@ function TypeSettings({
   source,
   commit,
 }: QuerySettingsProps & { source?: SourceDescription }) {
-  const dimensions = fields.filter((field) => field.role !== 'metric' && field.role !== 'date');
+  const dimensions = fields.filter(
+    (field) => field.role === 'dimension' && field.semanticType !== 'date',
+  );
   switch (definition.type) {
     case 'scorecard':
     case 'line':
@@ -1893,7 +1945,7 @@ function DatasourceFieldRow({
           value={value.role}
           onChange={(event) => setValue({ ...value, role: event.target.value as FieldRole })}
         >
-          {['dimension', 'metric', 'date', 'id'].map((item) => (
+          {fieldRoleSchema.options.map((item) => (
             <NativeSelectOption key={item} value={item}>
               {item}
             </NativeSelectOption>
@@ -1953,8 +2005,6 @@ function DatasourceFieldRow({
 const fieldRoleStyles: Record<FieldRole, string> = {
   dimension: 'border-l-blue-500',
   metric: 'border-l-emerald-500',
-  date: 'border-l-amber-500',
-  id: 'border-l-violet-500',
 };
 
 function MetricFormulaDialog({
@@ -2160,8 +2210,10 @@ async function defaultDefinition(
   if (!source) throw new Error('Register a datasource before adding a data widget.');
   const description = await describeSource(source.id);
   const fields = [...description.fields, ...description.calculatedFields];
-  const date = fields.find((field) => field.role === 'date');
-  const dimension = fields.find((field) => field.role === 'dimension' || field.role === 'id');
+  const date = fields.find((field) => field.semanticType === 'date');
+  const dimension = fields.find(
+    (field) => field.role === 'dimension' && field.semanticType !== 'date',
+  );
   const metricField = fields.find((field) => field.role === 'metric');
   if (type === 'control') {
     if (!dimension) throw new Error('This datasource has no dimension for a filter control.');
