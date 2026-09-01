@@ -433,7 +433,7 @@ export function DashboardBuilder({
         );
         return next;
       });
-      setSelectedId(undefined);
+      setSelectedId((current) => (current === widget.id ? undefined : current));
       if (revision === mutationRevisionRef.current) {
         setError(undefined);
         await refresh();
