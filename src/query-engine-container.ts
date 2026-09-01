@@ -7,7 +7,8 @@ export class QueryEngineContainer extends Container {
   pingEndpoint = '/ready';
   sleepAfter = '10m';
   enableInternet = false;
-  static outboundByHost = {
-    [INTERNAL_R2_HOST]: handleInternalR2Request,
-  };
 }
+
+QueryEngineContainer.outboundByHost = {
+  [INTERNAL_R2_HOST]: handleInternalR2Request,
+};
