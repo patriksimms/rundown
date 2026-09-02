@@ -33,4 +33,10 @@ describe('WebMCP input schemas', () => {
     expect(schema.properties).toHaveProperty('patch');
     expect(schema.properties).not.toHaveProperty('dashboardId');
   });
+
+  it('exposes the new rolling date anchors through generic widget tools', () => {
+    const schema = inputSchemaFor('addWidget', { dashboardId: 'dashboard' });
+    expect(JSON.stringify(schema)).toContain('startOfYear');
+    expect(JSON.stringify(schema)).toContain('startOfQuarter');
+  });
 });

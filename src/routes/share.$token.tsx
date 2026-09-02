@@ -1,15 +1,26 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect, useState } from 'react';
+import { z } from 'zod';
 import { callApi } from '#/api/client';
-import { DashboardView } from '#/components/dashboard-view';
+import { DashboardView, dashboardDateControlRange } from '#/components/dashboard-view';
 import { ErrorState, LoadingState } from '#/components/request-state';
 import type { DashboardDocument } from '#/domain/schema';
+import {
+  dateRangeSearchValue,
+  parseDateRangeSearch,
+  sameDateRange,
+} from '#/domain/date-range-search';
 import { useWebMcpTools } from '#/webmcp/use-webmcp-tools';
 
-export const Route = createFileRoute('/share/$token')({ component: SharedDashboard });
+export const Route = createFileRoute('/share/$token')({
+  validateSearch: z.object({ dateRange: z.string().optional().catch(undefined) }),
+  component: SharedDashboard,
+});
 
 function SharedDashboard() {
   const { token } = Route.useParams();
+  const search = Route.useSearch();
+  const navigate = Route.useNavigate();
   const [dashboard, setDashboard] = useState<DashboardDocument>();
   const [error, setError] = useState<string>();
   const refresh = useCallback(async () => {
@@ -41,7 +52,23 @@ function SharedDashboard() {
       ) : !dashboard ? (
         <LoadingState />
       ) : (
-        <DashboardView dashboard={dashboard} shareToken={token} />
+        <DashboardView
+          dashboard={dashboard}
+          shareToken={token}
+          dateRange={parseDateRangeSearch(search.dateRange)}
+          onDateRangeChange={(range) => {
+            const defaultRange = dashboardDateControlRange(dashboard);
+            void navigate({
+              search: (current) => ({
+                ...current,
+                dateRange:
+                  defaultRange && sameDateRange(defaultRange, range)
+                    ? undefined
+                    : dateRangeSearchValue(range),
+              }),
+            });
+          }}
+        />
       )}
     </main>
   );

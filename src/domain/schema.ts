@@ -35,7 +35,14 @@ const relativeDateSchema = z.object({
   amount: z.number().int().nonnegative(),
   unit: z.enum(['day', 'week', 'month', 'quarter', 'year']),
   direction: z.enum(['past', 'future']),
-  anchor: z.enum(['now', 'startOfDay', 'startOfWeek', 'startOfMonth']),
+  anchor: z.enum([
+    'now',
+    'startOfDay',
+    'startOfWeek',
+    'startOfMonth',
+    'startOfQuarter',
+    'startOfYear',
+  ]),
 });
 
 const dateValueSchema = z.union([

@@ -24,6 +24,7 @@ import GridLayout, {
 } from 'react-grid-layout';
 import { GridBackground } from 'react-grid-layout/extras';
 import { callApi } from '#/api/client';
+import { DateRangePicker } from '#/components/date-range-picker';
 import { DashboardWidgetView, initialControlState } from '#/components/dashboard-view';
 import { Alert, AlertDescription } from '#/components/ui/alert';
 import { Button } from '#/components/ui/button';
@@ -69,6 +70,7 @@ import { replacePlainTextDocument, textDocument } from '#/domain/text-content';
 import { withDefaultDateRange, withoutWidgetControlState } from '#/domain/control-state';
 import { createSerialQueue } from '#/domain/serial-queue';
 import { rollbackFailedLayout } from '#/domain/layout';
+import { yearToDateRange } from '#/domain/dates';
 import { fieldRoleSchema } from '#/domain/schema';
 import type {
   ControlState,
@@ -449,6 +451,8 @@ export function DashboardBuilder({
   const sidebar = selected ? (
     <WidgetSettings
       dashboardId={dashboard.id}
+      dashboardDefaultDateRange={dashboard.defaultDateRange}
+      timezone={dashboard.timezone}
       widget={selected}
       dataSources={dataSources}
       onBack={() => setSelectedId(undefined)}
@@ -472,6 +476,7 @@ export function DashboardBuilder({
   ) : (
     <WidgetCatalog
       disabled={saving}
+      hasDateControl={dashboard.widgets.some((widget) => widget.definition.type === 'dateControl')}
       onAdd={addWidget}
       onDragStart={(type) => {
         draggedType.current = type;
@@ -697,10 +702,12 @@ export function DashboardBuilder({
 
 function WidgetCatalog({
   disabled,
+  hasDateControl,
   onAdd,
   onDragStart,
 }: {
   disabled: boolean;
+  hasDateControl: boolean;
   onAdd: (type: BuilderType) => Promise<void>;
   onDragStart: (type: BuilderType) => void;
 }) {
@@ -711,32 +718,35 @@ function WidgetCatalog({
         <p className="text-sm text-muted-foreground">Drag onto the grid or add at the bottom.</p>
       </div>
       <div className="grid grid-cols-2 gap-2">
-        {catalog.map(({ type, label, icon: Icon }) => (
-          <div
-            key={type}
-            draggable={!disabled}
-            onDragStart={(event) => {
-              onDragStart(type);
-              event.dataTransfer.setData('text/plain', type);
-              event.dataTransfer.effectAllowed = 'copy';
-            }}
-            className="group flex min-h-28 cursor-grab flex-col justify-between rounded-lg bg-card p-3 ring-1 ring-foreground/10 active:cursor-grabbing"
-          >
-            <WidgetPreview type={type} icon={Icon} />
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-sm font-medium">{label}</span>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                disabled={disabled}
-                aria-label={`Add ${label}`}
-                onClick={() => void onAdd(type)}
-              >
-                <PlusIcon />
-              </Button>
+        {catalog.map(({ type, label, icon: Icon }) => {
+          const unavailable = disabled || (type === 'dateControl' && hasDateControl);
+          return (
+            <div
+              key={type}
+              draggable={!unavailable}
+              onDragStart={(event) => {
+                onDragStart(type);
+                event.dataTransfer.setData('text/plain', type);
+                event.dataTransfer.effectAllowed = 'copy';
+              }}
+              className="group flex min-h-28 cursor-grab flex-col justify-between rounded-lg bg-card p-3 ring-1 ring-foreground/10 active:cursor-grabbing"
+            >
+              <WidgetPreview type={type} icon={Icon} />
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium">{label}</span>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  disabled={unavailable}
+                  aria-label={`Add ${label}`}
+                  onClick={() => void onAdd(type)}
+                >
+                  <PlusIcon />
+                </Button>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -775,6 +785,8 @@ function WidgetPreview({ type, icon: Icon }: { type: BuilderType; icon: typeof B
 
 function WidgetSettings({
   dashboardId,
+  dashboardDefaultDateRange,
+  timezone,
   widget,
   dataSources,
   onBack,
@@ -782,6 +794,8 @@ function WidgetSettings({
   onLayoutChange,
 }: {
   dashboardId: string;
+  dashboardDefaultDateRange: DashboardDocument['defaultDateRange'];
+  timezone: string;
   widget: DashboardWidget;
   dataSources: BuilderDataSource[];
   onBack: () => void;
@@ -909,6 +923,16 @@ function WidgetSettings({
               Structured text is read-only here so its document format stays intact.
             </FieldDescription>
           ) : null}
+        </Field>
+      ) : null}
+      {definition.type === 'dateControl' ? (
+        <Field>
+          <FieldLabel>Default range</FieldLabel>
+          <DateRangePicker
+            range={definition.defaultDateRange ?? dashboardDefaultDateRange}
+            timezone={timezone}
+            onChange={(defaultDateRange) => void commit({ ...definition, defaultDateRange })}
+          />
         </Field>
       ) : null}
       {'dataSourceId' in definition ? (
@@ -2210,7 +2234,7 @@ async function defaultDefinition(
   type: BuilderType,
   source?: BuilderDataSource,
 ): Promise<WidgetDefinition> {
-  if (type === 'dateControl') return { type };
+  if (type === 'dateControl') return { type, defaultDateRange: yearToDateRange };
   if (type === 'text')
     return { type, content: { schemaVersion: 'plain-text-v1', document: 'Add text' } };
   if (!source) throw new Error('Register a datasource before adding a data widget.');

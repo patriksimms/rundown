@@ -8,6 +8,99 @@ export interface ResolvedDateRange {
 const invalidRangeMessage = 'The start date must not be after the end date.';
 export const unsupportedDateRangeMessage = 'The date range is outside the supported calendar.';
 
+const today = {
+  relative: { amount: 0, unit: 'day', direction: 'past', anchor: 'startOfDay' },
+} as const;
+
+export const dateRangePresets = [
+  { id: 'today', label: 'Today', range: { startDate: today, endDate: today } },
+  {
+    id: 'yesterday',
+    label: 'Yesterday',
+    range: {
+      startDate: {
+        relative: { amount: 1, unit: 'day', direction: 'past', anchor: 'startOfDay' },
+      },
+      endDate: {
+        relative: { amount: 1, unit: 'day', direction: 'past', anchor: 'startOfDay' },
+      },
+    },
+  },
+  ...[7, 28, 30, 90].map((days) => ({
+    id: `last-${days}-days`,
+    label: `Last ${days} days`,
+    range: {
+      startDate: {
+        relative: {
+          amount: days - 1,
+          unit: 'day' as const,
+          direction: 'past' as const,
+          anchor: 'startOfDay' as const,
+        },
+      },
+      endDate: today,
+    },
+  })),
+  {
+    id: 'this-month',
+    label: 'This month',
+    range: {
+      startDate: {
+        relative: { amount: 0, unit: 'month', direction: 'past', anchor: 'startOfMonth' },
+      },
+      endDate: today,
+    },
+  },
+  {
+    id: 'last-month',
+    label: 'Last month',
+    range: {
+      startDate: {
+        relative: { amount: 1, unit: 'month', direction: 'past', anchor: 'startOfMonth' },
+      },
+      endDate: {
+        relative: { amount: 1, unit: 'day', direction: 'past', anchor: 'startOfMonth' },
+      },
+    },
+  },
+  {
+    id: 'this-quarter',
+    label: 'This quarter',
+    range: {
+      startDate: {
+        relative: { amount: 0, unit: 'quarter', direction: 'past', anchor: 'startOfQuarter' },
+      },
+      endDate: today,
+    },
+  },
+  {
+    id: 'year-to-date',
+    label: 'Year to date',
+    range: {
+      startDate: {
+        relative: { amount: 0, unit: 'year', direction: 'past', anchor: 'startOfYear' },
+      },
+      endDate: today,
+    },
+  },
+  {
+    id: 'last-year',
+    label: 'Last year',
+    range: {
+      startDate: {
+        relative: { amount: 1, unit: 'year', direction: 'past', anchor: 'startOfYear' },
+      },
+      endDate: {
+        relative: { amount: 1, unit: 'day', direction: 'past', anchor: 'startOfYear' },
+      },
+    },
+  },
+] satisfies Array<{ id: string; label: string; range: DateRange }>;
+
+export const yearToDateRange = dateRangePresets.find(
+  (preset) => preset.id === 'year-to-date',
+)!.range;
+
 export function resolveDateRange(
   range: DateRange,
   timezone: string,
@@ -66,6 +159,10 @@ function resolveDateValue(value: DateRange['startDate'], timezone: string, now: 
     resolved.setUTCDate(resolved.getUTCDate() - day + 1);
   } else if (value.relative.anchor === 'startOfMonth') {
     resolved.setUTCDate(1);
+  } else if (value.relative.anchor === 'startOfQuarter') {
+    resolved.setUTCMonth(Math.floor(resolved.getUTCMonth() / 3) * 3, 1);
+  } else if (value.relative.anchor === 'startOfYear') {
+    resolved.setUTCMonth(0, 1);
   }
   const direction = value.relative.direction === 'past' ? -1 : 1;
   const amount = value.relative.amount * direction;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   comparisonDateRange,
+  dateRangePresets,
   dateRangeOrderError,
   resolveDateRange,
   tryResolveDateRange,
@@ -40,6 +41,31 @@ describe('date range resolution', () => {
         new Date('2026-08-29T12:00:00Z'),
       ),
     ).toEqual({ start: '2026-08-17', end: '2026-08-24' });
+  });
+
+  it('anchors rolling quarter and year presets to their calendar boundaries', () => {
+    const now = new Date('2026-08-29T12:00:00Z');
+    const preset = (id: string) => dateRangePresets.find((item) => item.id === id)!.range;
+    expect(resolveDateRange(preset('this-quarter'), 'UTC', now)).toEqual({
+      start: '2026-07-01',
+      end: '2026-08-29',
+    });
+    expect(resolveDateRange(preset('year-to-date'), 'UTC', now)).toEqual({
+      start: '2026-01-01',
+      end: '2026-08-29',
+    });
+    expect(resolveDateRange(preset('last-year'), 'UTC', now)).toEqual({
+      start: '2025-01-01',
+      end: '2025-12-31',
+    });
+  });
+
+  it('counts trailing-day presets inclusively', () => {
+    const lastSeven = dateRangePresets.find((item) => item.id === 'last-7-days')!.range;
+    expect(resolveDateRange(lastSeven, 'UTC', new Date('2026-08-29T12:00:00Z'))).toEqual({
+      start: '2026-08-23',
+      end: '2026-08-29',
+    });
   });
 
   it.each([
