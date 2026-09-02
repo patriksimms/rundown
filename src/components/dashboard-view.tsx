@@ -52,7 +52,7 @@ export function DashboardView({
   const defaultDateRange = dashboardDateControlRange(dashboard);
   const [controlState, setControlState] = useState<ControlState>(() => ({
     ...initialControlState(dashboard),
-    ...(dateRange ? { dateRange } : {}),
+    ...(dateRange && defaultDateRange ? { dateRange } : {}),
   }));
   const [controlsOpen, setControlsOpen] = useState(true);
   useEffect(() => {
