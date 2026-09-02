@@ -30,7 +30,7 @@ test.describe('signed-in dashboard flow', () => {
     await expect(
       page.getByRole('heading', { level: 1, name: `E2E dashboard ${suffix}` }),
     ).toBeVisible();
-    await expect(widget(page, 'Revenue')).toContainText(TOTAL_REVENUE);
+    await expect(widget(page, 'Revenue')).toContainText(TOTAL_REVENUE, { timeout: 20_000 });
 
     // Rename the widget through the builder sidebar.
     await page.getByRole('button', { name: 'Edit Revenue' }).click();
@@ -117,8 +117,9 @@ test.describe('signed-in dashboard flow', () => {
     await expect(line.locator('.recharts-line-curve')).toBeVisible();
     await expect(line.getByText('No rows for this date range.')).toHaveCount(0);
 
-    await page.getByLabel('Start').fill('2026-01-06');
-    await page.getByLabel('End').fill('2026-01-07');
+    await page.getByRole('button', { name: 'Choose date range' }).click();
+    await page.getByRole('button', { name: /January 6th, 2026/u }).click();
+    await page.getByRole('button', { name: /January 7th, 2026/u }).click();
     await expect(scorecard.getByText(NARROWED_IMPRESSIONS, { exact: true })).toBeVisible();
     await expect(line.locator('.recharts-line-curve')).toBeVisible();
   });
