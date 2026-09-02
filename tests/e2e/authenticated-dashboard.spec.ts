@@ -120,7 +120,7 @@ test.describe('signed-in dashboard flow', () => {
     await page.getByRole('button', { name: 'Choose date range' }).click();
     const rangeStart = page.getByRole('button', { name: /January 6th, 2026/u });
     await rangeStart.click();
-    await expect(rangeStart).toHaveAttribute('data-range-start', 'true');
+    await expect(rangeStart).toHaveAttribute('data-selected-single', 'true');
     await page.getByRole('button', { name: /January 7th, 2026/u }).click();
     await expect(scorecard.getByText(NARROWED_IMPRESSIONS, { exact: true })).toBeVisible();
     await expect(line.locator('.recharts-line-curve')).toBeVisible();
