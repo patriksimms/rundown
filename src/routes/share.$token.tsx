@@ -4,17 +4,19 @@ import { z } from 'zod';
 import { callApi } from '#/api/client';
 import { DashboardView, dashboardDateControlRange } from '#/components/dashboard-view';
 import { ErrorState, LoadingState } from '#/components/request-state';
-import type { DashboardDocument } from '#/domain/schema';
 import {
   dateRangeSearchValue,
   parseDateRangeSearch,
   sameDateRange,
 } from '#/domain/date-range-search';
+import type { DashboardDocument } from '#/domain/schema';
+import { pageTitle, usePageTitle } from '#/lib/page-title';
 import { useWebMcpTools } from '#/webmcp/use-webmcp-tools';
 
 export const Route = createFileRoute('/share/$token')({
   validateSearch: z.object({ dateRange: z.string().optional().catch(undefined) }),
   component: SharedDashboard,
+  head: () => ({ meta: [{ title: pageTitle('Shared dashboard') }] }),
 });
 
 function SharedDashboard() {
@@ -38,6 +40,7 @@ function SharedDashboard() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+  usePageTitle(dashboard?.name ?? 'Shared dashboard');
   useWebMcpTools({ dashboardId: dashboard?.id, shareToken: token });
   return (
     <main className="mx-auto min-h-screen w-full max-w-7xl px-4 py-6 sm:px-6">

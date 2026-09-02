@@ -122,6 +122,7 @@ function compileWidget(
     sourceSql,
     resolvedControls: query.resolvedControls,
     offset: query.offset,
+    dateBucketTarget: query.dateBucketTarget,
   });
 }
 

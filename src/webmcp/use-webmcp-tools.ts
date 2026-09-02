@@ -69,7 +69,7 @@ export function useWebMcpTools(options: WebMcpOptions) {
             {
               action: 'getDashboard',
               description:
-                'Read the open dashboard, including widget definitions, controls, current layout, timezone, and datasource names.',
+                'Read the open dashboard, including widget definitions, controls, placements, canvas row count, timezone, and datasource names.',
               readOnly: true,
               fixed,
             },
@@ -125,14 +125,14 @@ export function useWebMcpTools(options: WebMcpOptions) {
             {
               action: 'addWidget',
               description:
-                'Validate and append a widget to the open dashboard. Provide its full definition and size. Rundown computes its coordinates.',
+                'Validate and append a widget to the open dashboard. Provide its full definition and size. Table metrics can include ordered conditionalFormat threshold rules; tables with two or more dimensions can set showSubtotals, and pivotDimension creates grouped columns. Rundown computes its coordinates.',
               readOnly: false,
               fixed,
             },
             {
               action: 'updateWidget',
               description:
-                'Replace a widget definition on the open dashboard after reading it with getDashboard.',
+                'Replace a widget definition on the open dashboard after reading it with getDashboard. Table metrics support ordered conditionalFormat threshold rules with semantic colors, showSubtotals groups by the first dimension, and pivotDimension creates grouped columns.',
               readOnly: false,
               fixed,
             },
@@ -152,7 +152,7 @@ export function useWebMcpTools(options: WebMcpOptions) {
             {
               action: 'updateLayout',
               description:
-                'Replace every widget placement on the open dashboard in one validated write. Placements may leave empty rows but cannot overlap or leave the 12-column grid.',
+                'Replace every widget placement and the canvas row count on the open dashboard in one validated write. Include all placements. Empty rows are allowed, but widgets cannot overlap or leave the 12-column grid.',
               readOnly: false,
               fixed,
             },
@@ -165,7 +165,8 @@ export function useWebMcpTools(options: WebMcpOptions) {
             },
             {
               action: 'previewWidget',
-              description: 'Compile and run an unsaved widget definition without storing it.',
+              description:
+                'Compile and run an unsaved widget definition without storing it. Width controls automatic date bucketing.',
               readOnly: true,
               fixed,
             },

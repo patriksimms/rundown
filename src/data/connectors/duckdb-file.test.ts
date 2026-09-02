@@ -94,6 +94,7 @@ const dashboard: DashboardDocument = {
   timezone: 'Europe/Berlin',
   defaultDateRange,
   columns: 12,
+  canvasRows: 10,
   widgets: [],
   createdBy: 'user',
   createdAt: '2026-08-31T00:00:00.000Z',

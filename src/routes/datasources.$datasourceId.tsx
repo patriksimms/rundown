@@ -40,17 +40,21 @@ import {
   type SemanticType,
 } from '#/domain/schema';
 import { useWebMcpTools } from '#/webmcp/use-webmcp-tools';
+import { pageTitle, usePageTitle } from '#/lib/page-title';
 
-export const Route = createFileRoute('/datasources/$datasourceId')({ component: DatasourcePage });
+export const Route = createFileRoute('/datasources/$datasourceId')({
+  component: DatasourcePage,
+  head: () => ({ meta: [{ title: pageTitle('Datasource') }] }),
+});
 
 interface Description extends DatasourceDescription {
   location: DataSourceLocation;
 }
 
-// Blue dimensions and emerald metrics match the builder's field colour coding.
+// Emerald dimensions and blue metrics match the builder's field colour coding.
 const roleBadgeStyles: Record<FieldRole, string> = {
-  dimension: 'border-blue-500/40 bg-blue-500/10 text-blue-700 dark:text-blue-300',
-  metric: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+  dimension: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+  metric: 'border-blue-500/40 bg-blue-500/10 text-blue-700 dark:text-blue-300',
 };
 
 const helper = createColumnHelper<DataTableFeatures, DatasourceFieldRow>();
@@ -152,6 +156,7 @@ function DatasourceContent() {
   useEffect(() => void refresh(), [refresh]);
   const description = loaded?.datasourceId === datasourceId ? loaded.description : undefined;
   const isAdmin = loaded?.datasourceId === datasourceId ? loaded.isAdmin : false;
+  usePageTitle(description?.name ?? 'Datasource');
   useWebMcpTools({
     canManageDataSources: Boolean(description),
     isAdmin,

@@ -32,8 +32,8 @@ export function widgetDependencyState(definition: WidgetDefinition, metadata: Qu
       : []),
   ]);
   return {
-    queryResultVersion: 2,
-    definition,
+    queryResultVersion: 3,
+    definition: queryDefinition(definition),
     fields: metadata.fields
       .map(({ id, columnName, canonicalName, label, castTo }) => ({
         id,
@@ -58,6 +58,30 @@ export function widgetDependencyState(definition: WidgetDefinition, metadata: Qu
   };
 }
 
+function queryDefinition(definition: WidgetDefinition) {
+  const withoutMetricPresentation = (metric: ReturnType<typeof metricsIn>[number]) => {
+    const {
+      conditionalFormat: _conditionalFormat,
+      displayFormat: _displayFormat,
+      styling: _styling,
+      userDefinedName: _userDefinedName,
+      ...queryMetric
+    } = metric;
+    return queryMetric;
+  };
+  const {
+    styling: _styling,
+    title: _title,
+    ...query
+  } = definition as WidgetDefinition & {
+    title?: string;
+  };
+  if ('metric' in query) return { ...query, metric: withoutMetricPresentation(query.metric) };
+  if ('metrics' in query)
+    return { ...query, metrics: query.metrics.map(withoutMetricPresentation) };
+  return query;
+}
+
 export function queryCacheState(input: {
   definitionHash: string;
   requestedDateRange: unknown;
@@ -66,9 +90,10 @@ export function queryCacheState(input: {
   dataSourceConnector: string;
   dataSourceVersion: string;
   timezone: string;
+  dateBucketTarget: number;
 }) {
   return {
-    version: 2,
+    version: 3,
     definitionHash: input.definitionHash,
     controlState: {
       dateRange: {
@@ -82,6 +107,7 @@ export function queryCacheState(input: {
       version: input.dataSourceVersion,
     },
     timezone: input.timezone,
+    dateBucketTarget: input.dateBucketTarget,
   };
 }
 

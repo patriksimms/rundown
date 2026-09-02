@@ -45,6 +45,20 @@ const fields: FieldRecord[] = [
     cardinality: null,
   },
   {
+    id: 'platform',
+    dataSourceId: 'source',
+    columnName: 'Platform',
+    canonicalName: 'platform',
+    label: 'Platform',
+    role: 'dimension',
+    semanticType: 'text',
+    description: null,
+    hidden: false,
+    castTo: null,
+    sampleValues: null,
+    cardinality: null,
+  },
+  {
     id: 'cost',
     dataSourceId: 'source',
     columnName: 'MediaCost',
@@ -67,6 +81,7 @@ const dashboard: DashboardDocument = {
   timezone: 'Europe/Berlin',
   defaultDateRange,
   columns: 12,
+  canvasRows: 10,
   widgets: [],
   createdBy: 'user',
   createdAt: '2026-08-29T00:00:00.000Z',
@@ -163,6 +178,96 @@ describe('query compiler', () => {
     });
     expect(result.sql).toContain('LIMIT 21 OFFSET 40');
     expect(result.sql).toContain('ORDER BY 1 ASC');
+  });
+
+  it('buckets date dimensions to the widget target', () => {
+    const result = compileWidgetQuery({
+      dashboard,
+      definition: {
+        type: 'line',
+        title: 'Cost by date',
+        dataSourceId: 'source',
+        dateRangeFieldId: 'date',
+        dimension: { fieldId: 'date', dateGranularity: 'auto' },
+        metrics: [
+          { source: { kind: 'field', fieldId: 'cost', aggregation: 'sum' }, dataType: 'currency' },
+        ],
+      },
+      dataSource,
+      fields,
+      calculatedFields: [],
+      libraryMetrics: [],
+      controlState: {
+        dateRange: {
+          startDate: { fixed: '2026-01-01' },
+          endDate: { fixed: '2026-12-31' },
+        },
+      },
+      bucketName: 'bucket',
+      sourceSql: '"rundown_source"',
+      dateBucketTarget: 30,
+    });
+
+    expect(result.sql).toContain(`DATE_TRUNC('month', "DateStart") AS "dimension_1"`);
+    expect(result.sql).toContain('GROUP BY 1 ORDER BY 1 ASC');
+  });
+
+  it('returns detail rows, first-dimension subtotals, and a grand total together', () => {
+    const result = compileWidgetQuery({
+      dashboard,
+      definition: {
+        type: 'table',
+        title: 'Cost',
+        dataSourceId: 'source',
+        dateRangeFieldId: 'date',
+        dimensions: [{ fieldId: 'platform' }, { fieldId: 'campaign' }],
+        metrics: [
+          { source: { kind: 'field', fieldId: 'cost', aggregation: 'sum' }, dataType: 'currency' },
+        ],
+        resultLimit: { mode: 'top', amount: 50 },
+        showSubtotals: true,
+      },
+      dataSource,
+      fields,
+      calculatedFields: [],
+      libraryMetrics: [],
+      controlState: {},
+      bucketName: 'bucket',
+      sourceSql: '"rundown_source"',
+    });
+
+    expect(result.sql).toContain('GROUPING("Platform", "Campaign") AS "__grouping"');
+    expect(result.sql).toContain('GROUP BY GROUPING SETS ((1, 2), (1), ())');
+    expect(result.sql).toContain('ORDER BY 1 ASC, "__grouping" ASC');
+  });
+
+  it('keeps the pivot dimension in every subtotal grouping set', () => {
+    const result = compileWidgetQuery({
+      dashboard,
+      definition: {
+        type: 'table',
+        title: 'Cost',
+        dataSourceId: 'source',
+        dateRangeFieldId: 'date',
+        dimensions: [{ fieldId: 'platform' }, { fieldId: 'campaign' }],
+        pivotDimension: { fieldId: 'date' },
+        metrics: [
+          { source: { kind: 'field', fieldId: 'cost', aggregation: 'sum' }, dataType: 'currency' },
+        ],
+        resultLimit: { mode: 'top', amount: 50 },
+        showSubtotals: true,
+      },
+      dataSource,
+      fields,
+      calculatedFields: [],
+      libraryMetrics: [],
+      controlState: {},
+      bucketName: 'bucket',
+      sourceSql: '"rundown_source"',
+    });
+
+    expect(result.sql).toContain('GROUPING("Platform", "Campaign") AS "__grouping"');
+    expect(result.sql).toContain('GROUP BY GROUPING SETS ((1, 2, 3), (1, 3), (3))');
   });
 
   it('selects a library-driven gauge upper limit', () => {

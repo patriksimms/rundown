@@ -1,6 +1,7 @@
 import { SignInAction, SignUpAction } from '#/components/auth-actions';
 import { BrowserFrame } from '#/components/browser-frame';
 import { Button } from '#/components/ui/button';
+import { usePageTitle } from '#/lib/page-title';
 
 const claims = [
   {
@@ -18,6 +19,8 @@ const claims = [
 ];
 
 export function LandingPage() {
+  usePageTitle();
+
   return (
     <main>
       <section className="mx-auto w-full max-w-7xl px-4 pt-16 pb-12 sm:px-6 sm:pt-24">

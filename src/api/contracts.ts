@@ -63,14 +63,13 @@ export const apiRequestSchema = z.discriminatedUnion('action', [
   z.object({
     action: z.literal('updateLayout'),
     dashboardId: z.string().min(1),
-    placements: z
-      .array(
-        z.object({
-          widgetId: z.string().min(1),
-          placement: gridPlacementSchema,
-        }),
-      )
-      .min(1),
+    canvasRows: z.number().int().min(10),
+    placements: z.array(
+      z.object({
+        widgetId: z.string().min(1),
+        placement: gridPlacementSchema,
+      }),
+    ),
   }),
   z.object({
     action: z.literal('copyWidget'),
@@ -83,6 +82,7 @@ export const apiRequestSchema = z.discriminatedUnion('action', [
     action: z.literal('previewWidget'),
     dashboardId: z.string().min(1),
     definition: widgetDefinitionSchema,
+    width: z.number().int().positive(),
     controlState: controlStateSchema.optional(),
   }),
   z.object({

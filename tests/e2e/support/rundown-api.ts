@@ -25,6 +25,7 @@ export function buildDashboard(): DashboardDocument {
     timezone: 'Europe/Berlin',
     defaultDateRange: fixedRange,
     columns: 12,
+    canvasRows: 10,
     createdBy: 'user_demo',
     createdAt: '2026-08-01T00:00:00.000Z',
     updatedAt: '2026-08-01T00:00:00.000Z',
@@ -157,6 +158,7 @@ export async function mockRundownApi(page: Page, options: MockOptions = {}) {
       width?: number;
       height?: number;
       placements?: Array<{ widgetId: string; placement: DashboardWidget['layout'] }>;
+      canvasRows?: number;
       patch?: Record<string, unknown>;
     };
     switch (request.action) {
@@ -218,6 +220,10 @@ export async function mockRundownApi(page: Page, options: MockOptions = {}) {
         state.dashboard = {
           ...state.dashboard,
           widgets: [...state.dashboard.widgets, added],
+          canvasRows: Math.max(
+            state.dashboard.canvasRows,
+            added.layout.y + added.layout.height + 2,
+          ),
         };
         return ok(route, { widget: added });
       }
@@ -240,6 +246,7 @@ export async function mockRundownApi(page: Page, options: MockOptions = {}) {
         );
         state.dashboard = {
           ...state.dashboard,
+          canvasRows: request.canvasRows ?? state.dashboard.canvasRows,
           widgets: state.dashboard.widgets.map((item) =>
             byId.has(item.id) ? { ...item, layout: byId.get(item.id)! } : item,
           ),

@@ -1,8 +1,10 @@
 import { SignUp } from '@clerk/tanstack-react-start';
 import { createFileRoute } from '@tanstack/react-router';
+import { pageTitle } from '#/lib/page-title';
 
 export const Route = createFileRoute('/sign-up/$')({
   component: Page,
+  head: () => ({ meta: [{ title: pageTitle('Sign up') }] }),
 });
 
 function Page() {

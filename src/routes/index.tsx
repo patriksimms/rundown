@@ -16,6 +16,7 @@ import {
 } from '#/components/ui/empty';
 import { Field, FieldGroup, FieldLabel } from '#/components/ui/field';
 import { Input } from '#/components/ui/input';
+import { usePageTitle } from '#/lib/page-title';
 import {
   Table,
   TableBody,
@@ -53,6 +54,7 @@ function DashboardIndex() {
   const [error, setError] = useState<string>();
   const [createError, setCreateError] = useState<string>();
   const [name, setName] = useState('');
+  usePageTitle('Dashboards');
   const refresh = useCallback(async () => {
     try {
       setData(await callApi<Bootstrap>({ action: 'bootstrap' }));

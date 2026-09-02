@@ -16,16 +16,24 @@ import type { QueryResultColumn } from '#/domain/query-result';
 import { callApi } from '#/api/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '#/components/ui/card';
 import { Button } from '#/components/ui/button';
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from '#/components/ui/chart';
+import {
+  ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
+  ChartTooltip,
+  ChartTooltipContent,
+} from '#/components/ui/chart';
 import { Badge } from '#/components/ui/badge';
 import { Command, CommandGroup, CommandInput, CommandList } from '#/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '#/components/ui/popover';
 import { Skeleton } from '#/components/ui/skeleton';
 import { widgetQueryRequest } from '#/domain/widget-query';
+import { cn } from '#/lib/utils';
 import { controlDefaultValues, toggleControlValue } from '#/domain/control-state';
 import {
   pieBreakdownRows,
   pivotBreakdownRows,
+  pivotTableRows,
   withComparisonSeries,
 } from '#/domain/widget-results';
 import { DateRangePicker } from '#/components/date-range-picker';
@@ -237,21 +245,21 @@ function DateControl({
   const range = controlState.dateRange;
   if (!range) return null;
   return (
-    <Card size="sm">
-      <CardHeader>
-        <CardTitle>Date range</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <DateRangePicker
-          range={range}
-          timezone={timezone}
-          defaultRange={defaultDateRange}
-          onChange={(next) => {
-            setControlState({ ...controlState, dateRange: next });
-            onDateRangeChange?.(next);
-          }}
-        />
-      </CardContent>
+    <Card size="sm" className="h-full px-3 py-3 ring-inset">
+      <div className="flex min-h-0 flex-1 flex-col justify-center gap-2 md:flex-row md:items-center md:gap-3">
+        <CardTitle className="shrink-0">Date range</CardTitle>
+        <div className="min-w-0 flex-1 md:max-w-80">
+          <DateRangePicker
+            range={range}
+            timezone={timezone}
+            defaultRange={defaultDateRange}
+            onChange={(next) => {
+              setControlState({ ...controlState, dateRange: next });
+              onDateRangeChange?.(next);
+            }}
+          />
+        </div>
+      </div>
     </Card>
   );
 }
@@ -318,98 +326,102 @@ function FilterControl({
     updateSelected(toggleControlValue(selected, value, true));
   };
   return (
-    <Card size="sm">
-      <CardHeader>
-        <CardTitle>{definition.userDefinedName ?? 'Filter'}</CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-2">
-        <Popover open={open} onOpenChange={setOpen}>
-          <PopoverTrigger
-            render={
-              <Button
-                variant="outline"
-                className="w-full justify-between font-normal"
-                aria-label={`Choose ${definition.userDefinedName ?? 'filter'} values`}
-              />
-            }
-          >
-            {selected.length
-              ? definition.allowMultiple
-                ? `${selected.length} selected`
-                : selected[0]
-              : 'All values'}
-            <ChevronsUpDown className="size-4 opacity-50" />
-          </PopoverTrigger>
-          <PopoverContent className="w-(--anchor-width) p-0" align="start">
-            <Command shouldFilter={false} label={definition.userDefinedName ?? 'Filter values'}>
-              <CommandInput value={search} onValueChange={setSearch} placeholder="Search values…" />
-              <CommandList aria-multiselectable={definition.allowMultiple || undefined}>
-                {status === 'loading' ? (
-                  <div role="status" className="py-6 text-center text-sm text-muted-foreground">
-                    Loading…
-                  </div>
-                ) : status === 'error' ? (
-                  <div role="alert" className="flex flex-col items-center gap-2 py-6 text-sm">
-                    <p>Could not load values.</p>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setRetry((value) => value + 1)}
-                    >
-                      Retry
-                    </Button>
-                  </div>
-                ) : values.length ? (
-                  <CommandGroup>
-                    {values.map((value) => {
-                      const option = String(value);
-                      const checked = selected.includes(option);
-                      return (
-                        <button
-                          type="button"
-                          role="option"
-                          key={option}
-                          aria-selected={checked}
-                          className="flex min-h-10 w-full items-center rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
-                          onKeyDown={handleFilterOptionKeyDown}
-                          onClick={() => select(option)}
-                        >
-                          {option}
-                          <span aria-hidden="true" className="ml-auto">
-                            {checked ? '✓' : ''}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </CommandGroup>
-                ) : (
-                  <div className="py-6 text-center text-sm">No values found.</div>
-                )}
-              </CommandList>
-            </Command>
-          </PopoverContent>
-        </Popover>
-        {selected.length ? (
-          <div className="flex flex-wrap gap-1.5">
-            {selected.map((value) => (
-              <Badge key={value} variant="secondary" className="gap-1 pr-1">
-                {value}
-                <button
-                  type="button"
-                  className="flex size-6 items-center justify-center rounded-sm hover:bg-muted"
-                  aria-label={`Remove ${value}`}
-                  onClick={() => updateSelected(selected.filter((item) => item !== value))}
-                >
-                  <X className="size-3" />
-                </button>
-              </Badge>
-            ))}
-            <Button variant="ghost" size="xs" onClick={() => updateSelected([])}>
-              Clear
-            </Button>
-          </div>
-        ) : null}
-      </CardContent>
+    <Card size="sm" className="h-full px-3 py-3 ring-inset">
+      <div className="flex min-h-0 flex-1 flex-col justify-center gap-2 md:flex-row md:items-center md:gap-3">
+        <CardTitle className="shrink-0">{definition.userDefinedName ?? 'Filter'}</CardTitle>
+        <div className="flex min-w-0 flex-1 flex-col gap-2 md:max-w-80">
+          <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger
+              render={
+                <Button
+                  variant="outline"
+                  className="w-full justify-between font-normal"
+                  aria-label={`Choose ${definition.userDefinedName ?? 'filter'} values`}
+                />
+              }
+            >
+              {selected.length
+                ? definition.allowMultiple
+                  ? `${selected.length} selected`
+                  : selected[0]
+                : 'All values'}
+              <ChevronsUpDown className="size-4 opacity-50" />
+            </PopoverTrigger>
+            <PopoverContent className="w-(--anchor-width) p-0" align="start">
+              <Command shouldFilter={false} label={definition.userDefinedName ?? 'Filter values'}>
+                <CommandInput
+                  value={search}
+                  onValueChange={setSearch}
+                  placeholder="Search values…"
+                />
+                <CommandList aria-multiselectable={definition.allowMultiple || undefined}>
+                  {status === 'loading' ? (
+                    <div role="status" className="py-6 text-center text-sm text-muted-foreground">
+                      Loading…
+                    </div>
+                  ) : status === 'error' ? (
+                    <div role="alert" className="flex flex-col items-center gap-2 py-6 text-sm">
+                      <p>Could not load values.</p>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setRetry((value) => value + 1)}
+                      >
+                        Retry
+                      </Button>
+                    </div>
+                  ) : values.length ? (
+                    <CommandGroup>
+                      {values.map((value) => {
+                        const option = String(value);
+                        const checked = selected.includes(option);
+                        return (
+                          <button
+                            type="button"
+                            role="option"
+                            key={option}
+                            aria-selected={checked}
+                            className="flex min-h-10 w-full items-center rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+                            onKeyDown={handleFilterOptionKeyDown}
+                            onClick={() => select(option)}
+                          >
+                            {option}
+                            <span aria-hidden="true" className="ml-auto">
+                              {checked ? '✓' : ''}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </CommandGroup>
+                  ) : (
+                    <div className="py-6 text-center text-sm">No values found.</div>
+                  )}
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+          {selected.length ? (
+            <div className="flex flex-wrap gap-1.5">
+              {selected.map((value) => (
+                <Badge key={value} variant="secondary" className="gap-1 pr-1">
+                  {value}
+                  <button
+                    type="button"
+                    className="flex size-6 items-center justify-center rounded-sm hover:bg-muted"
+                    aria-label={`Remove ${value}`}
+                    onClick={() => updateSelected(selected.filter((item) => item !== value))}
+                  >
+                    <X className="size-3" />
+                  </button>
+                </Badge>
+              ))}
+              <Button variant="ghost" size="xs" onClick={() => updateSelected([])}>
+                Clear
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      </div>
     </Card>
   );
 }
@@ -497,16 +509,26 @@ function QueryCard({
       clearTimeout(timeout);
       controller.abort();
     };
-  }, [controlState, dashboardId, page, preview, retry, shareToken, widget.definition, widget.id]);
+  }, [
+    controlState,
+    dashboardId,
+    page,
+    preview,
+    retry,
+    shareToken,
+    widget.definition,
+    widget.id,
+    widget.layout.width,
+  ]);
   const definition = widget.definition;
   if (!('title' in definition)) return null;
   return (
-    <Card className="h-full">
-      <CardHeader>
+    <Card className="h-full min-h-0">
+      <CardHeader className="shrink-0">
         <CardTitle>{definition.title}</CardTitle>
         {error ? <CardDescription>{error}</CardDescription> : null}
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex min-h-0 flex-1 flex-col overflow-auto">
         {!rows || !columns ? (
           error ? (
             <div className="flex flex-col items-start gap-3">
@@ -519,7 +541,7 @@ function QueryCard({
             <Skeleton className="h-28 w-full" />
           )
         ) : (
-          <div className="space-y-3">
+          <div className="min-h-0 flex-1">
             <Result
               definition={definition}
               rows={rows}
@@ -601,29 +623,138 @@ export function Result({
     );
   }
   if (definition.type === 'table') {
+    const rowColumns = dimensionColumns.slice(0, definition.dimensions.length);
+    const pivotColumn = definition.pivotDimension
+      ? dimensionColumns[definition.dimensions.length]
+      : undefined;
+    const pivotSeries = pivotColumn
+      ? pivotTableRows(
+          [...rows, ...(comparisonRows ?? [])],
+          rowColumns.map((column) => column.key),
+          pivotColumn.key,
+          metricColumns.map((column) => column.key),
+        ).series
+      : undefined;
+    const tableRows = pivotColumn
+      ? pivotTableRows(
+          rows,
+          rowColumns.map((column) => column.key),
+          pivotColumn.key,
+          metricColumns.map((column) => column.key),
+          pivotSeries,
+        ).rows
+      : rows;
+    const tableComparisonRows = pivotColumn
+      ? pivotTableRows(
+          comparisonRows ?? [],
+          rowColumns.map((column) => column.key),
+          pivotColumn.key,
+          metricColumns.map((column) => column.key),
+          pivotSeries,
+        ).rows
+      : comparisonRows;
+    const tableMetricColumns = pivotSeries
+      ? pivotSeries.flatMap((series) =>
+          metricColumns.map((column) => ({
+            ...column,
+            key: `${series.key}_${column.key}`,
+          })),
+        )
+      : metricColumns;
+    const tableColumns = [...rowColumns, ...tableMetricColumns];
     const summary = definition.showSummaryRow ? summaryRow : undefined;
     return (
-      <div className="space-y-3 overflow-x-auto">
-        <Table>
-          <TableHeader>
+      <div className="space-y-3">
+        <Table className="text-xs">
+          <TableHeader className="sticky top-0 z-10 bg-card">
             <TableRow>
-              {columns.map((column) => (
-                <TableHead key={column.key}>{column.label}</TableHead>
+              {rowColumns.map((column) => (
+                <TableHead
+                  key={column.key}
+                  rowSpan={pivotSeries ? 2 : undefined}
+                  className="h-8 py-1"
+                >
+                  {column.label}
+                </TableHead>
               ))}
+              {pivotSeries
+                ? pivotSeries.map((series) => (
+                    <TableHead
+                      key={series.key}
+                      colSpan={metricColumns.length}
+                      className="h-8 border-l py-1 text-center"
+                    >
+                      {series.label}
+                    </TableHead>
+                  ))
+                : metricColumns.map((column) => (
+                    <TableHead key={column.key} className="h-8 py-1 text-right">
+                      {column.label}
+                    </TableHead>
+                  ))}
             </TableRow>
+            {pivotSeries ? (
+              <TableRow>
+                {pivotSeries.flatMap((series) =>
+                  metricColumns.map((column) => (
+                    <TableHead
+                      key={`${series.key}_${column.key}`}
+                      className="h-7 border-l py-1 text-right"
+                    >
+                      {column.label}
+                    </TableHead>
+                  )),
+                )}
+              </TableRow>
+            ) : null}
           </TableHeader>
           <TableBody>
-            {rows.map((row, index) => (
-              <TableRow key={index}>
-                {columns.map((column) => (
-                  <TableCell key={column.key}>{formatValue(row[column.key], column)}</TableCell>
-                ))}
-              </TableRow>
-            ))}
-            {summary ? (
+            {tableRows.map((row, index) => {
+              const grouping = Number(row.__grouping ?? 0);
+              const grandTotal = grouping > 0 && row.dimension_1 == null;
+              const subtotal = grouping > 0 && !grandTotal;
+              const startsGroup =
+                index > 0 && !grandTotal && row.dimension_1 !== tableRows[index - 1]?.dimension_1;
+              return (
+                <TableRow
+                  key={index}
+                  className={cn(
+                    startsGroup && 'border-t-2 border-t-foreground/20',
+                    (subtotal || grandTotal) && 'bg-muted/60 font-medium',
+                  )}
+                >
+                  {tableColumns.map((column, columnIndex) => {
+                    let value = formatValue(row[column.key], column);
+                    if (grandTotal && columnIndex === 0) value = 'Grand total';
+                    else if (subtotal && columnIndex === definition.dimensions.length - 1)
+                      value = 'Total';
+                    else if ((subtotal || grandTotal) && row[column.key] == null) value = '';
+                    return (
+                      <TableCell
+                        key={column.key}
+                        className={cn(
+                          'h-7 px-2 py-1',
+                          column.kind === 'metric' && 'text-right tabular-nums',
+                          conditionalFormatClass(row[column.key], column),
+                        )}
+                      >
+                        {value}
+                      </TableCell>
+                    );
+                  })}
+                </TableRow>
+              );
+            })}
+            {summary && !pivotSeries ? (
               <TableRow className="font-medium">
                 {columns.map((column, columnIndex) => (
-                  <TableCell key={column.key}>
+                  <TableCell
+                    key={column.key}
+                    className={cn(
+                      'h-7 px-2 py-1',
+                      column.kind === 'metric' && 'text-right tabular-nums',
+                    )}
+                  >
                     {columnIndex === 0 && definition.dimensions.length > 0
                       ? 'Summary'
                       : columnIndex < definition.dimensions.length
@@ -635,17 +766,22 @@ export function Result({
             ) : null}
           </TableBody>
         </Table>
-        {comparisonRows?.length ? (
+        {tableComparisonRows?.length ? (
           <div>
             <p className="mb-2 text-sm font-medium">
               {definition.comparison?.mode === 'previousYear' ? 'Previous year' : 'Previous period'}
             </p>
             <Table>
               <TableBody>
-                {comparisonRows.map((row, index) => (
+                {tableComparisonRows.map((row, index) => (
                   <TableRow key={index}>
-                    {columns.map((column) => (
-                      <TableCell key={column.key}>{formatValue(row[column.key], column)}</TableCell>
+                    {tableColumns.map((column) => (
+                      <TableCell
+                        key={column.key}
+                        className={cn(column.kind === 'metric' && 'text-right tabular-nums')}
+                      >
+                        {formatValue(row[column.key], column)}
+                      </TableCell>
                     ))}
                   </TableRow>
                 ))}
@@ -748,12 +884,38 @@ export function Result({
     ...row,
     ...Object.fromEntries(series.map((item) => [item.key, row[item.sourceKey]])),
   }));
-  const config = Object.fromEntries(
-    series.map((item) => [
-      item.key,
-      { label: item.label, color: `var(--chart-${(item.colorIndex % 5) + 1})` },
-    ]),
-  );
+  let pieLegendKey = dimension.key;
+  let pieConfig = {};
+  if (definition.type === 'pie') {
+    pieLegendKey = 'chart_slice';
+    while (occupiedKeys.has(pieLegendKey)) pieLegendKey = `_${pieLegendKey}`;
+    chartRows = chartRows.map((row, index) => {
+      const key = `chart_slice_${index}`;
+      return {
+        ...row,
+        [pieLegendKey]: key,
+        fill: `var(--color-${key})`,
+      };
+    });
+    pieConfig = Object.fromEntries(
+      chartRows.map((row, index) => [
+        `chart_slice_${index}`,
+        {
+          label: formatAxisValue(row[dimension.key], dimension),
+          color: `var(--chart-${(index % 8) + 1})`,
+        },
+      ]),
+    );
+  }
+  const config = {
+    ...Object.fromEntries(
+      series.map((item) => [
+        item.key,
+        { label: item.label, color: `var(--chart-${(item.colorIndex % 8) + 1})` },
+      ]),
+    ),
+    ...pieConfig,
+  };
   const tooltip = (
     <ChartTooltip
       content={
@@ -770,21 +932,25 @@ export function Result({
   );
   if (definition.type === 'pie')
     return (
-      <ChartContainer className="mx-auto aspect-square max-h-72" config={config}>
+      <ChartContainer
+        className="mx-auto aspect-square max-h-72 md:h-full md:max-h-full md:min-h-0"
+        config={config}
+      >
         <PieChart>
           {tooltip}
           <Pie
             data={chartRows}
             dataKey={series[0]?.key ?? ''}
-            nameKey={dimension.key}
+            nameKey={pieLegendKey}
             fill={`var(--color-${series[0]?.key ?? ''})`}
           />
+          <ChartLegend content={<ChartLegendContent nameKey={pieLegendKey} />} />
         </PieChart>
       </ChartContainer>
     );
   if (definition.type === 'bar')
     return (
-      <ChartContainer className="h-72 w-full" config={config}>
+      <ChartContainer className="h-72 w-full md:h-full md:min-h-0" config={config}>
         <BarChart data={chartRows}>
           <CartesianGrid vertical={false} />
           <XAxis
@@ -801,12 +967,13 @@ export function Result({
               fillOpacity={item.isComparison ? 0.5 : 1}
             />
           ))}
+          <ChartLegend content={<ChartLegendContent />} />
         </BarChart>
       </ChartContainer>
     );
   const axes = lineChartAxes(chartMetrics);
   return (
-    <ChartContainer className="h-72 w-full" config={config}>
+    <ChartContainer className="h-72 w-full md:h-full md:min-h-0" config={config}>
       <LineChart data={chartRows}>
         <CartesianGrid vertical={false} />
         <XAxis
@@ -832,9 +999,31 @@ export function Result({
             dot={false}
           />
         ))}
+        <ChartLegend content={<ChartLegendContent />} />
       </LineChart>
     </ChartContainer>
   );
+}
+
+function conditionalFormatClass(value: unknown, column: QueryResultColumn) {
+  if (column.kind !== 'metric') return undefined;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return undefined;
+  const rule = column.conditionalFormat?.find((candidate) => {
+    if (candidate.comparator === 'between')
+      return number >= candidate.min && number <= candidate.max;
+    if (candidate.comparator === 'gt') return number > candidate.value;
+    if (candidate.comparator === 'gte') return number >= candidate.value;
+    if (candidate.comparator === 'lt') return number < candidate.value;
+    return number <= candidate.value;
+  });
+  if (!rule) return undefined;
+  return {
+    positive: 'bg-emerald-500/20',
+    warning: 'bg-amber-500/25',
+    negative: 'bg-red-500/20',
+    neutral: 'bg-muted',
+  }[rule.color];
 }
 
 export function lineMetricAxis(index: number) {
@@ -920,7 +1109,7 @@ function normalizeMetricValues(rows: Record<string, unknown>[], metrics: QueryRe
   );
 }
 
-function formatAxisValue(value: unknown, column: QueryResultColumn) {
+export function formatAxisValue(value: unknown, column: QueryResultColumn) {
   if (column.kind === 'dimension' && column.dataType === 'date' && typeof value === 'string') {
     const date = new Date(`${value.slice(0, 10)}T00:00:00`);
     if (!Number.isNaN(date.valueOf()))
@@ -934,6 +1123,8 @@ function formatAxisValue(value: unknown, column: QueryResultColumn) {
       notation: 'compact',
       maximumFractionDigits: 1,
     }).format(number);
+  if (Math.abs(number) >= 1_000 && Math.abs(number) < 1_000_000)
+    return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(number / 1_000)}k`;
   return new Intl.NumberFormat(undefined, {
     notation: 'compact',
     maximumFractionDigits: 1,

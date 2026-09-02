@@ -5,6 +5,75 @@ export interface LayoutUpdate {
   placement: DashboardWidget['layout'];
 }
 
+export const MIN_CANVAS_ROWS = 10;
+
+export function occupiedRowCount(widgets: DashboardWidget[]) {
+  return widgets.reduce(
+    (bottom, widget) => Math.max(bottom, widget.layout.y + widget.layout.height),
+    0,
+  );
+}
+
+export function defaultCanvasRows(widgets: DashboardWidget[]) {
+  return Math.max(MIN_CANVAS_ROWS, occupiedRowCount(widgets) + 2);
+}
+
+export function requiredCanvasRows(widgets: DashboardWidget[]) {
+  return Math.max(MIN_CANVAS_ROWS, occupiedRowCount(widgets));
+}
+
+export function validRowCuts(widgets: DashboardWidget[]) {
+  const lastCut = occupiedRowCount(widgets);
+  return Array.from({ length: lastCut + 1 }, (_, cut) => cut).filter((cut) =>
+    widgets.every(
+      (widget) => !(widget.layout.y < cut && widget.layout.y + widget.layout.height > cut),
+    ),
+  );
+}
+
+export function rowInsertionCuts(widgets: DashboardWidget[], canvasRows: number) {
+  const occupiedRows = occupiedRowCount(widgets);
+  return [...validRowCuts(widgets).filter((cut) => cut < occupiedRows), canvasRows].filter(
+    (cut, index, cuts) => cuts.indexOf(cut) === index,
+  );
+}
+
+export function isRowEmpty(widgets: DashboardWidget[], row: number) {
+  return widgets.every(
+    (widget) => row < widget.layout.y || row >= widget.layout.y + widget.layout.height,
+  );
+}
+
+export function insertRow(widgets: DashboardWidget[], canvasRows: number, cut: number) {
+  if (
+    cut < 0 ||
+    cut > canvasRows ||
+    widgets.some((widget) => widget.layout.y < cut && widget.layout.y + widget.layout.height > cut)
+  )
+    return undefined;
+  return {
+    canvasRows: Math.max(requiredCanvasRows(widgets), canvasRows) + 1,
+    widgets: widgets.map((widget) =>
+      widget.layout.y >= cut
+        ? { ...widget, layout: { ...widget.layout, y: widget.layout.y + 1 } }
+        : widget,
+    ),
+  };
+}
+
+export function removeEmptyRow(widgets: DashboardWidget[], canvasRows: number, row: number) {
+  if (row < 0 || row >= canvasRows || canvasRows <= MIN_CANVAS_ROWS || !isRowEmpty(widgets, row))
+    return undefined;
+  const shifted = widgets.map((widget) =>
+    widget.layout.y > row
+      ? { ...widget, layout: { ...widget.layout, y: widget.layout.y - 1 } }
+      : widget,
+  );
+  const nextCanvasRows = canvasRows - 1;
+  if (nextCanvasRows < requiredCanvasRows(shifted)) return undefined;
+  return { widgets: shifted, canvasRows: nextCanvasRows };
+}
+
 export function appendPlacement(
   widgets: DashboardWidget[],
   width: number,
@@ -17,6 +86,28 @@ export function appendPlacement(
     0,
   );
   return { x: 0, y: bottom, width: safeWidth, height };
+}
+
+export function rollbackFailedLayoutState(
+  current: { widgets: DashboardWidget[]; canvasRows: number },
+  previous: { placements: ReadonlyMap<string, DashboardWidget['layout']>; canvasRows: number },
+  failed: { placements: ReadonlyMap<string, DashboardWidget['layout']>; canvasRows: number },
+) {
+  const stillFailed =
+    current.canvasRows === failed.canvasRows &&
+    current.widgets.every((widget) => {
+      const placement = failed.placements.get(widget.id);
+      return placement && samePlacement(widget.layout, placement);
+    });
+  if (!stillFailed) return current;
+  return {
+    ...current,
+    canvasRows: previous.canvasRows,
+    widgets: current.widgets.map((widget) => ({
+      ...widget,
+      layout: previous.placements.get(widget.id) ?? widget.layout,
+    })),
+  };
 }
 
 export function placementFits(

@@ -30,6 +30,15 @@ function RootDocument({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <head>
+        {/* Applies the stored theme (or the OS preference) before first paint,
+            so a dark-mode visitor never sees a light flash. Must stay inline
+            and ahead of hydration. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "try{var t=localStorage.getItem('theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark')}catch(e){}",
+          }}
+        />
         <HeadContent />
       </head>
       <body>

@@ -11,6 +11,7 @@ Dashboard:
   timezone: string           # IANA name, default Europe/Berlin
   defaultDateRange: DateRange
   columns: integer           # default 12
+  canvasRows: integer        # minimum 10
   widgets: DashboardWidget[]
   createdBy: string
   createdAt: string
@@ -41,8 +42,9 @@ WidgetDefinition:
 - `x`, `y` are zero or greater; `width`, `height` are greater than zero; `x + width` is at most `columns`.
 - Widgets do not overlap. The server rejects placements that would.
 - Empty rows are allowed. Stored placements are never compacted automatically.
+- `canvasRows` contains every widget and persists empty trailing rows. Older documents derive it from their widgets with two trailing rows and a ten-row minimum.
 - Widget IDs stay stable across moves and resizes.
-- `addWidget` accepts only `width` and `height` and appends at the bottom of the grid. `moveWidget` sets one placement. `updateLayout` replaces every placement in one validated write after an interactive drag or resize. Agents never compute coordinates when adding widgets.
+- `addWidget` accepts only `width` and `height` and appends at the bottom of the grid. `moveWidget` sets one placement. `updateLayout` replaces every placement and `canvasRows` in one validated write after an interactive layout change. Agents never compute coordinates when adding widgets.
 - `definitionHash` is recomputed on every write and is the first component of the query cache key.
 - The grid describes the desktop layout only. On narrow screens the viewer stacks widgets in a single column in grid order; nothing mobile-specific is stored.
 
@@ -60,6 +62,7 @@ defaultDateRange:
   endDate:
     relative: { amount: 0, unit: day, direction: past, anchor: startOfDay }
 columns: 12
+canvasRows: 10
 widgets:
   - id: date
     layout: { x: 0, y: 0, width: 4, height: 1 }

@@ -13,11 +13,11 @@ async function tabTo(page: Page, target: Locator, key: 'Tab' | 'Shift+Tab' = 'Ta
   throw new Error(`Could not reach ${await target.getAttribute('aria-label')} with ${key}`);
 }
 
-test('a keyboard-only editor selects, edits, moves, and removes a widget', async ({ page }) => {
+test('a keyboard-only editor selects, edits, and removes a widget', async ({ page }) => {
   const state = await mockRundownApi(page, { role: 'editor' });
   await page.goto('/dashboards/dash_demo');
   await expect(page.getByRole('heading', { name: 'Client weekly' })).toBeVisible();
-  await expect(page.getByText('Changes save automatically')).toBeVisible();
+  await expect(page.getByRole('status', { name: 'Changes saved' })).toBeVisible();
 
   // Select
   await tabTo(page, page.getByRole('button', { name: 'Edit Media spend' }));
@@ -32,16 +32,6 @@ test('a keyboard-only editor selects, edits, moves, and removes a widget', async
   await page.keyboard.type('Spend to date');
   await page.keyboard.press('Tab');
   await expect(settings.getByRole('heading', { name: 'Spend to date' })).toBeVisible();
-
-  // Move through the form
-  const column = settings.getByLabel('Column');
-  await tabTo(page, column);
-  await page.keyboard.press('ControlOrMeta+a');
-  await page.keyboard.type('6');
-  await page.keyboard.press('Tab');
-  await expect
-    .poll(() => state.dashboard.widgets.find((widget) => widget.id === 'w_spend')?.layout.x)
-    .toBe(6);
 
   // Removing happens on the widget card now; it asks first, and Escape backs out with focus restored
   const remove = page.getByRole('button', { name: 'Remove Spend to date' });
@@ -65,11 +55,45 @@ test('a keyboard-only editor selects, edits, moves, and removes a widget', async
   await expect(page.getByText('Spend to date')).toHaveCount(0);
 });
 
-test('a keyboard-only editor adds a widget from the catalog', async ({ page }) => {
+test('aggregation options explain their calculations', async ({ page }) => {
+  await mockRundownApi(page, { role: 'editor' });
+  await page.goto('/dashboards/dash_demo');
+
+  await page.getByRole('button', { name: 'Edit Media spend' }).click();
+  const settings = page.getByRole('complementary');
+  const aggregation = settings.getByRole('combobox', { name: 'Aggregation for metric 1' });
+  await aggregation.click();
+
+  const sum = page.getByRole('option', { name: 'SUM' });
+  const helpIconPositions = await page
+    .locator('[data-slot="aggregation-help"]')
+    .evaluateAll((icons) => icons.map((icon) => Math.round(icon.getBoundingClientRect().x)));
+  expect(new Set(helpIconPositions).size).toBe(1);
+  const countDistinctGap = await page.getByRole('option', { name: 'COUNTD' }).evaluate((option) => {
+    const label = option.querySelector('span');
+    const help = option.querySelector('[data-slot="aggregation-help"]');
+    if (!label || !help) throw new Error('Aggregation option layout is incomplete');
+    return help.getBoundingClientRect().left - label.getBoundingClientRect().right;
+  });
+  expect(countDistinctGap).toBeGreaterThanOrEqual(12);
+
+  await sum.hover();
+  await expect(page.getByText('Adds all non-null values in each group.')).toBeVisible();
+
+  await sum.focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.getByText('Returns the arithmetic mean of all non-null values.')).toBeVisible();
+  await page.keyboard.press('Enter');
+  await expect(aggregation).toContainText('AVG');
+});
+
+test('a keyboard-only editor adds a widget from the toolbar catalog', async ({ page }) => {
   const state = await mockRundownApi(page, { role: 'editor' });
   await page.goto('/dashboards/dash_demo');
-  await expect(page.getByText('Changes save automatically')).toBeVisible();
+  await expect(page.getByRole('status', { name: 'Changes saved' })).toBeVisible();
 
+  await tabTo(page, page.getByRole('button', { name: 'Add widget' }));
+  await page.keyboard.press('Enter');
   await tabTo(page, page.getByRole('button', { name: 'Add Scorecard' }));
   await page.keyboard.press('Enter');
   await expect
@@ -78,12 +102,41 @@ test('a keyboard-only editor adds a widget from the catalog', async ({ page }) =
   await expect(page.getByRole('button', { name: 'Remove New scorecard' })).toBeVisible();
 });
 
+test('row controls insert and remove an empty row with the keyboard', async ({ page }) => {
+  const state = await mockRundownApi(page, { role: 'editor' });
+  await page.goto('/dashboards/dash_demo');
+  await expect(page.getByRole('status', { name: 'Changes saved' })).toBeVisible();
+
+  const insert = page.getByRole('button', { name: 'Insert row after row 2' });
+  await tabTo(page, insert);
+  await page.keyboard.press('Enter');
+  await expect
+    .poll(() => state.dashboard.widgets.find((widget) => widget.id === 'w_spend')?.layout.y)
+    .toBe(3);
+  expect(state.dashboard.canvasRows).toBe(11);
+
+  const remove = page.getByRole('button', { name: 'Remove empty row 3' });
+  await tabTo(page, remove);
+  await page.keyboard.press('Enter');
+  await expect
+    .poll(() => state.dashboard.widgets.find((widget) => widget.id === 'w_spend')?.layout.y)
+    .toBe(2);
+  expect(state.dashboard.canvasRows).toBe(10);
+
+  const addBelow = page.getByRole('button', { name: 'Insert row after row 10' });
+  await tabTo(page, addBelow);
+  await page.keyboard.press('Enter');
+  await expect.poll(() => state.dashboard.canvasRows).toBe(11);
+  await expect(page.getByRole('button', { name: 'Insert row after row 11' })).toBeVisible();
+  expect(state.dashboard.widgets.find((widget) => widget.id === 'w_spend')?.layout.y).toBe(2);
+});
+
 // The drag handle doubles as the keyboard "Edit" button, so the pointer path is worth
 // pinning down alongside it.
 test('the pointer drag handle still moves a widget', async ({ page }) => {
   const state = await mockRundownApi(page, { role: 'editor' });
   await page.goto('/dashboards/dash_demo');
-  await expect(page.getByText('Changes save automatically')).toBeVisible();
+  await expect(page.getByRole('status', { name: 'Changes saved' })).toBeVisible();
 
   const card = page.locator('.react-grid-item').filter({ hasText: 'Media spend' });
   await card.hover();

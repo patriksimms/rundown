@@ -27,8 +27,12 @@ import {
   type DatasourceOverviewRow,
 } from '#/domain/datasource-overview';
 import { useWebMcpTools } from '#/webmcp/use-webmcp-tools';
+import { pageTitle } from '#/lib/page-title';
 
-export const Route = createFileRoute('/datasources/')({ component: DatasourcesPage });
+export const Route = createFileRoute('/datasources/')({
+  component: DatasourcesPage,
+  head: () => ({ meta: [{ title: pageTitle('Datasources') }] }),
+});
 
 const helper = createColumnHelper<DataTableFeatures, DatasourceOverviewRow>();
 const columns = helper.columns([

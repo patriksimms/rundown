@@ -106,6 +106,7 @@ export function remapWidgetDefinition(
   return widgetDefinitionSchema.parse({
     ...common,
     dimensions: definition.dimensions.map(dimension),
+    pivotDimension: definition.pivotDimension ? dimension(definition.pivotDimension) : undefined,
     metrics: definition.metrics.map(metric),
     sort: sort(definition.sort),
   });

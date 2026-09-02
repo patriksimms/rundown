@@ -21,6 +21,7 @@ export function widgetQueryRequest({
         action: 'previewWidget',
         dashboardId,
         definition: widget.definition,
+        width: widget.layout.width,
         controlState,
       }
     : {

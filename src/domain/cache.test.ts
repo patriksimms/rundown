@@ -99,6 +99,32 @@ describe('widget dependency cache state', () => {
     expect(after).not.toBe(before);
   });
 
+  it('ignores cell formatting while retaining query changes', async () => {
+    const metadata = {
+      fields: [baseField],
+      calculatedFields: [],
+      libraryMetrics: [
+        { id: 'metric_spend', canonicalName: 'spend', name: 'Spend', expression: 'SUM(cost)' },
+      ],
+    };
+    const before = await hashJson(widgetDependencyState(definition, metadata));
+    const formatted = await hashJson(
+      widgetDependencyState(
+        {
+          ...definition,
+          metric: {
+            ...definition.metric,
+            displayFormat: { radix: 2 },
+            conditionalFormat: [{ comparator: 'gte', value: 100, color: 'positive' }],
+          },
+        },
+        metadata,
+      ),
+    );
+
+    expect(formatted).toBe(before);
+  });
+
   it('separates resolved date boundaries and dashboard timezones', async () => {
     const state = {
       definitionHash: 'definition',
@@ -111,6 +137,7 @@ describe('widget dependency cache state', () => {
       dataSourceConnector: 'duckdb-file',
       dataSourceVersion: 'version',
       timezone: 'Europe/Berlin',
+      dateBucketTarget: 60,
     };
     const before = await hashJson(queryCacheState(state));
     const nextDay = await hashJson(
@@ -135,6 +162,7 @@ describe('widget dependency cache state', () => {
       dataSourceConnector: 'duckdb-file',
       dataSourceVersion: 'version',
       timezone: 'Europe/Berlin',
+      dateBucketTarget: 60,
     };
 
     const before = await hashJson(queryCacheState(state));
@@ -142,6 +170,22 @@ describe('widget dependency cache state', () => {
       queryCacheState({ ...state, dataSourceConnector: 'another-connector' }),
     );
 
+    expect(after).not.toBe(before);
+  });
+
+  it('separates automatic date buckets for different widget width tiers', async () => {
+    const state = {
+      definitionHash: 'definition',
+      requestedDateRange: {},
+      resolvedDateRange: { start: '2026-01-01', end: '2026-12-31' },
+      resolvedControls: [],
+      dataSourceConnector: 'duckdb-file',
+      dataSourceVersion: 'version',
+      timezone: 'Europe/Berlin',
+      dateBucketTarget: 30,
+    };
+    const before = await hashJson(queryCacheState(state));
+    const after = await hashJson(queryCacheState({ ...state, dateBucketTarget: 60 }));
     expect(after).not.toBe(before);
   });
 });

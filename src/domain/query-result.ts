@@ -23,6 +23,19 @@ export interface QueryResultColumn {
   kind: 'dimension' | 'metric';
   dataType: SemanticType | 'number' | 'percent' | 'duration';
   radix?: number;
+  conditionalFormat?: Array<
+    | {
+        comparator: 'gt' | 'lt' | 'gte' | 'lte';
+        value: number;
+        color: 'positive' | 'warning' | 'negative' | 'neutral';
+      }
+    | {
+        comparator: 'between';
+        min: number;
+        max: number;
+        color: 'positive' | 'warning' | 'negative' | 'neutral';
+      }
+  >;
 }
 
 export function queryResultColumns(
@@ -44,6 +57,7 @@ export function queryResultColumns(
     kind: 'metric' as const,
     dataType: metric.dataType,
     ...(metric.displayFormat?.radix === undefined ? {} : { radix: metric.displayFormat.radix }),
+    ...(metric.conditionalFormat ? { conditionalFormat: metric.conditionalFormat } : {}),
   }));
   return [...dimensions, ...metrics];
 }
@@ -56,7 +70,9 @@ function widgetDimensions(definition: WidgetDefinition) {
       ...(definition.breakdownDimension ? [definition.breakdownDimension] : []),
     ];
   }
-  return definition.type === 'table' ? definition.dimensions : [];
+  return definition.type === 'table'
+    ? [...definition.dimensions, ...(definition.pivotDimension ? [definition.pivotDimension] : [])]
+    : [];
 }
 
 function widgetMetrics(definition: WidgetDefinition) {

@@ -24,6 +24,8 @@ describe('WebMCP input schemas', () => {
   it('exposes batch placements without asking for the open dashboard id', () => {
     const schema = inputSchemaFor('updateLayout', { dashboardId: 'dashboard' });
     expect(schema.properties).toHaveProperty('placements');
+    expect(schema.properties).toHaveProperty('canvasRows');
+    expect(schema.required).toContain('canvasRows');
     expect(schema.properties).not.toHaveProperty('dashboardId');
   });
 

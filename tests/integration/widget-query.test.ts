@@ -59,6 +59,53 @@ describe('widget queries', () => {
     expect(call).not.toHaveProperty('requiresR2Credentials');
   });
 
+  test('date dimensions rebucket when a widget crosses a width tier', async () => {
+    const workspace = await signInToNewWorkspace();
+    const source = await seedDataSource(workspace);
+    const dashboard = await createDashboard();
+    const widget = await addWidget(dashboard.id, {
+      type: 'line',
+      title: 'Revenue by date',
+      dataSourceId: source.id,
+      dateRangeFieldId: source.fieldIds.day,
+      dimension: { fieldId: source.fieldIds.day, dateGranularity: 'auto' },
+      metrics: [
+        {
+          source: { kind: 'field', fieldId: source.fieldIds.revenue, aggregation: 'sum' },
+          dataType: 'currency',
+        },
+      ],
+    });
+    const controlState = {
+      dateRange: {
+        startDate: { fixed: '2026-01-01' as const },
+        endDate: { fixed: '2026-12-31' as const },
+      },
+    };
+
+    await callService({
+      action: 'queryWidget',
+      dashboardId: dashboard.id,
+      widgetId: widget.id,
+      controlState,
+    });
+    expect(queryEngine.queryCalls.at(-1)?.sql).toContain(`DATE_TRUNC('month', "day")`);
+
+    await callService({
+      action: 'moveWidget',
+      dashboardId: dashboard.id,
+      widgetId: widget.id,
+      placement: { x: 0, y: 0, width: 8, height: 3 },
+    });
+    await callService({
+      action: 'queryWidget',
+      dashboardId: dashboard.id,
+      widgetId: widget.id,
+      controlState,
+    });
+    expect(queryEngine.queryCalls.at(-1)?.sql).toContain(`DATE_TRUNC('week', "day")`);
+  });
+
   test('an identical query is served from KV and a changed control is not', async () => {
     const { source, dashboardId, widgetId } = await seedScorecardDashboard();
     const control = await addRegionControl(dashboardId, source);
@@ -419,6 +466,7 @@ describe('query engine failures', () => {
         action: 'previewWidget',
         dashboardId: dashboard.id,
         definition: regionControlDefinition(source),
+        width: 4,
       }),
     ).toMatchObject({ rows: [] });
     // None of them reach the query engine.

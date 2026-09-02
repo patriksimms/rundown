@@ -47,3 +47,24 @@ describe('datasource upload API contracts', () => {
     ).toBe(false);
   });
 });
+
+describe('dashboard layout API contracts', () => {
+  it('updates placements and canvas height in one request', () => {
+    expect(
+      apiRequestSchema.safeParse({
+        action: 'updateLayout',
+        dashboardId: 'dashboard-1',
+        canvasRows: 12,
+        placements: [],
+      }).success,
+    ).toBe(true);
+    expect(
+      apiRequestSchema.safeParse({
+        action: 'updateLayout',
+        dashboardId: 'dashboard-1',
+        canvasRows: 9,
+        placements: [],
+      }).success,
+    ).toBe(false);
+  });
+});

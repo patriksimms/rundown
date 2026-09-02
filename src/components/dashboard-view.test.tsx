@@ -2,7 +2,13 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { QueryResultColumn } from '#/domain/query-result';
 import type { DashboardWidget } from '#/domain/schema';
-import { formatValue, lineChartAxes, lineMetricAxis, Result } from './dashboard-view';
+import {
+  formatAxisValue,
+  formatValue,
+  lineChartAxes,
+  lineMetricAxis,
+  Result,
+} from './dashboard-view';
 
 type QueryDefinition = Extract<DashboardWidget['definition'], { title: string }>;
 const base = {
@@ -37,7 +43,7 @@ function columnsFor(definition: QueryDefinition): QueryResultColumn[] {
           ? 2
           : 1
         : definition.type === 'table'
-          ? definition.dimensions.length
+          ? definition.dimensions.length + (definition.pivotDimension ? 1 : 0)
           : 0;
   const metrics =
     definition.type === 'line' || definition.type === 'table'
@@ -61,6 +67,7 @@ function columnsFor(definition: QueryDefinition): QueryResultColumn[] {
       kind: 'metric' as const,
       dataType: item.dataType,
       ...(item.displayFormat?.radix === undefined ? {} : { radix: item.displayFormat.radix }),
+      ...(item.conditionalFormat ? { conditionalFormat: item.conditionalFormat } : {}),
     })),
   ];
 }
@@ -194,6 +201,71 @@ describe('widget result rendering', () => {
     expect(render(definition, [])).toContain('0–0');
   });
 
+  it('renders grouped totals and the first matching threshold color', () => {
+    const definition: QueryDefinition = {
+      ...base,
+      type: 'table',
+      dimensions: [{ fieldId: 'platform' }, { fieldId: 'placement' }],
+      metrics: [
+        {
+          ...metric,
+          conditionalFormat: [
+            { comparator: 'gte', value: 100, color: 'positive' },
+            { comparator: 'gte', value: 50, color: 'warning' },
+          ],
+        },
+      ],
+      resultLimit: { mode: 'top', amount: 20 },
+      showSubtotals: true,
+    };
+    const markup = render(definition, [
+      { dimension_1: 'Meta', dimension_2: 'Feed', metric_1: 120, __grouping: 0 },
+      { dimension_1: 'Meta', dimension_2: null, metric_1: 120, __grouping: 1 },
+      { dimension_1: null, dimension_2: null, metric_1: 120, __grouping: 3 },
+    ]);
+
+    expect(markup).toContain('Total');
+    expect(markup).toContain('Grand total');
+    expect(markup).toContain('bg-emerald-500/20');
+    expect(markup).not.toContain('__grouping');
+  });
+
+  it('renders pivot values as grouped metric headers', () => {
+    const definition: QueryDefinition = {
+      ...base,
+      type: 'table',
+      dimensions: [{ fieldId: 'platform' }, { fieldId: 'placement' }],
+      pivotDimension: { fieldId: 'month' },
+      metrics: [metric, { ...metric, userDefinedName: 'Clicks' }],
+      resultLimit: { mode: 'top', amount: 20 },
+      showSubtotals: true,
+    };
+    const markup = render(definition, [
+      {
+        dimension_1: 'Meta',
+        dimension_2: 'Feed',
+        dimension_3: 'Jan',
+        metric_1: 10,
+        metric_2: 2,
+        __grouping: 0,
+      },
+      {
+        dimension_1: 'Meta',
+        dimension_2: 'Feed',
+        dimension_3: 'Feb',
+        metric_1: 20,
+        metric_2: 4,
+        __grouping: 0,
+      },
+    ]);
+
+    expect(markup).toContain('colSpan="2"');
+    expect(markup).toContain('rowSpan="2"');
+    expect(markup).toContain('Jan');
+    expect(markup).toContain('Feb');
+    expect(markup).not.toContain('Dimension 3');
+  });
+
   it('uses stable chart keys while retaining the custom display label', () => {
     const html = renderToStaticMarkup(
       <Result
@@ -293,5 +365,12 @@ describe('widget result rendering', () => {
     );
     expect(formatValue('9223372036854775807', dimension)).toBe('9223372036854775807');
     expect(formatValue('9223372036854775807', currency)).toBe('9223372036854775807');
+  });
+
+  it('abbreviates thousands on chart axes with k', () => {
+    expect(formatAxisValue(999, currency)).toBe('999');
+    expect(formatAxisValue(35_000, currency)).toBe('35k');
+    expect(formatAxisValue(-140_000, currency)).toBe('-140k');
+    expect(formatAxisValue(1_000_000, currency)).not.toContain('k');
   });
 });

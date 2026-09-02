@@ -3,6 +3,7 @@ import {
   alignDateComparisonRows,
   pieBreakdownRows,
   pivotBreakdownRows,
+  pivotTableRows,
   tableSummaryDefinition,
   withComparisonSeries,
 } from './widget-results';
@@ -97,6 +98,23 @@ describe('widget result shaping', () => {
     ]);
   });
 
+  it('aligns calendar buckets across an uneven previous period', () => {
+    expect(
+      alignDateComparisonRows(
+        [
+          { week: '2025-12-01', spend: 5 },
+          { week: '2025-12-08', spend: 7 },
+        ],
+        'previousPeriod',
+        { start: '2026-01-01', end: '2026-01-30' },
+        'week',
+      ),
+    ).toEqual([
+      { week: '2025-12-29', spend: 5 },
+      { week: '2026-01-05', spend: 7 },
+    ]);
+  });
+
   it('normalizes database date objects', () => {
     expect(
       alignDateComparisonRows(
@@ -176,6 +194,43 @@ describe('widget result shaping', () => {
     ).toEqual({
       rows: [{ day: 'Mon', comparison_0: 10, _comparison_0: 5 }],
       series: ['_comparison_0'],
+    });
+  });
+
+  it('pivots table metrics while merging subtotal rows across pivot values', () => {
+    expect(
+      pivotTableRows(
+        [
+          { platform: 'Meta', placement: 'Feed', month: 'Jan', spend: 10, __grouping: 0 },
+          { platform: 'Meta', placement: 'Feed', month: 'Feb', spend: 20, __grouping: 0 },
+          { platform: 'Meta', placement: null, month: 'Jan', spend: 10, __grouping: 1 },
+          { platform: 'Meta', placement: null, month: 'Feb', spend: 20, __grouping: 1 },
+        ],
+        ['platform', 'placement'],
+        'month',
+        ['spend'],
+      ),
+    ).toEqual({
+      rows: [
+        {
+          platform: 'Meta',
+          placement: 'Feed',
+          __grouping: 0,
+          pivot_0_spend: 10,
+          pivot_1_spend: 20,
+        },
+        {
+          platform: 'Meta',
+          placement: null,
+          __grouping: 1,
+          pivot_0_spend: 10,
+          pivot_1_spend: 20,
+        },
+      ],
+      series: [
+        { key: 'pivot_0', label: 'Jan', value: 'string:Jan' },
+        { key: 'pivot_1', label: 'Feb', value: 'string:Feb' },
+      ],
     });
   });
 

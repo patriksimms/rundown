@@ -40,6 +40,7 @@ describe('widget query requests', () => {
       }),
     ).toMatchObject({
       action: 'previewWidget',
+      width: 4,
       definition: { metric: { source: { fieldId: 'revenue', aggregation: 'average' } } },
     });
   });

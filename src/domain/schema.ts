@@ -64,6 +64,34 @@ export const dateRangeSchema = z
 
 const stylingSchema = z.record(z.string(), z.unknown()).optional();
 
+export const dateGranularitySchema = z.enum([
+  'auto',
+  'raw',
+  'day',
+  'week',
+  'month',
+  'quarter',
+  'year',
+]);
+
+const conditionalFormatSchema = z.discriminatedUnion('comparator', [
+  z.object({
+    comparator: z.enum(['gt', 'lt', 'gte', 'lte']),
+    value: z.number(),
+    color: z.enum(['positive', 'warning', 'negative', 'neutral']),
+  }),
+  z
+    .object({
+      comparator: z.literal('between'),
+      min: z.number(),
+      max: z.number(),
+      color: z.enum(['positive', 'warning', 'negative', 'neutral']),
+    })
+    .refine((rule) => rule.min <= rule.max, {
+      message: 'The minimum threshold must not exceed the maximum.',
+    }),
+]);
+
 export const filterConditionSchema = z.object({
   fieldId: z.string().min(1),
   operator: z.enum([
@@ -101,12 +129,14 @@ const metricSchema = z.object({
   userDefinedName: z.string().trim().min(1).optional(),
   dataType: z.enum(['number', 'percent', 'duration', 'currency']),
   displayFormat: z.object({ radix: z.number().int().min(0).max(10).optional() }).optional(),
+  conditionalFormat: z.array(conditionalFormatSchema).optional(),
   styling: stylingSchema,
 });
 
 const dimensionSchema = z.object({
   fieldId: z.string().min(1),
   userDefinedName: z.string().trim().min(1).optional(),
+  dateGranularity: dateGranularitySchema.optional(),
   styling: stylingSchema,
 });
 
@@ -197,12 +227,14 @@ export const widgetDefinitionSchema = z.discriminatedUnion('type', [
     ...cardBase,
     type: z.literal('table'),
     dimensions: z.array(dimensionSchema),
+    pivotDimension: dimensionSchema.optional(),
     metrics: z.array(metricSchema).min(1),
     comparison: comparisonSchema.optional(),
     resultLimit: z.object({
       mode: z.enum(['pagination', 'top']),
       amount: z.number().int().positive().max(500),
     }),
+    showSubtotals: z.boolean().optional(),
     showSummaryRow: z.boolean().optional(),
     sort: z.array(sortSchema).optional(),
   }),
@@ -222,7 +254,7 @@ export const dashboardWidgetSchema = z.object({
   definitionHash: z.string().min(1),
 });
 
-export const dashboardDocumentSchema = z.object({
+const dashboardDocumentFields = z.object({
   id: z.string().min(1),
   workspaceId: z.string().min(1),
   name: z.string().trim().min(1),
@@ -231,11 +263,33 @@ export const dashboardDocumentSchema = z.object({
   timezone: z.string().min(1).default('Europe/Berlin'),
   defaultDateRange: dateRangeSchema,
   columns: z.number().int().positive().default(12),
+  canvasRows: z.number().int().min(10).optional(),
   widgets: z.array(dashboardWidgetSchema),
   createdBy: z.string().min(1),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
+
+export const dashboardDocumentSchema = dashboardDocumentFields
+  .transform((document) => ({
+    ...document,
+    canvasRows:
+      document.canvasRows ??
+      Math.max(
+        10,
+        document.widgets.reduce(
+          (bottom, widget) => Math.max(bottom, widget.layout.y + widget.layout.height + 2),
+          0,
+        ),
+      ),
+  }))
+  .refine(
+    (document) =>
+      document.widgets.every(
+        (widget) => widget.layout.y + widget.layout.height <= document.canvasRows,
+      ),
+    { message: 'Canvas rows must contain every widget.', path: ['canvasRows'] },
+  );
 
 export const controlStateSchema = z.object({
   dateRange: dateRangeSchema.optional(),
@@ -251,6 +305,7 @@ export const dataSourceLocationSchema = z.object({
 export type DashboardDocument = z.infer<typeof dashboardDocumentSchema>;
 export type DashboardWidget = z.infer<typeof dashboardWidgetSchema>;
 export type WidgetDefinition = z.infer<typeof widgetDefinitionSchema>;
+export type DateGranularity = z.infer<typeof dateGranularitySchema>;
 export type ControlState = z.infer<typeof controlStateSchema>;
 export type DateRange = z.infer<typeof dateRangeSchema>;
 export type FieldRole = z.infer<typeof fieldRoleSchema>;

@@ -6,6 +6,7 @@ import type {
   WidgetDefinition,
 } from '#/domain/schema';
 import { resolveDateRange } from '#/domain/dates';
+import { resolveDateGranularity } from '#/domain/date-granularity';
 import type {
   CalculatedFieldRecord,
   DataSourceRecord,
@@ -31,6 +32,7 @@ export interface QueryContext {
   sourceSql?: string;
   resolvedControls?: Array<{ fieldId: string; values: unknown[] }>;
   offset?: number;
+  dateBucketTarget?: number;
 }
 
 export interface CompiledQuery {
@@ -45,11 +47,15 @@ export function compileWidgetQuery(context: QueryContext): CompiledQuery {
     throw new Error('This widget does not query a datasource.');
   const dimensions = widgetDimensions(definition);
   const metrics = widgetMetrics(definition);
+  const dateRange = context.controlState.dateRange ?? context.dashboard.defaultDateRange;
+  const resolved = resolveDateRange(dateRange, context.dashboard.timezone);
+  const dimensionExpressions = dimensions.map((dimension) =>
+    dimensionExpression(dimension, context, resolved),
+  );
   const definitions: CompiledQuery['definitions'] = [];
   const select = [
-    ...dimensions.map(
-      (dimension, index) =>
-        `${fieldExpression(dimension.fieldId, context)} AS ${quoteIdentifier(`dimension_${index + 1}`)}`,
+    ...dimensionExpressions.map(
+      (expression, index) => `${expression} AS ${quoteIdentifier(`dimension_${index + 1}`)}`,
     ),
     ...metrics.map((metric, index) => {
       const compiled = metricExpression(metric, context, definitions);
@@ -70,8 +76,6 @@ export function compileWidgetQuery(context: QueryContext): CompiledQuery {
   ];
   const parameters: unknown[] = [];
   const conditions: string[] = [];
-  const dateRange = context.controlState.dateRange ?? context.dashboard.defaultDateRange;
-  const resolved = resolveDateRange(dateRange, context.dashboard.timezone);
   conditions.push(`${fieldExpression(definition.dateRangeFieldId, context)} BETWEEN ? AND ?`);
   parameters.push(resolved.start, resolved.end);
   if (definition.filter) conditions.push(compileFilter(definition.filter, context, parameters));
@@ -84,15 +88,49 @@ export function compileWidgetQuery(context: QueryContext): CompiledQuery {
   const source = context.sourceSql
     ? context.sourceSql
     : compileSourceSql(context.dataSource, context.bucketName);
+  const tableRowDimensions = definition.type === 'table' ? definition.dimensions : [];
+  const pivotPosition =
+    definition.type === 'table' && definition.pivotDimension ? dimensions.length : undefined;
+  const groupedTable =
+    definition.type === 'table' &&
+    tableRowDimensions.length > 0 &&
+    (definition.showSummaryRow || (definition.showSubtotals && tableRowDimensions.length > 1));
+  if (groupedTable) {
+    select.push(
+      `GROUPING(${dimensionExpressions.slice(0, tableRowDimensions.length).join(', ')}) AS "__grouping"`,
+    );
+  }
+  const dimensionPositions = dimensions.map((_, index) => index + 1);
+  const pivotPositions = pivotPosition === undefined ? [] : [pivotPosition];
+  const groupingSets = groupedTable
+    ? [
+        `(${dimensionPositions.join(', ')})`,
+        ...(tableRowDimensions.length > 1
+          ? [`(${[dimensionPositions[0], ...pivotPositions].join(', ')})`]
+          : []),
+        `(${pivotPositions.join(', ')})`,
+      ]
+    : [];
   const groupBy = dimensions.length
-    ? ` GROUP BY ${dimensions.map((_, index) => index + 1).join(', ')}`
+    ? groupedTable
+      ? ` GROUP BY GROUPING SETS (${groupingSets.join(', ')})`
+      : ` GROUP BY ${dimensionPositions.join(', ')}`
     : '';
   const explicitSort =
     'sort' in definition && definition.sort?.length
-      ? compileSort(definition.sort, dimensions.length, context)
+      ? compileSort(definition.sort, dimensions)
       : undefined;
   const stableDimensions = dimensions.map((_, index) => `${index + 1} ASC`).join(', ');
-  const order = [explicitSort, stableDimensions].filter(Boolean).join(', ');
+  const order = groupedTable
+    ? [
+        tableRowDimensions.length > 1 ? '1 ASC' : undefined,
+        '"__grouping" ASC',
+        explicitSort,
+        stableDimensions,
+      ]
+        .filter(Boolean)
+        .join(', ')
+    : [explicitSort, stableDimensions].filter(Boolean).join(', ');
   const orderBy = order ? ` ORDER BY ${order}` : '';
   const limit = widgetLimit(definition);
   return {
@@ -100,6 +138,24 @@ export function compileWidgetQuery(context: QueryContext): CompiledQuery {
     parameters,
     definitions,
   };
+}
+
+function dimensionExpression(
+  dimension: ReturnType<typeof widgetDimensions>[number],
+  context: QueryContext,
+  range: { start: string; end: string },
+) {
+  const expression = fieldExpression(dimension.fieldId, context);
+  const field = [...context.fields, ...context.calculatedFields].find(
+    (candidate) => candidate.id === dimension.fieldId,
+  );
+  if (field?.semanticType !== 'date') return expression;
+  const granularity = resolveDateGranularity(
+    dimension.dateGranularity ?? (context.definition.type === 'table' ? 'raw' : 'auto'),
+    range,
+    context.dateBucketTarget ?? 60,
+  );
+  return granularity === 'raw' ? expression : `DATE_TRUNC('${granularity}', ${expression})`;
 }
 
 function widgetDimensions(definition: WidgetDefinition) {
@@ -110,7 +166,9 @@ function widgetDimensions(definition: WidgetDefinition) {
       ...(definition.breakdownDimension ? [definition.breakdownDimension] : []),
     ];
   }
-  return definition.type === 'table' ? definition.dimensions : [];
+  return definition.type === 'table'
+    ? [...definition.dimensions, ...(definition.pivotDimension ? [definition.pivotDimension] : [])]
+    : [];
 }
 
 function widgetMetrics(definition: WidgetDefinition) {
@@ -263,15 +321,17 @@ function compileFilter(
 
 function compileSort(
   sort: NonNullable<Extract<WidgetDefinition, { type: 'table' }>['sort']>,
-  dimensionCount: number,
-  context: QueryContext,
+  dimensions: ReturnType<typeof widgetDimensions>,
 ) {
   return sort
-    .map((item) =>
-      item.target.kind === 'metric'
-        ? `${dimensionCount + item.target.index + 1} ${item.direction.toUpperCase()}`
-        : `${fieldExpression(item.target.fieldId, context)} ${item.direction.toUpperCase()}`,
-    )
+    .map((item) => {
+      if (item.target.kind === 'metric')
+        return `${dimensions.length + item.target.index + 1} ${item.direction.toUpperCase()}`;
+      const fieldId = item.target.fieldId;
+      const position = dimensions.findIndex((dimension) => dimension.fieldId === fieldId) + 1;
+      if (position < 1) throw new Error(`Cannot sort by unknown dimension ${fieldId}.`);
+      return `${position} ${item.direction.toUpperCase()}`;
+    })
     .join(', ');
 }
 

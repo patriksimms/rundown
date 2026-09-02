@@ -3,6 +3,7 @@ import { Link } from '@tanstack/react-router';
 import { MenuIcon } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { SignInAction, SignUpAction } from '#/components/auth-actions';
+import { ThemeToggle } from '#/components/theme-toggle';
 import { Button } from '#/components/ui/button';
 import {
   Sheet,
@@ -70,7 +71,8 @@ export function AppShell({
               ))}
             </Show>
           </nav>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-1 sm:gap-2">
+            <ThemeToggle />
             <Show when="signed-out">
               <SignInAction>
                 <Button variant="ghost" size="sm">

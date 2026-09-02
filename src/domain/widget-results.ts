@@ -1,4 +1,5 @@
 import type { WidgetDefinition } from './schema';
+import type { ResolvedDateGranularity } from './date-granularity';
 
 interface BreakdownSeries {
   key: string;
@@ -45,6 +46,49 @@ export function pieBreakdownRows(rows: Record<string, unknown>[]) {
     label: `${String(row[dimension])} · ${String(row[breakdown])}`,
     [metric]: row[metric],
   }));
+}
+
+interface PivotTableSeries {
+  key: string;
+  label: string;
+  value: string;
+}
+
+export function pivotTableRows(
+  rows: Record<string, unknown>[],
+  rowDimensionKeys: string[],
+  pivotKey: string,
+  metricKeys: string[],
+  providedSeries?: PivotTableSeries[],
+) {
+  const pivotValues = new Map<string, unknown>();
+  for (const row of rows) pivotValues.set(valueKey(row[pivotKey]), row[pivotKey]);
+  const series =
+    providedSeries ??
+    [...pivotValues.entries()].map(([value, label], index) => ({
+      key: `pivot_${index}`,
+      label: String(label ?? 'None'),
+      value,
+    }));
+  const seriesByValue = new Map(series.map((item) => [item.value, item]));
+  const pivoted = new Map<string, Record<string, unknown>>();
+  for (const row of rows) {
+    const grouping = row.__grouping ?? 0;
+    const rowKey = JSON.stringify([
+      ...rowDimensionKeys.map((key) => valueKey(row[key])),
+      valueKey(grouping),
+    ]);
+    const target = pivoted.get(rowKey) ?? {
+      ...Object.fromEntries(rowDimensionKeys.map((key) => [key, row[key]])),
+      __grouping: grouping,
+    };
+    const pivotSeries = seriesByValue.get(valueKey(row[pivotKey]));
+    if (pivotSeries)
+      for (const metricKey of metricKeys)
+        target[`${pivotSeries.key}_${metricKey}`] = row[metricKey];
+    pivoted.set(rowKey, target);
+  }
+  return { rows: [...pivoted.values()], series };
 }
 
 export function withComparisonSeries(
@@ -103,6 +147,7 @@ export function alignDateComparisonRows(
   rows: Record<string, unknown>[],
   mode: 'previousPeriod' | 'previousYear',
   currentRange: { start: string; end: string },
+  granularity?: ResolvedDateGranularity | 'raw',
 ) {
   const dimension = Object.keys(rows[0] ?? {})[0];
   if (!dimension) return rows;
@@ -122,7 +167,8 @@ export function alignDateComparisonRows(
           : undefined;
     if (!sourceDate) return row;
     const date = new Date(sourceDate);
-    if (mode === 'previousPeriod') date.setUTCDate(date.getUTCDate() + periodDays);
+    if (mode === 'previousPeriod')
+      shiftPreviousPeriodBucket(date, currentRange.start, periodDays, granularity ?? 'raw');
     else if (
       currentRange.start === currentRange.end &&
       currentRange.start.endsWith('-02-29') &&
@@ -144,6 +190,45 @@ export function alignDateComparisonRows(
           : `${date.toISOString().slice(0, 10)}${typeof value === 'string' ? value.slice(10) : ''}`,
     };
   });
+}
+
+function shiftPreviousPeriodBucket(
+  date: Date,
+  currentStart: string,
+  periodDays: number,
+  granularity: ResolvedDateGranularity | 'raw',
+) {
+  if (granularity === 'raw' || granularity === 'day') {
+    date.setUTCDate(date.getUTCDate() + periodDays);
+    return;
+  }
+  const current = bucketStart(new Date(`${currentStart}T00:00:00Z`), granularity);
+  const previous = new Date(`${currentStart}T00:00:00Z`);
+  previous.setUTCDate(previous.getUTCDate() - periodDays);
+  const previousBucket = bucketStart(previous, granularity);
+  if (granularity === 'week') {
+    const days = Math.round((current.valueOf() - previousBucket.valueOf()) / 86_400_000);
+    date.setUTCDate(date.getUTCDate() + days);
+    return;
+  }
+  const months =
+    (current.getUTCFullYear() - previousBucket.getUTCFullYear()) * 12 +
+    current.getUTCMonth() -
+    previousBucket.getUTCMonth();
+  date.setUTCMonth(date.getUTCMonth() + months, 1);
+}
+
+function bucketStart(date: Date, granularity: ResolvedDateGranularity) {
+  const result = new Date(date);
+  result.setUTCHours(0, 0, 0, 0);
+  if (granularity === 'week') {
+    const mondayOffset = (result.getUTCDay() + 6) % 7;
+    result.setUTCDate(result.getUTCDate() - mondayOffset);
+  } else if (granularity === 'month') result.setUTCDate(1);
+  else if (granularity === 'quarter') {
+    result.setUTCMonth(Math.floor(result.getUTCMonth() / 3) * 3, 1);
+  } else if (granularity === 'year') result.setUTCMonth(0, 1);
+  return result;
 }
 
 function valueKey(value: unknown) {

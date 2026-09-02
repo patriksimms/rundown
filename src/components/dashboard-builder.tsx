@@ -1,19 +1,32 @@
 import {
+  ActivityIcon,
+  AlignCenterVerticalIcon,
+  ArrowDownToLineIcon,
+  ArrowUpToLineIcon,
   BarChart3Icon,
   CalendarDaysIcon,
   CaseUpperIcon,
   ChartNoAxesColumnIcon,
-  ChevronLeftIcon,
+  ChartScatterIcon,
+  CircleHelpIcon,
   CircleGaugeIcon,
+  CircleDivideIcon,
+  FingerprintIcon,
+  Grid2X2PlusIcon,
   GripVerticalIcon,
+  HashIcon,
   LineChartIcon,
   ListFilterIcon,
+  MinusIcon,
   PencilIcon,
   PieChartIcon,
   PlusIcon,
   Settings2Icon,
+  SigmaIcon,
   Table2Icon,
   Trash2Icon,
+  XIcon,
+  type LucideIcon,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import GridLayout, {
@@ -35,6 +48,7 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
+  CommandSeparator,
 } from '#/components/ui/command';
 import {
   Dialog,
@@ -50,6 +64,14 @@ import { Input } from '#/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '#/components/ui/native-select';
 import { Popover, PopoverContent, PopoverTrigger } from '#/components/ui/popover';
 import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '#/components/ui/select';
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -58,6 +80,8 @@ import {
   SheetTrigger,
 } from '#/components/ui/sheet';
 import { Textarea } from '#/components/ui/textarea';
+import { Tooltip, TooltipContent, TooltipTrigger } from '#/components/ui/tooltip';
+import { Switch } from '#/components/ui/switch';
 import { cn } from '#/lib/utils';
 import {
   clearControlValue,
@@ -67,16 +91,25 @@ import {
 } from '#/domain/widget-editing';
 import { remapWidgetDefinition } from '#/domain/remap';
 import { replacePlainTextDocument, textDocument } from '#/domain/text-content';
-import { withDefaultDateRange, withoutWidgetControlState } from '#/domain/control-state';
-import { createSerialQueue } from '#/domain/serial-queue';
-import { rollbackFailedLayout } from '#/domain/layout';
+import { withoutWidgetControlState } from '#/domain/control-state';
+import { sameDateRange } from '#/domain/date-range-search';
 import { yearToDateRange } from '#/domain/dates';
+import { createSerialQueue } from '#/domain/serial-queue';
+import {
+  insertRow,
+  isRowEmpty,
+  removeEmptyRow,
+  rollbackFailedLayoutState,
+  rowInsertionCuts,
+} from '#/domain/layout';
 import { fieldRoleSchema } from '#/domain/schema';
 import type {
   ControlState,
   Aggregation,
   DashboardDocument,
   DashboardWidget,
+  DateGranularity,
+  DateRange,
   FieldRole,
   SemanticType,
   WidgetDefinition,
@@ -86,6 +119,8 @@ export interface BuilderDataSource {
   id: string;
   name: string;
 }
+
+export type DashboardSaveStatus = 'saved' | 'saving' | 'error';
 
 interface SourceField {
   id: string;
@@ -146,10 +181,12 @@ export function DashboardBuilder({
   dashboard: initialDashboard,
   dataSources,
   refresh,
+  onSaveStatusChange,
 }: {
   dashboard: DashboardDocument;
   dataSources: BuilderDataSource[];
   refresh: () => Promise<void>;
+  onSaveStatusChange: (status: DashboardSaveStatus) => void;
 }) {
   const [dashboard, setDashboard] = useState(initialDashboard);
   const [selectedId, setSelectedId] = useState<string>();
@@ -162,12 +199,17 @@ export function DashboardBuilder({
   const [chartRevision, setChartRevision] = useState(0);
   const [pendingWidgets, setPendingWidgets] = useState<Record<string, number>>({});
   const [removeTarget, setRemoveTarget] = useState<DashboardWidget>();
+  const [catalogOpen, setCatalogOpen] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [desktop, setDesktop] = useState<boolean>();
-  const dashboardRef = useRef(initialDashboard);
+  const dashboardRef = useRef(dashboard);
   const mutationQueueRef = useRef(createSerialQueue());
   const mutationRevisionRef = useRef(0);
+  const appliedDefaultDateRangeRef = useRef<DateRange | undefined>(undefined);
   const draggedType = useRef<BuilderType | undefined>(undefined);
+  // Set while the grid is moving or resizing a widget: the click that ends such a gesture
+  // lands on the canvas background and must not be read as a deselect.
+  const gridGestureRef = useRef(false);
   const { width, containerRef, mounted } = useContainerWidth({ measureBeforeMount: true });
   const saving = pendingOperations > 0;
 
@@ -176,6 +218,9 @@ export function DashboardBuilder({
     setDashboard(initialDashboard);
   }, [initialDashboard]);
   useEffect(() => {
+    onSaveStatusChange(saving ? 'saving' : error ? 'error' : 'saved');
+  }, [error, onSaveStatusChange, saving]);
+  useEffect(() => {
     const query = window.matchMedia('(min-width: 48rem)');
     const update = () => setDesktop(query.matches);
     update();
@@ -183,12 +228,27 @@ export function DashboardBuilder({
     return () => query.removeEventListener('change', update);
   }, []);
   useEffect(() => {
+    // Base UI dialogs, popovers and selects handle Escape on `document` and mark the event
+    // as defaulted, so the window listener below only sees presses nothing else claimed.
+    const deselect = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.defaultPrevented) setSelectedId(undefined);
+    };
+    window.addEventListener('keydown', deselect);
+    return () => window.removeEventListener('keydown', deselect);
+  }, []);
+  useEffect(() => {
     const dateControl = dashboard.widgets.find(
       (widget) => widget.definition.type === 'dateControl',
     );
-    if (!dateControl || dateControl.definition.type !== 'dateControl') return;
+    if (!dateControl || dateControl.definition.type !== 'dateControl') {
+      appliedDefaultDateRangeRef.current = undefined;
+      return;
+    }
     const defaultDateRange = dateControl.definition.defaultDateRange ?? dashboard.defaultDateRange;
-    setControlState((current) => withDefaultDateRange(current, defaultDateRange));
+    const previousDefault = appliedDefaultDateRangeRef.current;
+    if (previousDefault && sameDateRange(previousDefault, defaultDateRange)) return;
+    appliedDefaultDateRangeRef.current = defaultDateRange;
+    setControlState((current) => ({ ...current, dateRange: defaultDateRange }));
   }, [dashboard.defaultDateRange, dashboard.widgets]);
 
   function updateDashboard(updater: (current: DashboardDocument) => DashboardDocument) {
@@ -212,27 +272,34 @@ export function DashboardBuilder({
 
   const layout = useMemo<Layout>(
     () =>
-      dashboard.widgets.map((widget) => ({
-        i: widget.id,
-        x: widget.layout.x,
-        y: widget.layout.y,
-        w: widget.layout.width,
-        h: widget.layout.height,
-        minW: 2,
-        minH: 2,
-      })),
+      dashboard.widgets.map((widget) => {
+        const control =
+          widget.definition.type === 'control' || widget.definition.type === 'dateControl';
+        return {
+          i: widget.id,
+          x: widget.layout.x,
+          y: widget.layout.y,
+          w: widget.layout.width,
+          h: widget.layout.height,
+          minW: control ? 4 : 2,
+          minH: control ? 1 : 2,
+        };
+      }),
     [dashboard.widgets],
   );
   const selected = dashboard.widgets.find((widget) => widget.id === selectedId);
 
-  async function saveLayout(next: Layout) {
+  async function saveLayout(next: Layout, requestedCanvasRows = dashboardRef.current.canvasRows) {
     const revision = ++mutationRevisionRef.current;
     const byId = new Map(next.map((item) => [item.i, item]));
+    const canvasRows = Math.max(10, requestedCanvasRows, ...next.map((item) => item.y + item.h));
     const previousLayouts = new Map(
       dashboardRef.current.widgets.map((widget) => [widget.id, widget.layout]),
     );
+    const previousCanvasRows = dashboardRef.current.canvasRows;
     const optimistic = updateDashboard((current) => ({
       ...current,
+      canvasRows,
       widgets: current.widgets.map((widget) => {
         const item = byId.get(widget.id);
         return item
@@ -254,6 +321,7 @@ export function DashboardBuilder({
         return callApi({
           action: 'updateLayout',
           dashboardId: current.id,
+          canvasRows: current.canvasRows,
           placements: current.widgets.map((widget) => ({
             widgetId: widget.id,
             placement: widget.layout,
@@ -268,7 +336,11 @@ export function DashboardBuilder({
       if (revision === mutationRevisionRef.current)
         updateDashboard((current) => ({
           ...current,
-          widgets: rollbackFailedLayout(current.widgets, previousLayouts, optimisticLayouts),
+          ...rollbackFailedLayoutState(
+            current,
+            { placements: previousLayouts, canvasRows: previousCanvasRows },
+            { placements: optimisticLayouts, canvasRows },
+          ),
         }));
       if (revision === mutationRevisionRef.current) setError(message(caught));
     } finally {
@@ -296,6 +368,7 @@ export function DashboardBuilder({
       const widget = result.widget;
       const next = updateDashboard((current) => ({
         ...current,
+        canvasRows: Math.max(current.canvasRows, widget.layout.y + widget.layout.height + 2),
         widgets: current.widgets.some((item) => item.id === widget.id)
           ? current.widgets
           : [...current.widgets, widget],
@@ -448,57 +521,77 @@ export function DashboardBuilder({
     }
   }
 
-  const sidebar = selected ? (
-    <WidgetSettings
-      dashboardId={dashboard.id}
-      dashboardDefaultDateRange={dashboard.defaultDateRange}
-      timezone={dashboard.timezone}
-      widget={selected}
-      dataSources={dataSources}
-      onBack={() => setSelectedId(undefined)}
-      onChange={(definition) => updateWidget(selected, definition)}
-      onLayoutChange={(placement) =>
-        saveLayout(
-          layout.map((item) =>
-            item.i === selected.id
-              ? {
-                  ...item,
-                  x: placement.x,
-                  y: placement.y,
-                  w: placement.width,
-                  h: placement.height,
-                }
-              : item,
-          ),
-        )
-      }
-    />
-  ) : (
+  function saveRowInsertion(cut: number) {
+    const next = insertRow(dashboardRef.current.widgets, dashboardRef.current.canvasRows, cut);
+    if (!next) return;
+    void saveLayout(layoutFor(next.widgets), next.canvasRows);
+  }
+
+  function saveRowRemoval(row: number) {
+    const next = removeEmptyRow(dashboardRef.current.widgets, dashboardRef.current.canvasRows, row);
+    if (!next) return;
+    void saveLayout(layoutFor(next.widgets), next.canvasRows);
+  }
+
+  const inspectorPanel = (
+    <fieldset disabled={saving} className="min-w-0 border-0 p-0">
+      {selected ? (
+        <WidgetSettings
+          dashboardId={dashboard.id}
+          dashboardDefaultDateRange={dashboard.defaultDateRange}
+          timezone={dashboard.timezone}
+          widget={selected}
+          dataSources={dataSources}
+          onClose={() => setSelectedId(undefined)}
+          onChange={(definition) => updateWidget(selected, definition)}
+          onRemoveEmptyRowAbove={
+            dashboard.canvasRows > 10 &&
+            selected.layout.y > 0 &&
+            isRowEmpty(dashboard.widgets, selected.layout.y - 1)
+              ? () => saveRowRemoval(selected.layout.y - 1)
+              : undefined
+          }
+          onRemoveEmptyRowBelow={
+            dashboard.canvasRows > 10 &&
+            selected.layout.y + selected.layout.height < dashboard.canvasRows &&
+            isRowEmpty(dashboard.widgets, selected.layout.y + selected.layout.height)
+              ? () => saveRowRemoval(selected.layout.y + selected.layout.height)
+              : undefined
+          }
+        />
+      ) : (
+        <p className="text-sm text-muted-foreground">Select a widget to edit it.</p>
+      )}
+    </fieldset>
+  );
+  const catalogPanel = (
     <WidgetCatalog
       disabled={saving}
       hasDateControl={dashboard.widgets.some((widget) => widget.definition.type === 'dateControl')}
-      onAdd={addWidget}
+      onAdd={async (type) => {
+        setCatalogOpen(false);
+        await addWidget(type);
+      }}
       onDragStart={(type) => {
         draggedType.current = type;
       }}
     />
   );
-  const settingsPanel = (
-    <fieldset disabled={saving} className="min-w-0 border-0 p-0">
-      {sidebar}
-    </fieldset>
-  );
+
+  const gridRows = dashboard.canvasRows;
+  const insertionCuts = rowInsertionCuts(dashboard.widgets, dashboard.canvasRows);
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm text-muted-foreground">
-          {saving ? 'Saving...' : 'Changes save automatically'}
-        </p>
-        {desktop === false ? (
+      {desktop === false ? (
+        <div className="flex items-center justify-end">
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
             <SheetTrigger render={<Button variant="outline" size="sm" />}>
-              <Settings2Icon data-icon="inline-start" />
+              {selected ? (
+                <Settings2Icon data-icon="inline-start" />
+              ) : (
+                <Grid2X2PlusIcon data-icon="inline-start" />
+              )}
               {selected ? 'Widget settings' : 'Add widget'}
             </SheetTrigger>
             <SheetContent side="right" className="w-[min(92vw,24rem)] overflow-y-auto">
@@ -508,11 +601,11 @@ export function DashboardBuilder({
                   Every builder action is available without drag and resize.
                 </SheetDescription>
               </SheetHeader>
-              <div className="px-4 pb-6">{settingsPanel}</div>
+              <div className="px-4 pb-6">{selected ? inspectorPanel : catalogPanel}</div>
             </SheetContent>
           </Sheet>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
       {error ? (
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>
@@ -521,95 +614,155 @@ export function DashboardBuilder({
       <div className="grid items-start gap-5 md:grid-cols-[minmax(0,1fr)_20rem]">
         <div>
           {desktop !== false ? (
-            <div ref={containerRef} className="relative min-h-80 rounded-xl bg-muted/50">
-              {mounted ? (
-                <>
-                  <GridBackground
-                    width={width}
-                    cols={12}
-                    rowHeight={56}
-                    margin={[8, 8]}
-                    rows={Math.max(10, ...layout.map((item) => item.y + item.h + 2))}
-                    color="var(--color-muted)"
-                    borderRadius={6}
-                  />
-                  <GridLayout
-                    width={width}
-                    layout={layout}
-                    compactor={noCompactor}
-                    gridConfig={{ cols: 12, rowHeight: 56, margin: [8, 8] }}
-                    dragConfig={{ enabled: !saving, handle: '.widget-drag-handle', threshold: 8 }}
-                    resizeConfig={{
-                      enabled: !saving,
-                      handles: ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'],
-                    }}
-                    dropConfig={{ enabled: !saving, defaultItem: { w: 4, h: 3 } }}
-                    droppingItem={{ i: '__dropping__', x: 0, y: 0, w: 4, h: 3 }}
-                    onDrop={(next, item) => {
-                      const type = draggedType.current;
-                      draggedType.current = undefined;
-                      if (type && item) void addWidget(type, item);
-                      else if (next.length === dashboard.widgets.length) void saveLayout(next);
-                    }}
-                    onDropDragOver={() => {
-                      const entry = catalog.find((item) => item.type === draggedType.current);
-                      return entry ? { w: entry.size.width, h: entry.size.height } : false;
-                    }}
-                    onDragStop={(next) => void saveLayout(next)}
-                    onResizeStop={(next) => {
-                      setChartRevision((value) => value + 1);
-                      void saveLayout(next);
-                    }}
-                  >
-                    {dashboard.widgets.map((widget) => (
-                      <div
-                        key={widget.id}
-                        className={cn(
-                          'group overflow-hidden rounded-xl bg-card shadow-sm ring-1 ring-foreground/10 focus-within:ring-2 focus-within:ring-ring',
-                          selectedId === widget.id && 'ring-2 ring-primary',
-                        )}
-                        onClick={() => setSelectedId(widget.id)}
-                      >
-                        {/* Pointer users drag it; Enter selects the widget for the settings form. */}
-                        <Button
-                          className="widget-drag-handle absolute top-2 left-1/2 z-10 -translate-x-1/2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label={`Edit ${widgetLabel(widget)}`}
-                          onClick={() => setSelectedId(widget.id)}
-                        >
-                          <GripVerticalIcon />
-                        </Button>
-                        <Button
-                          className="absolute top-2 right-2 z-10 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label={`Remove ${widgetLabel(widget)}`}
+            <>
+              <div className="mb-2 flex items-center gap-2">
+                <Popover open={catalogOpen} onOpenChange={setCatalogOpen}>
+                  <PopoverTrigger render={<Button variant="outline" size="sm" />}>
+                    <Grid2X2PlusIcon data-icon="inline-start" />
+                    Add widget
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="w-[21rem]">
+                    {catalogPanel}
+                  </PopoverContent>
+                </Popover>
+              </div>
+              <div
+                ref={containerRef}
+                className="relative"
+                // Matches the height GridBackground draws (56px cells + 8px margins)
+                // so the drop area covers the spare rows below the last widget.
+                style={{ minHeight: gridRows * 64 + 8 }}
+                onPointerDownCapture={() => {
+                  gridGestureRef.current = false;
+                }}
+                onClick={() => {
+                  if (gridGestureRef.current) {
+                    gridGestureRef.current = false;
+                    return;
+                  }
+                  setSelectedId(undefined);
+                }}
+              >
+                {mounted ? (
+                  <>
+                    <GridBackground
+                      width={width}
+                      cols={12}
+                      rowHeight={56}
+                      margin={[8, 8]}
+                      rows={gridRows}
+                      color="color-mix(in srgb, var(--color-muted) 96%, var(--color-foreground) 4%)"
+                      borderRadius={6}
+                    />
+                    {insertionCuts.map((cut) => (
+                      <RowInsertionControl
+                        key={cut}
+                        cut={cut}
+                        disabled={saving}
+                        onInsert={() => saveRowInsertion(cut)}
+                      />
+                    ))}
+                    {gridRows > 10
+                      ? Array.from({ length: gridRows }, (_, row) => row)
+                          .filter((row) => isRowEmpty(dashboard.widgets, row))
+                          .map((row) => (
+                            <RowRemovalControl
+                              key={row}
+                              row={row}
+                              disabled={saving}
+                              onRemove={() => saveRowRemoval(row)}
+                            />
+                          ))
+                      : null}
+                    <GridLayout
+                      width={width}
+                      layout={layout}
+                      compactor={noCompactor}
+                      gridConfig={{ cols: 12, rowHeight: 56, margin: [8, 8] }}
+                      dragConfig={{ enabled: !saving, handle: '.widget-drag-handle', threshold: 8 }}
+                      resizeConfig={{
+                        enabled: !saving,
+                        handles: ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'],
+                      }}
+                      dropConfig={{ enabled: !saving, defaultItem: { w: 4, h: 3 } }}
+                      droppingItem={{ i: '__dropping__', x: 0, y: 0, w: 4, h: 3 }}
+                      onDrop={(next, item) => {
+                        const type = draggedType.current;
+                        draggedType.current = undefined;
+                        setCatalogOpen(false);
+                        if (type && item) void addWidget(type, item);
+                        else if (next.length === dashboard.widgets.length) void saveLayout(next);
+                      }}
+                      onDropDragOver={() => {
+                        const entry = catalog.find((item) => item.type === draggedType.current);
+                        return entry ? { w: entry.size.width, h: entry.size.height } : false;
+                      }}
+                      onDragStart={() => {
+                        gridGestureRef.current = true;
+                      }}
+                      onResizeStart={() => {
+                        gridGestureRef.current = true;
+                      }}
+                      onDragStop={(next) => void saveLayout(next)}
+                      onResizeStop={(next) => {
+                        setChartRevision((value) => value + 1);
+                        void saveLayout(next);
+                      }}
+                    >
+                      {dashboard.widgets.map((widget) => (
+                        <div
+                          key={widget.id}
+                          className={cn(
+                            'group overflow-hidden rounded-xl bg-card shadow-sm ring-1 ring-foreground/10 focus-within:ring-2 focus-within:ring-ring',
+                            selectedId === widget.id && 'ring-2 ring-primary',
+                          )}
                           onClick={(event) => {
+                            // Keeps the canvas background click from deselecting again.
                             event.stopPropagation();
-                            setRemoveTarget(widget);
+                            setSelectedId(widget.id);
                           }}
                         >
-                          <Trash2Icon />
-                        </Button>
-                        <div
-                          key={`${widget.id}-${chartRevision}`}
-                          className="h-full [&>[data-slot=card]]:h-full"
-                        >
-                          <DashboardWidgetView
-                            dashboard={dashboard}
-                            widget={widget}
-                            preview={Boolean(pendingWidgets[widget.id])}
-                            controlState={controlState}
-                            setControlState={setControlState}
-                          />
+                          {/* Pointer users drag it; Enter selects the widget for the settings form. */}
+                          <Button
+                            className="widget-drag-handle absolute top-2 left-1/2 z-10 -translate-x-1/2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={`Edit ${widgetLabel(widget)}`}
+                            onClick={() => setSelectedId(widget.id)}
+                          >
+                            <GripVerticalIcon />
+                          </Button>
+                          <Button
+                            className="absolute top-2 right-2 z-10 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={`Remove ${widgetLabel(widget)}`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setRemoveTarget(widget);
+                            }}
+                          >
+                            <Trash2Icon />
+                          </Button>
+                          <div
+                            key={`${widget.id}-${chartRevision}`}
+                            className="h-full [&>[data-slot=card]]:h-full"
+                          >
+                            <DashboardWidgetView
+                              dashboard={dashboard}
+                              widget={widget}
+                              preview={Boolean(pendingWidgets[widget.id])}
+                              controlState={controlState}
+                              setControlState={setControlState}
+                            />
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </GridLayout>
-                </>
-              ) : null}
-            </div>
+                      ))}
+                    </GridLayout>
+                  </>
+                ) : null}
+              </div>
+            </>
           ) : null}
           {desktop === false ? (
             <div className="flex flex-col gap-4">
@@ -657,7 +810,7 @@ export function DashboardBuilder({
         </div>
         {desktop ? (
           <aside className="sticky top-4 max-h-[calc(100vh-2rem)] overflow-y-auto pr-1">
-            {settingsPanel}
+            {inspectorPanel}
           </aside>
         ) : null}
       </div>
@@ -700,6 +853,76 @@ export function DashboardBuilder({
   );
 }
 
+function layoutFor(widgets: DashboardWidget[]): Layout {
+  return widgets.map((widget) => ({
+    i: widget.id,
+    x: widget.layout.x,
+    y: widget.layout.y,
+    w: widget.layout.width,
+    h: widget.layout.height,
+  }));
+}
+
+function RowInsertionControl({
+  cut,
+  disabled,
+  onInsert,
+}: {
+  cut: number;
+  disabled: boolean;
+  onInsert: () => void;
+}) {
+  const label = cut === 0 ? 'Insert first row' : `Insert row after row ${cut}`;
+  return (
+    <div
+      className="group/row absolute right-2 left-2 z-20 flex h-6 -translate-y-1/2 items-center"
+      style={{ top: cut === 0 ? 8 : cut * 64 + 4 }}
+    >
+      <span className="h-px flex-1 bg-primary opacity-0 transition-none group-hover/row:opacity-100 group-focus-within/row:opacity-100" />
+      <Button
+        className="opacity-0 transition-none group-hover/row:opacity-100 focus-visible:opacity-100"
+        size="icon-xs"
+        disabled={disabled}
+        aria-label={label}
+        onClick={(event) => {
+          event.stopPropagation();
+          onInsert();
+        }}
+      >
+        <PlusIcon />
+      </Button>
+      <span className="h-px flex-1 bg-primary opacity-0 transition-none group-hover/row:opacity-100 group-focus-within/row:opacity-100" />
+    </div>
+  );
+}
+
+function RowRemovalControl({
+  row,
+  disabled,
+  onRemove,
+}: {
+  row: number;
+  disabled: boolean;
+  onRemove: () => void;
+}) {
+  return (
+    <Button
+      className="absolute right-3 z-30 -translate-y-1/2 opacity-0 transition-none hover:opacity-100 focus-visible:opacity-100"
+      style={{ top: row * 64 + 36 }}
+      variant="outline"
+      size="icon-xs"
+      disabled={disabled}
+      aria-label={`Remove empty row ${row + 1}`}
+      onClick={(event) => {
+        event.stopPropagation();
+        onRemove();
+      }}
+    >
+      <MinusIcon />
+    </Button>
+  );
+}
+
 function WidgetCatalog({
   disabled,
   hasDateControl,
@@ -712,12 +935,9 @@ function WidgetCatalog({
   onDragStart: (type: BuilderType) => void;
 }) {
   return (
-    <div className="flex flex-col gap-3">
-      <div>
-        <h2 className="font-medium">Widgets</h2>
-        <p className="text-sm text-muted-foreground">Drag onto the grid or add at the bottom.</p>
-      </div>
-      <div className="grid grid-cols-2 gap-2">
+    <div className="flex flex-col gap-2">
+      <p className="text-sm text-muted-foreground">Drag onto the grid or click +.</p>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-px">
         {catalog.map(({ type, label, icon: Icon }) => {
           const unavailable = disabled || (type === 'dateControl' && hasDateControl);
           return (
@@ -729,57 +949,24 @@ function WidgetCatalog({
                 event.dataTransfer.setData('text/plain', type);
                 event.dataTransfer.effectAllowed = 'copy';
               }}
-              className="group flex min-h-28 cursor-grab flex-col justify-between rounded-lg bg-card p-3 ring-1 ring-foreground/10 active:cursor-grabbing"
+              className="flex cursor-grab items-center gap-2 rounded-md py-0.5 pl-1.5 hover:bg-accent active:cursor-grabbing"
             >
-              <WidgetPreview type={type} icon={Icon} />
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-medium">{label}</span>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  disabled={unavailable}
-                  aria-label={`Add ${label}`}
-                  onClick={() => void onAdd(type)}
-                >
-                  <PlusIcon />
-                </Button>
-              </div>
+              <Icon className="size-4 shrink-0 text-muted-foreground" />
+              <span className="flex-1 truncate text-sm">{label}</span>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                disabled={unavailable}
+                aria-label={`Add ${label}`}
+                onClick={() => void onAdd(type)}
+              >
+                <PlusIcon />
+              </Button>
             </div>
           );
         })}
       </div>
     </div>
-  );
-}
-
-function WidgetPreview({ type, icon: Icon }: { type: BuilderType; icon: typeof BarChart3Icon }) {
-  return (
-    <svg viewBox="0 0 120 48" className="h-12 w-full text-muted-foreground" aria-hidden="true">
-      <rect
-        x="1"
-        y="1"
-        width="118"
-        height="46"
-        rx="5"
-        fill="none"
-        stroke="currentColor"
-        opacity=".25"
-      />
-      {['bar', 'line', 'pie'].includes(type) ? (
-        <path
-          d="M16 36 35 21 53 29 75 12 103 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="3"
-        />
-      ) : type === 'table' ? (
-        <path d="M14 15h92M14 25h92M14 35h92M45 9v32M78 9v32" stroke="currentColor" opacity=".7" />
-      ) : (
-        <foreignObject x="43" y="8" width="34" height="34">
-          <Icon className="size-8" />
-        </foreignObject>
-      )}
-    </svg>
   );
 }
 
@@ -789,18 +976,20 @@ function WidgetSettings({
   timezone,
   widget,
   dataSources,
-  onBack,
+  onClose,
   onChange,
-  onLayoutChange,
+  onRemoveEmptyRowAbove,
+  onRemoveEmptyRowBelow,
 }: {
   dashboardId: string;
   dashboardDefaultDateRange: DashboardDocument['defaultDateRange'];
   timezone: string;
   widget: DashboardWidget;
   dataSources: BuilderDataSource[];
-  onBack: () => void;
+  onClose: () => void;
   onChange: (definition: WidgetDefinition) => Promise<void>;
-  onLayoutChange: (placement: DashboardWidget['layout']) => Promise<void>;
+  onRemoveEmptyRowAbove?: () => void;
+  onRemoveEmptyRowBelow?: () => void;
 }) {
   const [definition, setDefinition] = useState(widget.definition);
   const [source, setSource] = useState<SourceDescription>();
@@ -870,13 +1059,27 @@ function WidgetSettings({
   return (
     <div className="flex flex-col gap-5">
       <div className="flex items-center gap-2">
-        <Button variant="ghost" size="icon-sm" aria-label="Back to widgets" onClick={onBack}>
-          <ChevronLeftIcon />
-        </Button>
         <div className="min-w-0 flex-1">
           <h2 className="truncate font-medium">{widgetLabel(widget)}</h2>
           <p className="text-xs text-muted-foreground">{definition.type}</p>
         </div>
+        <Button variant="ghost" size="icon-sm" aria-label="Close widget settings" onClick={onClose}>
+          <XIcon />
+        </Button>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {onRemoveEmptyRowAbove ? (
+          <Button variant="outline" size="sm" onClick={onRemoveEmptyRowAbove}>
+            <MinusIcon data-icon="inline-start" />
+            Remove empty row above
+          </Button>
+        ) : null}
+        {onRemoveEmptyRowBelow ? (
+          <Button variant="outline" size="sm" onClick={onRemoveEmptyRowBelow}>
+            <MinusIcon data-icon="inline-start" />
+            Remove empty row below
+          </Button>
+        ) : null}
       </div>
       {settingsError ? (
         <Alert variant="destructive">
@@ -978,6 +1181,7 @@ function WidgetSettings({
                 fields={fields}
                 source={source}
                 commit={commit}
+                onCreate={() => setFormulaOpen(true)}
               />
               <FilterSettings definition={definition} fields={fields} commit={commit} />
               <TypeSettings
@@ -986,14 +1190,14 @@ function WidgetSettings({
                 source={source}
                 commit={commit}
               />
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" size="sm" onClick={() => setFormulaOpen(true)}>
-                  <PlusIcon data-icon="inline-start" /> Custom metric
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => setDimensionOpen(true)}>
-                  <PlusIcon data-icon="inline-start" /> New field
-                </Button>
-              </div>
+              <Button
+                className="justify-self-start"
+                variant="outline"
+                size="sm"
+                onClick={() => setDimensionOpen(true)}
+              >
+                <PlusIcon data-icon="inline-start" /> New field
+              </Button>
             </>
           )}
           {source ? (
@@ -1022,49 +1226,6 @@ function WidgetSettings({
           />
         </>
       ) : null}
-      <FieldGroup className="grid grid-cols-2 gap-3">
-        <Field>
-          <FieldLabel htmlFor={`x-${widget.id}`}>Column</FieldLabel>
-          <LayoutNumberInput
-            id={`x-${widget.id}`}
-            min={0}
-            max={11}
-            value={widget.layout.x}
-            onCommit={(x) => onLayoutChange({ ...widget.layout, x })}
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={`y-${widget.id}`}>Row</FieldLabel>
-          <LayoutNumberInput
-            id={`y-${widget.id}`}
-            min={0}
-            value={widget.layout.y}
-            onCommit={(y) => onLayoutChange({ ...widget.layout, y })}
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={`width-${widget.id}`}>Width</FieldLabel>
-          <LayoutNumberInput
-            id={`width-${widget.id}`}
-            min={1}
-            max={12}
-            value={widget.layout.width}
-            onCommit={(width) => onLayoutChange({ ...widget.layout, width })}
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={`height-${widget.id}`}>Height</FieldLabel>
-          <LayoutNumberInput
-            id={`height-${widget.id}`}
-            min={1}
-            value={widget.layout.height}
-            onCommit={(height) => onLayoutChange({ ...widget.layout, height })}
-          />
-        </Field>
-        <FieldDescription className="col-span-2">
-          Desktop also supports direct drag and resize.
-        </FieldDescription>
-      </FieldGroup>
     </div>
   );
 }
@@ -1103,69 +1264,175 @@ function LayoutNumberInput({
 }
 
 function DimensionSettings({ definition, fields, commit }: QuerySettingsProps) {
-  const dimensions = fields.filter(
-    (field) => field.role === 'dimension' && field.semanticType !== 'date',
-  );
-  if ('dimension' in definition)
-    return (
-      <FieldPicker
-        label="Dimension"
-        value={definition.dimension.fieldId}
-        fields={dimensions}
-        onChange={(fieldId) =>
-          void commit({ ...definition, dimension: { ...definition.dimension, fieldId } })
-        }
-      />
+  const dimensions = fields.filter((field) => field.role === 'dimension');
+  const choices = dimensions.map((field) => ({
+    id: field.id,
+    label: field.label,
+    group: 'Fields',
+    prefix: fieldTypePrefix(field.semanticType),
+  }));
+  if ('dimension' in definition) {
+    const date = dimensions.find(
+      (field) => field.id === definition.dimension.fieldId && field.semanticType === 'date',
     );
+    return (
+      <>
+        <Field>
+          <FieldLabel>{axisLabel('dimension', definition.type, false)}</FieldLabel>
+          <FieldPicker
+            appearance="assignment"
+            label="Dimension"
+            prefix={
+              choices.find((field) => field.id === definition.dimension.fieldId)?.prefix ?? 'ABC'
+            }
+            tone="dimension"
+            value={definition.dimension.fieldId}
+            fields={choices}
+            onChange={(fieldId) =>
+              void commit({
+                ...definition,
+                dimension: dimensionForField(definition.dimension, fieldId, fields, 'auto'),
+              })
+            }
+          />
+        </Field>
+        {date ? (
+          <DateGranularitySetting
+            value={definition.dimension.dateGranularity ?? 'auto'}
+            onChange={(dateGranularity) =>
+              commit({ ...definition, dimension: { ...definition.dimension, dateGranularity } })
+            }
+          />
+        ) : null}
+      </>
+    );
+  }
   if ('dimensions' in definition)
     return (
-      <div className="flex flex-col gap-3">
-        {definition.dimensions.map((dimension, index) => (
-          <div key={`${dimension.fieldId}-${index}`} className="flex items-end gap-2">
-            <div className="min-w-0 flex-1">
-              <FieldPicker
-                label={`Dimension ${index + 1}`}
-                value={dimension.fieldId}
-                fields={dimensions}
-                onChange={(fieldId) =>
-                  void commit({
-                    ...definition,
-                    dimensions: definition.dimensions.map((item, itemIndex) =>
-                      itemIndex === index ? { ...item, fieldId } : item,
-                    ),
-                  })
-                }
-              />
+      <Field>
+        <FieldLabel>{axisLabel('dimension', definition.type, true)}</FieldLabel>
+        <div className="flex flex-col gap-1.5">
+          {definition.dimensions.map((dimension, index) => (
+            <div key={`${dimension.fieldId}-${index}`} className="flex flex-col gap-1">
+              <div className="flex items-center gap-1">
+                <FieldPicker
+                  appearance="assignment"
+                  label={`Dimension ${index + 1}`}
+                  prefix={choices.find((field) => field.id === dimension.fieldId)?.prefix ?? 'ABC'}
+                  tone="dimension"
+                  value={dimension.fieldId}
+                  fields={choices}
+                  onChange={(fieldId) =>
+                    void commit({
+                      ...definition,
+                      dimensions: definition.dimensions.map((item, itemIndex) =>
+                        itemIndex === index
+                          ? dimensionForField(item, fieldId, fields, 'raw')
+                          : item,
+                      ),
+                    })
+                  }
+                />
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={`Remove dimension ${index + 1}`}
+                  onClick={() =>
+                    void commit({
+                      ...definition,
+                      dimensions: definition.dimensions.filter(
+                        (_, itemIndex) => itemIndex !== index,
+                      ),
+                    })
+                  }
+                >
+                  <Trash2Icon />
+                </Button>
+              </div>
+              {fields.find(
+                (field) => field.id === dimension.fieldId && field.semanticType === 'date',
+              ) ? (
+                <DateGranularitySetting
+                  compact
+                  value={dimension.dateGranularity ?? 'raw'}
+                  onChange={(dateGranularity) =>
+                    commit({
+                      ...definition,
+                      dimensions: definition.dimensions.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, dateGranularity } : item,
+                      ),
+                    })
+                  }
+                />
+              ) : null}
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={`Remove dimension ${index + 1}`}
-              onClick={() =>
-                void commit({
-                  ...definition,
-                  dimensions: definition.dimensions.filter((_, itemIndex) => itemIndex !== index),
-                })
-              }
-            >
-              <Trash2Icon />
-            </Button>
-          </div>
-        ))}
-        <FieldPicker
-          label="Add dimension"
-          value=""
-          fields={dimensions}
-          onChange={(fieldId) =>
-            void commit({
-              ...definition,
-              dimensions: [...definition.dimensions, { fieldId }],
-            })
-          }
-        />
-      </div>
+          ))}
+          <FieldPicker
+            appearance="add"
+            label="Add dimension"
+            tone="dimension"
+            value=""
+            fields={choices}
+            onChange={(fieldId) =>
+              void commit({
+                ...definition,
+                dimensions: [
+                  ...definition.dimensions,
+                  dimensionForField({ fieldId }, fieldId, fields, 'raw'),
+                ],
+              })
+            }
+          />
+        </div>
+      </Field>
     );
   return null;
+}
+
+type DimensionDefinition = Extract<WidgetDefinition, { type: 'line' }>['dimension'];
+
+function dimensionForField(
+  dimension: DimensionDefinition,
+  fieldId: string,
+  fields: SourceField[],
+  dateDefault: DateGranularity,
+): DimensionDefinition {
+  const { dateGranularity: _dateGranularity, ...rest } = dimension;
+  const date = fields.some((field) => field.id === fieldId && field.semanticType === 'date');
+  return date ? { ...rest, fieldId, dateGranularity: dateDefault } : { ...rest, fieldId };
+}
+
+function DateGranularitySetting({
+  value,
+  onChange,
+  compact = false,
+}: {
+  value: DateGranularity;
+  onChange: (value: DateGranularity) => Promise<void>;
+  compact?: boolean;
+}) {
+  const select = (
+    <NativeSelect
+      aria-label={compact ? 'Date granularity' : undefined}
+      value={value}
+      onChange={(event) => void onChange(event.target.value as DateGranularity)}
+    >
+      <NativeSelectOption value="auto">Automatic</NativeSelectOption>
+      <NativeSelectOption value="raw">Raw values</NativeSelectOption>
+      <NativeSelectOption value="day">Day</NativeSelectOption>
+      <NativeSelectOption value="week">Week</NativeSelectOption>
+      <NativeSelectOption value="month">Month</NativeSelectOption>
+      <NativeSelectOption value="quarter">Quarter</NativeSelectOption>
+      <NativeSelectOption value="year">Year</NativeSelectOption>
+    </NativeSelect>
+  );
+  if (compact) return select;
+  return (
+    <Field>
+      <FieldLabel>Date granularity</FieldLabel>
+      {select}
+    </Field>
+  );
 }
 
 type MetricDefinition = Extract<WidgetDefinition, { type: 'scorecard' }>['metric'];
@@ -1175,14 +1442,17 @@ function MetricSettings({
   fields,
   source,
   commit,
-}: QuerySettingsProps & { source?: SourceDescription }) {
+  onCreate,
+}: QuerySettingsProps & { source?: SourceDescription; onCreate: () => void }) {
   const choices = [
     ...fields
       .filter((field) => field.role === 'metric')
-      .map((field) => ({ id: field.id, label: field.label })),
+      .map((field) => ({ id: field.id, label: field.label, group: 'Fields', prefix: '123' })),
     ...(source?.libraryMetrics ?? []).map((item) => ({
       id: item.id,
-      label: `${item.name} · library`,
+      label: item.name,
+      group: 'Metric library',
+      prefix: 'fx',
     })),
   ];
   const metrics =
@@ -1223,91 +1493,276 @@ function MetricSettings({
     };
   }
   return (
-    <div className="flex flex-col gap-3">
-      {metrics.map((metric, index) => {
-        const value =
-          metric.source.kind === 'field'
-            ? metric.source.fieldId
-            : metric.source.kind === 'library'
-              ? metric.source.libraryMetricId
-              : `expression:${index}`;
-        const metricChoices =
-          metric.source.kind === 'expression'
-            ? [{ id: value, label: metric.userDefinedName ?? 'Custom expression' }, ...choices]
-            : choices;
-        return (
-          <div key={`${value}-${index}`} className="flex flex-col gap-2">
-            <div className="flex items-end gap-2">
-              <div className="min-w-0 flex-1">
-                <FieldPicker
-                  label={`Metric${metrics.length > 1 ? ` ${index + 1}` : ''}`}
-                  value={value}
-                  fields={metricChoices}
-                  onChange={(id) => {
-                    if (id !== value) void update(index, metricFor(id));
-                  }}
-                />
+    <Field>
+      <FieldLabel>{axisLabel('metric', definition.type, metrics.length > 1)}</FieldLabel>
+      <div className="flex flex-col gap-1.5">
+        {metrics.map((metric, index) => {
+          const value =
+            metric.source.kind === 'field'
+              ? metric.source.fieldId
+              : metric.source.kind === 'library'
+                ? metric.source.libraryMetricId
+                : `expression:${index}`;
+          const metricChoices =
+            metric.source.kind === 'expression'
+              ? [
+                  {
+                    id: value,
+                    label: metric.userDefinedName ?? 'Custom expression',
+                    group: 'Chart metrics',
+                    prefix: 'fx',
+                  },
+                  ...choices,
+                ]
+              : choices;
+          return (
+            <div key={`${value}-${index}`} className="flex flex-col gap-2">
+              <div className="flex items-center gap-1">
+                <div className="flex h-8 min-w-0 flex-1 overflow-hidden rounded-full border border-metric/40 bg-metric/10">
+                  {metric.source.kind === 'field' ? (
+                    <Select
+                      value={metric.source.aggregation}
+                      onValueChange={(aggregation) => {
+                        if (!aggregation) return;
+                        void update(index, {
+                          ...metric,
+                          source: {
+                            kind: 'field',
+                            fieldId: metric.source.kind === 'field' ? metric.source.fieldId : '',
+                            aggregation,
+                          },
+                        });
+                      }}
+                    >
+                      <SelectTrigger
+                        aria-label={`Aggregation for metric ${index + 1}`}
+                        className="w-28 shrink-0"
+                        variant="embedded"
+                      >
+                        <SelectValue>
+                          {(aggregation: Aggregation | null) => {
+                            if (!aggregation) return null;
+                            const Icon = aggregationIcons[aggregation];
+                            return (
+                              <>
+                                <Icon />
+                                {aggregationLabel(aggregation)}
+                              </>
+                            );
+                          }}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent
+                        className="min-w-40"
+                        align="start"
+                        alignItemWithTrigger={false}
+                      >
+                        <SelectGroup>
+                          {aggregations.map((item) => {
+                            const Icon = aggregationIcons[item];
+                            return (
+                              <Tooltip key={item}>
+                                <TooltipTrigger
+                                  render={<SelectItem className="pr-16" value={item} />}
+                                >
+                                  <Icon />
+                                  <span>{aggregationLabel(item)}</span>
+                                  <CircleHelpIcon
+                                    data-slot="aggregation-help"
+                                    className="absolute right-8"
+                                    aria-hidden="true"
+                                  />
+                                </TooltipTrigger>
+                                <TooltipContent side="right">
+                                  {aggregationDescriptions[item]}
+                                </TooltipContent>
+                              </Tooltip>
+                            );
+                          })}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <span className="flex w-12 shrink-0 items-center justify-center border-r border-metric/30 font-mono text-xs font-semibold text-muted-foreground">
+                      fx
+                    </span>
+                  )}
+                  <FieldPicker
+                    appearance="embedded"
+                    label={`Metric${metrics.length > 1 ? ` ${index + 1}` : ''}`}
+                    tone="metric"
+                    value={value}
+                    fields={metricChoices}
+                    onCreate={{ label: 'Add custom metric', action: onCreate }}
+                    onChange={(id) => {
+                      if (id !== value) void update(index, metricFor(id));
+                    }}
+                  />
+                </div>
+                {'metrics' in definition && definition.metrics.length > 1 ? (
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Remove metric ${index + 1}`}
+                    onClick={() =>
+                      void commit({
+                        ...definition,
+                        metrics: definition.metrics.filter((_, itemIndex) => itemIndex !== index),
+                      })
+                    }
+                  >
+                    <Trash2Icon />
+                  </Button>
+                ) : null}
               </div>
-              {'metrics' in definition && definition.metrics.length > 1 ? (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label={`Remove metric ${index + 1}`}
-                  onClick={() =>
-                    void commit({
-                      ...definition,
-                      metrics: definition.metrics.filter((_, itemIndex) => itemIndex !== index),
-                    })
-                  }
-                >
-                  <Trash2Icon />
-                </Button>
+              {metric.source.kind === 'expression' ? (
+                <MetricExpressionInput
+                  metric={metric}
+                  onCommit={(nextMetric) => update(index, nextMetric)}
+                />
+              ) : null}
+              {definition.type === 'table' ? (
+                <ConditionalFormatSettings
+                  metric={metric}
+                  onChange={(conditionalFormat) => update(index, { ...metric, conditionalFormat })}
+                />
               ) : null}
             </div>
-            {metric.source.kind === 'field' ? (
-              <Field>
-                <FieldLabel>Aggregation</FieldLabel>
-                <NativeSelect
-                  value={metric.source.aggregation}
-                  onChange={(event) =>
-                    void update(index, {
-                      ...metric,
-                      source: {
-                        kind: 'field',
-                        fieldId: metric.source.kind === 'field' ? metric.source.fieldId : '',
-                        aggregation: event.target.value as Aggregation,
-                      },
-                    })
-                  }
-                >
-                  {aggregations.map((item) => (
-                    <NativeSelectOption key={item} value={item}>
-                      {item}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-              </Field>
-            ) : null}
-            {metric.source.kind === 'expression' ? (
-              <MetricExpressionInput
-                metric={metric}
-                onCommit={(nextMetric) => update(index, nextMetric)}
-              />
-            ) : null}
-          </div>
-        );
-      })}
-      {'metrics' in definition ? (
-        <FieldPicker
-          label="Add metric"
-          value=""
-          fields={choices}
-          onChange={(id) =>
-            void commit({ ...definition, metrics: [...definition.metrics, metricFor(id)] })
+          );
+        })}
+        {'metrics' in definition ? (
+          <FieldPicker
+            appearance="add"
+            label="Add metric"
+            tone="metric"
+            value=""
+            fields={choices}
+            onCreate={{ label: 'Add custom metric', action: onCreate }}
+            onChange={(id) =>
+              void commit({ ...definition, metrics: [...definition.metrics, metricFor(id)] })
+            }
+          />
+        ) : null}
+      </div>
+    </Field>
+  );
+}
+
+type ConditionalFormat = NonNullable<MetricDefinition['conditionalFormat']>;
+
+function ConditionalFormatSettings({
+  metric,
+  onChange,
+}: {
+  metric: MetricDefinition;
+  onChange: (rules: ConditionalFormat | undefined) => Promise<void>;
+}) {
+  const rules = metric.conditionalFormat ?? [];
+  const update = (index: number, rule: ConditionalFormat[number]) =>
+    onChange(rules.map((item, itemIndex) => (itemIndex === index ? rule : item)));
+  return (
+    <div className="grid gap-2 pl-2">
+      <div className="flex items-center justify-between gap-2">
+        <FieldLabel>Conditional formatting</FieldLabel>
+        <Button
+          variant="ghost"
+          size="xs"
+          onClick={() =>
+            void onChange([...rules, { comparator: 'gte', value: 0, color: 'positive' }])
           }
-        />
-      ) : null}
+        >
+          <PlusIcon data-icon="inline-start" /> Add rule
+        </Button>
+      </div>
+      {rules.map((rule, index) => (
+        <div key={index} className="grid grid-cols-[1fr_5rem_6rem_auto] items-center gap-1">
+          <NativeSelect
+            aria-label={`Rule ${index + 1} comparator`}
+            value={rule.comparator}
+            onChange={(event) => {
+              const comparator = event.target.value;
+              void update(
+                index,
+                comparator === 'between'
+                  ? { comparator, min: 0, max: 100, color: rule.color }
+                  : {
+                      comparator: comparator as 'gt' | 'lt' | 'gte' | 'lte',
+                      value: 'value' in rule ? rule.value : rule.min,
+                      color: rule.color,
+                    },
+              );
+            }}
+          >
+            <NativeSelectOption value="gt">Greater than</NativeSelectOption>
+            <NativeSelectOption value="gte">At least</NativeSelectOption>
+            <NativeSelectOption value="lt">Less than</NativeSelectOption>
+            <NativeSelectOption value="lte">At most</NativeSelectOption>
+            <NativeSelectOption value="between">Between</NativeSelectOption>
+          </NativeSelect>
+          <ThresholdInputs rule={rule} onChange={(next) => update(index, next)} />
+          <NativeSelect
+            aria-label={`Rule ${index + 1} color`}
+            value={rule.color}
+            onChange={(event) =>
+              void update(index, {
+                ...rule,
+                color: event.target.value as ConditionalFormat[number]['color'],
+              })
+            }
+          >
+            <NativeSelectOption value="positive">Positive</NativeSelectOption>
+            <NativeSelectOption value="warning">Warning</NativeSelectOption>
+            <NativeSelectOption value="negative">Negative</NativeSelectOption>
+            <NativeSelectOption value="neutral">Neutral</NativeSelectOption>
+          </NativeSelect>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={`Remove rule ${index + 1}`}
+            onClick={() => {
+              const next = rules.filter((_, itemIndex) => itemIndex !== index);
+              void onChange(next.length ? next : undefined);
+            }}
+          >
+            <Trash2Icon />
+          </Button>
+        </div>
+      ))}
     </div>
+  );
+}
+
+function ThresholdInputs({
+  rule,
+  onChange,
+}: {
+  rule: ConditionalFormat[number];
+  onChange: (rule: ConditionalFormat[number]) => Promise<void>;
+}) {
+  if (rule.comparator === 'between')
+    return (
+      <div className="flex gap-1">
+        <Input
+          aria-label="Minimum"
+          type="number"
+          defaultValue={rule.min}
+          onBlur={(event) => void onChange({ ...rule, min: Number(event.currentTarget.value) })}
+        />
+        <Input
+          aria-label="Maximum"
+          type="number"
+          defaultValue={rule.max}
+          onBlur={(event) => void onChange({ ...rule, max: Number(event.currentTarget.value) })}
+        />
+      </div>
+    );
+  return (
+    <Input
+      aria-label="Threshold"
+      type="number"
+      defaultValue={rule.value}
+      onBlur={(event) => void onChange({ ...rule, value: Number(event.currentTarget.value) })}
+    />
   );
 }
 
@@ -1322,6 +1777,60 @@ const aggregations: Aggregation[] = [
   'standardDeviation',
   'variance',
 ];
+
+const aggregationLabels: Record<Aggregation, string> = {
+  sum: 'SUM',
+  average: 'AVG',
+  count: 'COUNT',
+  countDistinct: 'COUNTD',
+  min: 'MIN',
+  max: 'MAX',
+  median: 'MEDIAN',
+  standardDeviation: 'STDDEV',
+  variance: 'VAR',
+};
+
+const aggregationIcons: Record<Aggregation, LucideIcon> = {
+  sum: SigmaIcon,
+  average: CircleDivideIcon,
+  count: HashIcon,
+  countDistinct: FingerprintIcon,
+  min: ArrowDownToLineIcon,
+  max: ArrowUpToLineIcon,
+  median: AlignCenterVerticalIcon,
+  standardDeviation: ActivityIcon,
+  variance: ChartScatterIcon,
+};
+
+const aggregationDescriptions: Record<Aggregation, string> = {
+  sum: 'Adds all non-null values in each group.',
+  average: 'Returns the arithmetic mean of all non-null values.',
+  count: 'Counts rows where this field is not null.',
+  countDistinct: 'Counts unique non-null values.',
+  min: 'Returns the smallest non-null value.',
+  max: 'Returns the largest non-null value.',
+  median: 'Returns the middle non-null value after sorting.',
+  standardDeviation: 'Measures spread using the sample standard deviation.',
+  variance: 'Measures squared spread using the sample variance.',
+};
+
+function aggregationLabel(aggregation: Aggregation) {
+  return aggregationLabels[aggregation];
+}
+
+function fieldTypePrefix(type: SemanticType) {
+  if (type === 'date') return 'DATE';
+  if (type === 'text') return 'ABC';
+  if (type === 'id') return 'ID';
+  return '123';
+}
+
+function axisLabel(role: 'dimension' | 'metric', type: WidgetDefinition['type'], plural: boolean) {
+  const label = `${role === 'dimension' ? 'Dimension' : 'Metric'}${plural ? 's' : ''}`;
+  if (type === 'line' || type === 'bar')
+    return `${label} · ${role === 'dimension' ? 'X' : 'Y'} axis`;
+  return label;
+}
 
 function MetricExpressionInput({
   metric,
@@ -1680,6 +2189,33 @@ function TypeSettings({
               })
             }
           />
+          <FieldPicker
+            label="Pivot columns"
+            value={definition.pivotDimension?.fieldId ?? ''}
+            fields={[
+              { id: '', label: 'None' },
+              ...dimensions.filter(
+                (field) => !definition.dimensions.some((item) => item.fieldId === field.id),
+              ),
+            ]}
+            onChange={(fieldId) =>
+              void commit({
+                ...definition,
+                pivotDimension: fieldId ? { fieldId } : undefined,
+              })
+            }
+          />
+          <Field orientation="horizontal">
+            <FieldLabel>Show subtotals</FieldLabel>
+            <Switch
+              checked={definition.showSubtotals ?? false}
+              disabled={definition.dimensions.length < 2}
+              onCheckedChange={(showSubtotals) => void commit({ ...definition, showSubtotals })}
+            />
+            {definition.dimensions.length < 2 ? (
+              <FieldDescription>Add a second dimension to group rows.</FieldDescription>
+            ) : null}
+          </Field>
         </>
       );
     default:
@@ -1786,45 +2322,126 @@ function FieldPicker({
   value,
   fields,
   onChange,
+  appearance = 'default',
+  tone,
+  prefix,
+  onCreate,
 }: {
   label: string;
   value: string;
-  fields: Array<{ id: string; label: string }>;
+  fields: Array<{ id: string; label: string; group?: string; prefix?: string }>;
   onChange: (value: string) => void;
+  appearance?: 'default' | 'assignment' | 'embedded' | 'add';
+  tone?: 'dimension' | 'metric';
+  prefix?: string;
+  onCreate?: { label: string; action: () => void };
 }) {
   const [open, setOpen] = useState(false);
   const selected = fields.find((field) => field.id === value);
+  const groups = [...new Set(fields.map((field) => field.group ?? ''))];
+  const compact = appearance !== 'default';
   return (
-    <Field>
-      <FieldLabel>{label}</FieldLabel>
+    <Field className={cn(compact && 'min-w-0 gap-0', appearance === 'embedded' && 'flex-1')}>
+      <FieldLabel className={cn(compact && 'sr-only')}>{label}</FieldLabel>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
-          render={<Button variant="outline" className="w-full justify-between font-normal" />}
+          render={
+            <Button
+              variant={appearance === 'default' || appearance === 'add' ? 'outline' : 'ghost'}
+              className={cn(
+                'w-full font-normal',
+                appearance === 'default' && 'justify-between',
+                appearance === 'assignment' && 'h-8 justify-start overflow-hidden rounded-full p-0',
+                appearance === 'assignment' &&
+                  tone === 'dimension' &&
+                  'border border-dimension/40 bg-dimension/10 hover:bg-dimension/15',
+                appearance === 'assignment' &&
+                  tone === 'metric' &&
+                  'border border-metric/40 bg-metric/10 hover:bg-metric/15',
+                appearance === 'embedded' &&
+                  'h-full min-w-0 justify-start rounded-none bg-transparent px-2 hover:bg-metric/10',
+                appearance === 'add' &&
+                  'h-8 justify-start rounded-full border-dashed text-muted-foreground',
+              )}
+            />
+          }
         >
-          <span className="truncate">
-            {selected?.label ?? `Select ${label.toLocaleLowerCase()}`}
-          </span>
+          {appearance === 'add' ? (
+            <>
+              <PlusIcon data-icon="inline-start" />
+              {label}
+            </>
+          ) : (
+            <>
+              {appearance === 'assignment' && prefix ? (
+                <span
+                  className={cn(
+                    'flex h-full shrink-0 items-center border-r px-2 font-mono text-xs font-semibold text-muted-foreground',
+                    tone === 'dimension' ? 'border-dimension/30' : 'border-metric/30',
+                  )}
+                >
+                  {prefix}
+                </span>
+              ) : null}
+              <span className={cn('truncate', appearance === 'assignment' && 'px-2')}>
+                {selected?.label ?? `Select ${label.toLocaleLowerCase()}`}
+              </span>
+            </>
+          )}
         </PopoverTrigger>
         <PopoverContent className="w-(--anchor-width) p-0" align="start">
-          <Command>
+          <Command label={label}>
             <CommandInput placeholder={`Search ${label.toLocaleLowerCase()}...`} />
             <CommandList>
               <CommandEmpty>No matching field.</CommandEmpty>
-              <CommandGroup>
-                {fields.map((field) => (
-                  <CommandItem
-                    key={field.id || 'empty'}
-                    value={`${field.label} ${field.id}`}
-                    data-checked={field.id === value}
-                    onSelect={() => {
-                      onChange(field.id);
-                      setOpen(false);
-                    }}
-                  >
-                    {field.label}
-                  </CommandItem>
-                ))}
-              </CommandGroup>
+              {groups.map((group) => (
+                <CommandGroup key={group || 'fields'} heading={group || undefined}>
+                  {fields
+                    .filter((field) => (field.group ?? '') === group)
+                    .map((field) => (
+                      <CommandItem
+                        key={field.id || 'empty'}
+                        value={`${field.label} ${field.id}`}
+                        className={cn(
+                          tone && 'my-1 rounded-full border',
+                          tone === 'dimension' &&
+                            'border-dimension/30 bg-dimension/10 data-selected:bg-dimension/20',
+                          tone === 'metric' &&
+                            'border-metric/30 bg-metric/10 data-selected:bg-metric/20',
+                        )}
+                        data-checked={field.id === value}
+                        onSelect={() => {
+                          onChange(field.id);
+                          setOpen(false);
+                        }}
+                      >
+                        {field.prefix ? (
+                          <span className="w-10 shrink-0 font-mono text-xs font-semibold text-muted-foreground">
+                            {field.prefix}
+                          </span>
+                        ) : null}
+                        <span className="truncate">{field.label}</span>
+                      </CommandItem>
+                    ))}
+                </CommandGroup>
+              ))}
+              {onCreate ? (
+                <>
+                  <CommandSeparator />
+                  <CommandGroup>
+                    <CommandItem
+                      value={onCreate.label}
+                      onSelect={() => {
+                        setOpen(false);
+                        onCreate.action();
+                      }}
+                    >
+                      <PlusIcon />
+                      {onCreate.label}
+                    </CommandItem>
+                  </CommandGroup>
+                </>
+              ) : null}
             </CommandList>
           </Command>
         </PopoverContent>
@@ -2037,8 +2654,8 @@ function DatasourceFieldRow({
 }
 
 const fieldRoleStyles: Record<FieldRole, string> = {
-  dimension: 'border-l-blue-500',
-  metric: 'border-l-emerald-500',
+  dimension: 'border-l-emerald-500',
+  metric: 'border-l-blue-500',
 };
 
 function MetricFormulaDialog({
@@ -2283,6 +2900,7 @@ async function defaultDefinition(
       dimensions: [{ fieldId: dimension.id }],
       metrics: [metric],
       resultLimit: { mode: 'top', amount: 50 },
+      showSubtotals: true,
     };
   return { ...base, type, dimension: { fieldId: dimension.id }, metric, limit: 20 };
 }

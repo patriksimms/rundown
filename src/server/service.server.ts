@@ -36,10 +36,16 @@ import {
   type DashboardWidget,
   type WidgetDefinition,
 } from '#/domain/schema';
-import { appendPlacement, placementFits, validateLayoutUpdate } from '#/domain/layout';
+import {
+  appendPlacement,
+  placementFits,
+  requiredCanvasRows,
+  validateLayoutUpdate,
+} from '#/domain/layout';
 import { canUpdateFieldMetadata, detectFieldSemantics } from '#/domain/field-metadata';
 import { hashJson } from '#/domain/hash';
 import { comparisonDateRange, resolveDateRange, yearToDateRange } from '#/domain/dates';
+import { dateBucketTarget, resolveDateGranularity } from '#/domain/date-granularity';
 import { queryCacheState, widgetDependencyState } from '#/domain/cache';
 import { queryResultColumns } from '#/domain/query-result';
 import { remapWidgetDefinition } from '#/domain/remap';
@@ -48,7 +54,7 @@ import {
   mergeControlState,
   singleValueControlWithMultipleSelections,
 } from '#/domain/control-state';
-import { alignDateComparisonRows, tableSummaryDefinition } from '#/domain/widget-results';
+import { alignDateComparisonRows } from '#/domain/widget-results';
 import { isWorkspaceR2Key, scopedR2Prefix } from '#/domain/tenancy';
 import {
   createDatasourceUploadCleanupToken,
@@ -262,6 +268,7 @@ async function createDashboard(request: Extract<ApiRequest, { action: 'createDas
     timezone: request.timezone,
     defaultDateRange: request.defaultDateRange ?? defaultDateRange,
     columns: 12,
+    canvasRows: 10,
     widgets: [],
     createdBy: session.userId,
     createdAt: now,
@@ -321,6 +328,7 @@ async function addWidget(request: Extract<ApiRequest, { action: 'addWidget' }>) 
   const updated = {
     ...access.document,
     widgets: [...access.document.widgets, widget],
+    canvasRows: Math.max(access.document.canvasRows, widget.layout.y + widget.layout.height + 2),
     updatedAt: new Date().toISOString(),
   };
   await persistDashboard(updated);
@@ -376,6 +384,10 @@ async function moveWidget(request: Extract<ApiRequest, { action: 'moveWidget' }>
     widgets: access.document.widgets.map((widget) =>
       widget.id === existing.id ? updatedWidget : widget,
     ),
+    canvasRows: Math.max(
+      access.document.canvasRows,
+      request.placement.y + request.placement.height,
+    ),
     updatedAt: new Date().toISOString(),
   };
   await persistDashboard(updated);
@@ -388,21 +400,25 @@ async function updateLayout(request: Extract<ApiRequest, { action: 'updateLayout
     throw new ApiError(
       400,
       'invalid_layout',
-      'The layout must include every widget exactly once, stay inside the grid, and not overlap.',
+      'The layout must include every widget exactly once, fit the canvas and grid, and not overlap.',
     );
   const placements = new Map(
     request.placements.map((update) => [update.widgetId, update.placement]),
   );
+  const widgets = access.document.widgets.map((widget) => ({
+    ...widget,
+    layout: placements.get(widget.id)!,
+  }));
+  if (request.canvasRows < requiredCanvasRows(widgets))
+    throw new ApiError(400, 'invalid_layout', 'The canvas must contain every widget.');
   const updated = {
     ...access.document,
-    widgets: access.document.widgets.map((widget) => ({
-      ...widget,
-      layout: placements.get(widget.id)!,
-    })),
+    widgets,
+    canvasRows: request.canvasRows,
     updatedAt: new Date().toISOString(),
   };
   await persistDashboard(updated);
-  return updated.widgets;
+  return updated;
 }
 
 async function copyWidget(request: Extract<ApiRequest, { action: 'copyWidget' }>) {
@@ -452,7 +468,12 @@ async function copyWidget(request: Extract<ApiRequest, { action: 'copyWidget' }>
 async function previewWidget(request: Extract<ApiRequest, { action: 'previewWidget' }>) {
   const access = await authorizeDashboard(request.dashboardId, 'editor');
   await validateDefinition(access.document, request.definition);
-  return runDefinition(access.document, request.definition, request.controlState ?? {});
+  return runDefinition(
+    access.document,
+    request.definition,
+    request.controlState ?? {},
+    request.width,
+  );
 }
 
 async function queryWidget(
@@ -482,6 +503,13 @@ async function queryWidget(
   );
   const dateRange = controlState.dateRange ?? access.document.defaultDateRange;
   const resolvedDateRange = resolveDateRange(dateRange, access.document.timezone);
+  const bucketTarget = dateBucketTarget(widget.layout.width);
+  const comparisonGranularity = resolvedWidgetDateGranularity(
+    widget.definition,
+    metadata,
+    resolvedDateRange,
+    bucketTarget,
+  );
   const resolvedControlState: ControlState = {
     ...controlState,
     dateRange: {
@@ -503,13 +531,14 @@ async function queryWidget(
       dataSourceConnector: connector.type,
       dataSourceVersion: dataSource.version,
       timezone: access.document.timezone,
+      dateBucketTarget: bucketTarget,
     }),
     page: pageSize === undefined ? 0 : page,
   });
   const cached = await env.QUERY_CACHE.get(cacheKey, 'json');
   if (cached) {
     console.info('rundown.query_cache', { dashboardId, widgetId, outcome: 'hit' });
-    return { ...(cached as object), cache: 'hit' };
+    return { ...(cached as object), columns, cache: 'hit' };
   }
   console.info('rundown.query_cache', { dashboardId, widgetId, outcome: 'miss' });
   const run = (
@@ -526,12 +555,12 @@ async function queryWidget(
         controlState: queryControlState,
         resolvedControls,
         offset,
+        dateBucketTarget: bucketTarget,
       }),
     );
   const comparison = widgetComparison(widget.definition);
-  const summaryDefinition = tableSummaryDefinition(widget.definition);
   const pageOffset = pageSize === undefined ? undefined : page * pageSize;
-  const [rows, comparisonRows, summaryRows] = await Promise.all([
+  const [rows, comparisonRows] = await Promise.all([
     run(resolvedControlState, widget.definition, pageOffset),
     comparison
       ? run(
@@ -547,11 +576,15 @@ async function queryWidget(
           pageOffset,
         )
       : Promise.resolve(undefined),
-    summaryDefinition ? run(resolvedControlState, summaryDefinition) : undefined,
   ]);
   const alignedComparisonRows =
     comparisonRows && comparison && hasDateDimension(widget.definition, metadata)
-      ? alignDateComparisonRows(comparisonRows, comparison, resolvedDateRange)
+      ? alignDateComparisonRows(
+          comparisonRows,
+          comparison,
+          resolvedDateRange,
+          comparisonGranularity,
+        )
       : comparisonRows;
   const hasMore = pageSize !== undefined && rows.length > pageSize;
   const result = {
@@ -566,7 +599,6 @@ async function queryWidget(
           ),
         }
       : {}),
-    ...(summaryRows?.[0] ? { summaryRow: normalize(summaryRows[0]) } : {}),
     controlState,
     cache: 'miss',
     ...(pageSize === undefined ? {} : { page, hasMore }),
@@ -591,6 +623,7 @@ async function explainWidget(dashboardId: string, widgetId: string, shareToken?:
       definition: widget.definition,
       metadata,
       controlState: {},
+      dateBucketTarget: dateBucketTarget(widget.layout.width),
     }),
   );
   const calculatedDefinitions = metadata.calculatedFields
@@ -1524,6 +1557,20 @@ async function validateDefinition(dashboard: DashboardDocument, definition: Widg
       'unknown_field',
       'The widget references a field that does not belong to its datasource.',
     );
+  const metadataById = new Map(
+    [...metadata.fields, ...metadata.calculatedFields].map((field) => [field.id, field]),
+  );
+  if (
+    definitionDimensions(definition).some(
+      (dimension) =>
+        dimension.dateGranularity && metadataById.get(dimension.fieldId)?.semanticType !== 'date',
+    )
+  )
+    throw new ApiError(
+      400,
+      'invalid_date_granularity',
+      'Date granularity can only be set on date dimensions.',
+    );
   if (!compilesToQuery(definition)) return;
   await datasourceOperation(() =>
     connectorFor(dataSource).validateQuery(dataSource, {
@@ -1532,6 +1579,7 @@ async function validateDefinition(dashboard: DashboardDocument, definition: Widg
       definition,
       metadata,
       controlState: {},
+      dateBucketTarget: 60,
     }),
   );
 }
@@ -1540,6 +1588,7 @@ async function runDefinition(
   dashboard: DashboardDocument,
   definition: WidgetDefinition,
   state: ControlState,
+  width = 8,
 ) {
   const defaults = defaultControlState(dashboard);
   const controlState = validateControlState(dashboard, mergeControlState(defaults, state));
@@ -1555,6 +1604,13 @@ async function runDefinition(
   );
   const dateRange = controlState.dateRange ?? dashboard.defaultDateRange;
   const resolvedDateRange = resolveDateRange(dateRange, dashboard.timezone);
+  const bucketTarget = dateBucketTarget(width);
+  const comparisonGranularity = resolvedWidgetDateGranularity(
+    definition,
+    metadata,
+    resolvedDateRange,
+    bucketTarget,
+  );
   const resolvedControlState: ControlState = {
     ...controlState,
     dateRange: {
@@ -1571,11 +1627,11 @@ async function runDefinition(
         metadata,
         controlState: queryControlState,
         resolvedControls,
+        dateBucketTarget: bucketTarget,
       }),
     );
   const comparison = widgetComparison(definition);
-  const summaryDefinition = tableSummaryDefinition(definition);
-  const [rows, comparisonRows, summaryRows] = await Promise.all([
+  const [rows, comparisonRows] = await Promise.all([
     run(resolvedControlState),
     comparison
       ? run({
@@ -1587,17 +1643,20 @@ async function runDefinition(
           ),
         })
       : Promise.resolve(undefined),
-    summaryDefinition ? run(resolvedControlState, summaryDefinition) : undefined,
   ]);
   const alignedComparisonRows =
     comparisonRows && comparison && hasDateDimension(definition, metadata)
-      ? alignDateComparisonRows(comparisonRows, comparison, resolvedDateRange)
+      ? alignDateComparisonRows(
+          comparisonRows,
+          comparison,
+          resolvedDateRange,
+          comparisonGranularity,
+        )
       : comparisonRows;
   return {
     rows: normalize(rows),
     columns,
     ...(alignedComparisonRows ? { comparisonRows: normalize(alignedComparisonRows) } : {}),
-    ...(summaryRows?.[0] ? { summaryRow: normalize(summaryRows[0]) } : {}),
     controlState,
   };
 }
@@ -1614,6 +1673,7 @@ async function compiledSql(dashboard: DashboardDocument, widget: DashboardWidget
         definition: widget.definition,
         metadata,
         controlState: {},
+        dateBucketTarget: dateBucketTarget(widget.layout.width),
       }).sql,
   );
 }
@@ -1656,12 +1716,31 @@ function hasDateDimension(
     calculatedFields: Array<{ id: string; semanticType: string }>;
   },
 ) {
-  const fieldId =
-    definition.type === 'line' || definition.type === 'bar'
-      ? definition.dimension.fieldId
-      : undefined;
+  const fieldId = definitionDimensions(definition)[0]?.fieldId;
   return [...metadata.fields, ...metadata.calculatedFields].some(
     (field) => field.id === fieldId && field.semanticType === 'date',
+  );
+}
+
+function resolvedWidgetDateGranularity(
+  definition: WidgetDefinition,
+  metadata: {
+    fields: Array<{ id: string; semanticType: string }>;
+    calculatedFields: Array<{ id: string; semanticType: string }>;
+  },
+  range: { start: string; end: string },
+  targetBuckets: number,
+) {
+  const dimension = definitionDimensions(definition)[0];
+  if (!dimension) return undefined;
+  const field = [...metadata.fields, ...metadata.calculatedFields].find(
+    (candidate) => candidate.id === dimension.fieldId,
+  );
+  if (field?.semanticType !== 'date') return undefined;
+  return resolveDateGranularity(
+    dimension.dateGranularity ?? (definition.type === 'table' ? 'raw' : 'auto'),
+    range,
+    targetBuckets,
   );
 }
 
@@ -1716,6 +1795,8 @@ function definitionFieldIds(definition: WidgetDefinition) {
   if ('dimension' in definition) ids.push(definition.dimension.fieldId);
   if ('dimensions' in definition)
     ids.push(...definition.dimensions.map((dimension) => dimension.fieldId));
+  if ('pivotDimension' in definition && definition.pivotDimension)
+    ids.push(definition.pivotDimension.fieldId);
   if ('breakdownDimension' in definition && definition.breakdownDimension)
     ids.push(definition.breakdownDimension.fieldId);
   const metrics =
@@ -1728,6 +1809,18 @@ function definitionFieldIds(definition: WidgetDefinition) {
     ...metrics.flatMap((metric) => (metric.source.kind === 'field' ? [metric.source.fieldId] : [])),
   );
   return ids;
+}
+
+function definitionDimensions(definition: WidgetDefinition) {
+  if (definition.type === 'line') return [definition.dimension];
+  if (definition.type === 'bar' || definition.type === 'pie')
+    return [
+      definition.dimension,
+      ...(definition.breakdownDimension ? [definition.breakdownDimension] : []),
+    ];
+  return definition.type === 'table'
+    ? [...definition.dimensions, ...(definition.pivotDimension ? [definition.pivotDimension] : [])]
+    : [];
 }
 
 function dashboardUsesDataSource(dashboard: DashboardDocument, dataSourceId: string) {

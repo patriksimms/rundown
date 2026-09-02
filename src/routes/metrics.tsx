@@ -18,8 +18,12 @@ import {
 import { Textarea } from '#/components/ui/textarea';
 import type { SemanticType } from '#/domain/schema';
 import { useWebMcpTools } from '#/webmcp/use-webmcp-tools';
+import { pageTitle } from '#/lib/page-title';
 
-export const Route = createFileRoute('/metrics')({ component: MetricsPage });
+export const Route = createFileRoute('/metrics')({
+  component: MetricsPage,
+  head: () => ({ meta: [{ title: pageTitle('Metric library') }] }),
+});
 
 interface MetricRecord {
   id: string;

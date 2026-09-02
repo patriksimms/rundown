@@ -56,6 +56,7 @@ metric's `semanticType` and can be overridden.
 Dimension:
   fieldId: string
   userDefinedName?: string
+  dateGranularity?: auto | raw | day | week | month | quarter | year
   styling?: Styling
 
 BreakdownDimension:
@@ -64,7 +65,10 @@ BreakdownDimension:
   styling?: Styling
 ```
 
-A breakdown dimension splits each primary dimension value into series.
+A breakdown dimension splits each primary dimension value into series. `dateGranularity` only applies
+to fields with the `date` semantic type. Charts use `auto` when a date is selected. Tables use `raw`.
+Automatic granularity targets 30 buckets for widgets up to four columns wide, 60 through eight
+columns, and 90 above eight columns. The compiler picks the finest calendar bucket that fits.
 
 ## Date range
 

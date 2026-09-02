@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   appendPlacement,
+  defaultCanvasRows,
+  insertRow,
+  isRowEmpty,
   placementFits,
+  removeEmptyRow,
+  rowInsertionCuts,
   rollbackFailedLayout,
+  rollbackFailedLayoutState,
+  validRowCuts,
   validateLayoutUpdate,
 } from './layout';
 import type { DashboardWidget } from './schema';
@@ -85,5 +92,64 @@ describe('dashboard layout', () => {
 
     expect(rolledBack[0]?.layout).toEqual(newer);
     expect(rolledBack[1]?.layout).toEqual({ x: 6, y: 0, width: 6, height: 2 });
+  });
+
+  it('derives a legacy canvas height with two trailing rows', () => {
+    expect(defaultCanvasRows([widget])).toBe(10);
+    expect(defaultCanvasRows([{ ...widget, layout: { ...widget.layout, y: 12 } }])).toBe(16);
+  });
+
+  it('offers only cuts that no widget crosses', () => {
+    const lower = { ...widget, id: 'two', layout: { x: 0, y: 4, width: 6, height: 2 } };
+    expect(validRowCuts([widget, lower])).toEqual([0, 2, 3, 4, 6]);
+  });
+
+  it('places the final insertion cut below all stored canvas rows', () => {
+    const lower = { ...widget, id: 'two', layout: { x: 0, y: 4, width: 6, height: 2 } };
+    expect(rowInsertionCuts([widget, lower], 10)).toEqual([0, 2, 3, 4, 10]);
+    expect(rowInsertionCuts([], 10)).toEqual([10]);
+  });
+
+  it('inserts at a valid cut and shifts only widgets below it', () => {
+    const lower = { ...widget, id: 'two', layout: { x: 0, y: 4, width: 6, height: 2 } };
+    const inserted = insertRow([widget, lower], 10, 2);
+    expect(inserted?.canvasRows).toBe(11);
+    expect(inserted?.widgets.map((item) => item.layout.y)).toEqual([0, 5]);
+    expect(insertRow([widget, lower], 10, 1)).toBeUndefined();
+  });
+
+  it('inserts below the final canvas row without moving widgets', () => {
+    const inserted = insertRow([widget], 10, 10);
+    expect(inserted?.canvasRows).toBe(11);
+    expect(inserted?.widgets[0]?.layout).toEqual(widget.layout);
+  });
+
+  it('removes only empty rows and shifts widgets below them', () => {
+    const lower = { ...widget, id: 'two', layout: { x: 0, y: 4, width: 6, height: 2 } };
+    expect(isRowEmpty([widget, lower], 3)).toBe(true);
+    const removed = removeEmptyRow([widget, lower], 11, 3);
+    expect(removed?.canvasRows).toBe(10);
+    expect(removed?.widgets.map((item) => item.layout.y)).toEqual([0, 3]);
+    expect(removeEmptyRow([widget, lower], 11, 1)).toBeUndefined();
+    expect(removeEmptyRow([widget, lower], 10, 3)).toBeUndefined();
+  });
+
+  it('rolls canvas height and placements back as one state', () => {
+    const failedWidget = { ...widget, layout: { ...widget.layout, y: 1 } };
+    const rolledBack = rollbackFailedLayoutState(
+      { widgets: [failedWidget], canvasRows: 11 },
+      { placements: new Map([[widget.id, widget.layout]]), canvasRows: 10 },
+      { placements: new Map([[widget.id, failedWidget.layout]]), canvasRows: 11 },
+    );
+    expect(rolledBack.canvasRows).toBe(10);
+    expect(rolledBack.widgets[0]?.layout).toEqual(widget.layout);
+
+    const newer = rollbackFailedLayoutState(
+      { widgets: [failedWidget], canvasRows: 12 },
+      { placements: new Map([[widget.id, widget.layout]]), canvasRows: 10 },
+      { placements: new Map([[widget.id, failedWidget.layout]]), canvasRows: 11 },
+    );
+    expect(newer.canvasRows).toBe(12);
+    expect(newer.widgets[0]?.layout).toEqual(failedWidget.layout);
   });
 });

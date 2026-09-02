@@ -72,3 +72,16 @@ test('a phone editor edits a widget in a sheet that closes on Escape', async ({ 
 
   expect(await page.evaluate(documentOverflow)).toBeLessThanOrEqual(0);
 });
+
+test('changing the date control default applies it to the dashboard', async ({ page }) => {
+  await mockRundownApi(page, { role: 'editor' });
+  await page.goto('/dashboards/dash_demo');
+
+  await page.getByRole('button', { name: 'Edit Date range' }).click();
+  const settings = page.getByRole('dialog', { name: 'Widget settings' });
+  await settings.getByRole('button', { name: 'Choose date range' }).click();
+  await page.getByRole('button', { name: 'Last 7 days' }).click();
+  await expect(page.getByRole('button', { name: 'Choose date range' }).first()).toContainText(
+    'Last 7 days',
+  );
+});
