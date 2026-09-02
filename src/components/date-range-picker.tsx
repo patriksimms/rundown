@@ -86,7 +86,11 @@ export function DateRangePicker({
             numberOfMonths={2}
             defaultMonth={selection?.from}
             selected={selection}
-            onSelect={(next) => {
+            onSelect={(next, selectedDay) => {
+              if (selection?.from && selection.to) {
+                setSelection({ from: selectedDay });
+                return;
+              }
               setSelection(next);
               if (!next?.from || !next.to) return;
               select({
