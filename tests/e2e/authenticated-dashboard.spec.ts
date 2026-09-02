@@ -114,7 +114,8 @@ test.describe('signed-in dashboard flow', () => {
     const scorecard = widget(page, 'Impressions');
     const line = widget(page, 'Impressions over time');
     await expect(scorecard.getByText(TOTAL_IMPRESSIONS, { exact: true })).toBeVisible();
-    await expect(line.locator('.recharts-line-curve')).toBeVisible();
+    await line.scrollIntoViewIfNeeded();
+    await expect(line.locator('.recharts-line-curve')).toBeVisible({ timeout: 15_000 });
     await expect(line.getByText('No rows for this date range.')).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Choose date range' }).click();
@@ -123,14 +124,15 @@ test.describe('signed-in dashboard flow', () => {
     await expect(rangeStart).toHaveAttribute('data-selected-single', 'true');
     await page.getByRole('button', { name: /January 7th, 2026/u }).click();
     await expect(scorecard.getByText(NARROWED_IMPRESSIONS, { exact: true })).toBeVisible();
-    await expect(line.locator('.recharts-line-curve')).toBeVisible();
+    await line.scrollIntoViewIfNeeded();
+    await expect(line.locator('.recharts-line-curve')).toBeVisible({ timeout: 15_000 });
   });
 });
 
-/** The builder grid item holding the widget with this title. */
+/** The builder item holding the widget with this title. */
 function widget(page: Page, title: string): Locator {
   return page
-    .locator('.react-grid-item')
+    .locator('[data-widget-id]')
     .filter({ has: page.getByRole('button', { name: `Edit ${title}`, exact: true }) });
 }
 

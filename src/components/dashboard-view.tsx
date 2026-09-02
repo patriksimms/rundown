@@ -943,6 +943,7 @@ export function Result({
             dataKey={series[0]?.key ?? ''}
             nameKey={pieLegendKey}
             fill={`var(--color-${series[0]?.key ?? ''})`}
+            isAnimationActive={false}
           />
           <ChartLegend content={<ChartLegendContent nameKey={pieLegendKey} />} />
         </PieChart>
@@ -965,6 +966,7 @@ export function Result({
               dataKey={item.key}
               fill={`var(--color-${item.key})`}
               fillOpacity={item.isComparison ? 0.5 : 1}
+              isAnimationActive={false}
             />
           ))}
           <ChartLegend content={<ChartLegendContent />} />
@@ -997,6 +999,7 @@ export function Result({
             stroke={`var(--color-${item.key})`}
             strokeDasharray={item.isComparison ? '4 4' : undefined}
             dot={false}
+            isAnimationActive={false}
           />
         ))}
         <ChartLegend content={<ChartLegendContent />} />

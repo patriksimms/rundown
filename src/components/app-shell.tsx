@@ -75,7 +75,7 @@ export function AppShell({
             <ThemeToggle />
             <Show when="signed-out">
               <SignInAction>
-                <Button variant="ghost" size="sm">
+                <Button className="hidden min-[360px]:inline-flex" variant="ghost" size="sm">
                   Sign in
                 </Button>
               </SignInAction>

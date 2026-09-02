@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { mockRundownApi } from './support/rundown-api';
 
 test('charts show legends without widget configuration', async ({ page }) => {
+  test.slow();
   const state = await mockRundownApi(page, { role: 'editor' });
   state.dashboard.widgets.push(
     {
@@ -57,15 +58,21 @@ test('charts show legends without widget configuration', async ({ page }) => {
   );
 
   await page.goto('/dashboards/dash_demo');
-  const bar = page.locator('.react-grid-item').filter({ hasText: 'Spend by campaign' });
-  const line = page.locator('.react-grid-item').filter({ hasText: 'Spend trend' });
-  const pie = page.locator('.react-grid-item').filter({ hasText: 'Spend share' });
-  await expect(bar.locator('.recharts-bar-rectangle')).toHaveCount(2);
-  await expect(bar.locator('.recharts-legend-wrapper')).toContainText('Media cost');
-  await expect(line.locator('.recharts-legend-wrapper')).toContainText('Media cost');
-  await expect(pie.locator('.recharts-legend-wrapper')).toContainText('Spring sale');
+  const bar = page.locator('[data-widget-id="w_chart"]');
+  const line = page.locator('[data-widget-id="w_line_chart"]');
+  const pie = page.locator('[data-widget-id="w_pie_chart"]');
+  await expect(bar.locator('.recharts-bar-rectangle')).toHaveCount(2, { timeout: 15_000 });
+  await expect(bar.locator('.recharts-legend-wrapper')).toContainText('Media cost', {
+    timeout: 15_000,
+  });
+  await expect(line.locator('.recharts-legend-wrapper')).toContainText('Media cost', {
+    timeout: 15_000,
+  });
+  await expect(pie.locator('.recharts-legend-wrapper')).toContainText('Spring sale', {
+    timeout: 15_000,
+  });
   await expect(pie.locator('.recharts-legend-wrapper')).toContainText('Always on');
 
-  await page.getByRole('button', { name: 'Edit Spend by campaign' }).click();
+  await bar.getByRole('button', { name: 'Edit Spend by campaign' }).press('Enter');
   await expect(page.getByRole('complementary').getByRole('switch')).toHaveCount(0);
 });

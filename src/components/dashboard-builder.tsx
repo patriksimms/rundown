@@ -712,6 +712,7 @@ export function DashboardBuilder({
                       {dashboard.widgets.map((widget) => (
                         <div
                           key={widget.id}
+                          data-widget-id={widget.id}
                           className={cn(
                             'group overflow-hidden rounded-xl bg-card shadow-sm ring-1 ring-foreground/10 focus-within:ring-2 focus-within:ring-ring',
                             selectedId === widget.id && 'ring-2 ring-primary',
@@ -773,6 +774,7 @@ export function DashboardBuilder({
                 .map((widget) => (
                   <div
                     key={widget.id}
+                    data-widget-id={widget.id}
                     className="relative rounded-xl ring-1 ring-foreground/10 focus-within:ring-2 focus-within:ring-ring"
                   >
                     <div className="absolute top-2 right-2 z-10 flex gap-1">
