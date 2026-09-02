@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 import { useEffect, useState, type CSSProperties, type KeyboardEvent } from 'react';
 import { ChevronsUpDown, X } from 'lucide-react';
-import type { ControlState, DashboardDocument, DashboardWidget } from '#/domain/schema';
+import type { ControlState, DashboardDocument, DashboardWidget, DateRange } from '#/domain/schema';
 import type { QueryResultColumn } from '#/domain/query-result';
 import { callApi } from '#/api/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '#/components/ui/card';
@@ -19,8 +19,6 @@ import { Button } from '#/components/ui/button';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '#/components/ui/chart';
 import { Badge } from '#/components/ui/badge';
 import { Command, CommandGroup, CommandInput, CommandList } from '#/components/ui/command';
-import { Field, FieldError, FieldLabel } from '#/components/ui/field';
-import { Input } from '#/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '#/components/ui/popover';
 import { Skeleton } from '#/components/ui/skeleton';
 import { widgetQueryRequest } from '#/domain/widget-query';
@@ -30,12 +28,7 @@ import {
   pivotBreakdownRows,
   withComparisonSeries,
 } from '#/domain/widget-results';
-import {
-  dateRangeOrderError,
-  tryResolveDateRange,
-  unsupportedDateRangeMessage,
-  updateDateRangeBoundary,
-} from '#/domain/dates';
+import { DateRangePicker } from '#/components/date-range-picker';
 import {
   Table,
   TableBody,
@@ -48,14 +41,24 @@ import {
 export function DashboardView({
   dashboard,
   shareToken,
+  dateRange,
+  onDateRangeChange,
 }: {
   dashboard: DashboardDocument;
   shareToken?: string;
+  dateRange?: DateRange;
+  onDateRangeChange?: (range: DateRange) => void;
 }) {
-  const [controlState, setControlState] = useState<ControlState>(() =>
-    initialControlState(dashboard),
-  );
+  const defaultDateRange = dashboardDateControlRange(dashboard);
+  const [controlState, setControlState] = useState<ControlState>(() => ({
+    ...initialControlState(dashboard),
+    ...(dateRange && defaultDateRange ? { dateRange } : {}),
+  }));
   const [controlsOpen, setControlsOpen] = useState(true);
+  useEffect(() => {
+    if (!defaultDateRange) return;
+    setControlState((current) => ({ ...current, dateRange: dateRange ?? defaultDateRange }));
+  }, [dateRange, defaultDateRange]);
   const ordered = [...dashboard.widgets].sort(
     (left, right) => left.layout.y - right.layout.y || left.layout.x - right.layout.x,
   );
@@ -76,9 +79,11 @@ export function DashboardView({
         widget={widget}
         dashboardId={dashboard.id}
         timezone={dashboard.timezone}
+        defaultDateRange={defaultDateRange}
         shareToken={shareToken}
         controlState={controlState}
         setControlState={setControlState}
+        onDateRangeChange={onDateRangeChange}
       />
     </div>
   );
@@ -132,18 +137,22 @@ function Widget({
   widget,
   dashboardId,
   timezone,
+  defaultDateRange,
   shareToken,
   preview,
   controlState,
   setControlState,
+  onDateRangeChange,
 }: {
   widget: DashboardWidget;
   dashboardId: string;
   timezone: string;
+  defaultDateRange?: DateRange;
   shareToken?: string;
   preview?: boolean;
   controlState: ControlState;
   setControlState: (state: ControlState) => void;
+  onDateRangeChange?: (range: DateRange) => void;
 }) {
   if (widget.definition.type === 'text')
     return (
@@ -156,10 +165,11 @@ function Widget({
   if (widget.definition.type === 'dateControl')
     return (
       <DateControl
-        widgetId={widget.id}
         timezone={timezone}
+        defaultDateRange={defaultDateRange}
         controlState={controlState}
         setControlState={setControlState}
+        onDateRangeChange={onDateRangeChange}
       />
     );
   if (widget.definition.type === 'control')
@@ -203,6 +213,7 @@ export function DashboardWidgetView({
       widget={widget}
       dashboardId={dashboard.id}
       timezone={dashboard.timezone}
+      defaultDateRange={dashboardDateControlRange(dashboard)}
       preview={preview}
       controlState={controlState}
       setControlState={setControlState}
@@ -211,60 +222,35 @@ export function DashboardWidgetView({
 }
 
 function DateControl({
-  widgetId,
   timezone,
+  defaultDateRange,
   controlState,
   setControlState,
+  onDateRangeChange,
 }: {
-  widgetId: string;
   timezone: string;
+  defaultDateRange?: DateRange;
   controlState: ControlState;
   setControlState: (state: ControlState) => void;
+  onDateRangeChange?: (range: DateRange) => void;
 }) {
   const range = controlState.dateRange;
-  const resolved = range ? tryResolveDateRange(range, timezone) : undefined;
-  const [error, setError] = useState<string>();
-  const displayedError =
-    error ??
-    (range
-      ? resolved
-        ? dateRangeOrderError(range, timezone)
-        : unsupportedDateRangeMessage
-      : undefined);
-
-  const updateBoundary = (boundary: 'start' | 'end', value: string) => {
-    if (!range) return;
-    const result = updateDateRangeBoundary(range, timezone, boundary, value);
-    setError(result.error);
-    if (result.range) setControlState({ ...controlState, dateRange: result.range });
-  };
+  if (!range) return null;
   return (
     <Card size="sm">
       <CardHeader>
         <CardTitle>Date range</CardTitle>
       </CardHeader>
-      <CardContent className="grid grid-cols-2 gap-3">
-        <Field data-invalid={Boolean(displayedError)}>
-          <FieldLabel htmlFor={`date-start-${widgetId}`}>Start</FieldLabel>
-          <Input
-            id={`date-start-${widgetId}`}
-            type="date"
-            value={resolved?.start ?? ''}
-            aria-invalid={Boolean(displayedError)}
-            onChange={(event) => updateBoundary('start', event.target.value)}
-          />
-        </Field>
-        <Field data-invalid={Boolean(displayedError)}>
-          <FieldLabel htmlFor={`date-end-${widgetId}`}>End</FieldLabel>
-          <Input
-            id={`date-end-${widgetId}`}
-            type="date"
-            value={resolved?.end ?? ''}
-            aria-invalid={Boolean(displayedError)}
-            onChange={(event) => updateBoundary('end', event.target.value)}
-          />
-        </Field>
-        <FieldError className="col-span-2">{displayedError}</FieldError>
+      <CardContent>
+        <DateRangePicker
+          range={range}
+          timezone={timezone}
+          defaultRange={defaultDateRange}
+          onChange={(next) => {
+            setControlState({ ...controlState, dateRange: next });
+            onDateRangeChange?.(next);
+          }}
+        />
       </CardContent>
     </Card>
   );
@@ -878,6 +864,13 @@ export function initialControlState(dashboard: DashboardDocument): ControlState 
       : {}),
     ...(Object.keys(values).length ? { values } : {}),
   };
+}
+
+export function dashboardDateControlRange(dashboard: DashboardDocument) {
+  const control = dashboard.widgets.find((widget) => widget.definition.type === 'dateControl');
+  return control?.definition.type === 'dateControl'
+    ? (control.definition.defaultDateRange ?? dashboard.defaultDateRange)
+    : undefined;
 }
 
 function richText(value: unknown): string {

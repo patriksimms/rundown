@@ -15,6 +15,15 @@ test('a phone viewer reaches the controls from a sticky bar and never scrolls si
 
   const controls = page.getByRole('region', { name: 'Dashboard controls' });
   await expect(controls.getByText('Date range')).toBeVisible();
+  const dateRange = controls.getByRole('button', { name: 'Choose date range' });
+  await dateRange.click();
+  await page.getByRole('button', { name: 'Last 7 days' }).click();
+  await expect(page).toHaveURL(/dateRange=last-7-days/u);
+  await page.reload();
+  await expect(dateRange).toContainText('Last 7 days');
+  await dateRange.click();
+  await page.getByRole('button', { name: 'Use default' }).click();
+  await expect(page).not.toHaveURL(/dateRange=/u);
   await expect(controls.getByRole('button', { name: 'Choose Platform values' })).toBeVisible();
   // Data widgets stay out of the control bar.
   await expect(controls.getByText('Media spend')).toHaveCount(0);
@@ -55,6 +64,11 @@ test('a phone editor edits a widget in a sheet that closes on Escape', async ({ 
   await page.keyboard.press('Escape');
   await expect(sheet).toBeHidden();
   await expect(edit).toBeFocused();
+
+  await page.getByRole('button', { name: 'Edit Date range' }).click();
+  await expect(
+    page.getByRole('dialog').getByRole('button', { name: 'Choose date range' }),
+  ).toBeVisible();
 
   expect(await page.evaluate(documentOverflow)).toBeLessThanOrEqual(0);
 });

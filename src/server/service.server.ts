@@ -39,7 +39,7 @@ import {
 import { appendPlacement, placementFits, validateLayoutUpdate } from '#/domain/layout';
 import { canUpdateFieldMetadata, detectFieldSemantics } from '#/domain/field-metadata';
 import { hashJson } from '#/domain/hash';
-import { comparisonDateRange, resolveDateRange } from '#/domain/dates';
+import { comparisonDateRange, resolveDateRange, yearToDateRange } from '#/domain/dates';
 import { queryCacheState, widgetDependencyState } from '#/domain/cache';
 import { queryResultColumns } from '#/domain/query-result';
 import { remapWidgetDefinition } from '#/domain/remap';
@@ -303,7 +303,9 @@ async function updateDashboard(request: Extract<ApiRequest, { action: 'updateDas
 
 async function addWidget(request: Extract<ApiRequest, { action: 'addWidget' }>) {
   const access = await authorizeDashboard(request.dashboardId, 'editor');
-  await validateDefinition(access.document, request.definition);
+  const definition = withDateControlDefault(request.definition);
+  assertSingleDateControl(access.document, definition);
+  await validateDefinition(access.document, definition);
   const id = `widget_${crypto.randomUUID()}`;
   const widget: DashboardWidget = {
     id,
@@ -313,8 +315,8 @@ async function addWidget(request: Extract<ApiRequest, { action: 'addWidget' }>) 
       request.height,
       access.document.columns,
     ),
-    definition: request.definition,
-    definitionHash: await definitionHash(request.definition, access.document.workspaceId),
+    definition,
+    definitionHash: await definitionHash(definition, access.document.workspaceId),
   };
   const updated = {
     ...access.document,
@@ -328,11 +330,13 @@ async function addWidget(request: Extract<ApiRequest, { action: 'addWidget' }>) 
 async function updateWidget(request: Extract<ApiRequest, { action: 'updateWidget' }>) {
   const access = await authorizeDashboard(request.dashboardId, 'editor');
   const existing = widgetById(access.document, request.widgetId);
-  await validateDefinition(access.document, request.definition);
+  const definition = withDateControlDefault(request.definition);
+  assertSingleDateControl(access.document, definition, existing.id);
+  await validateDefinition(access.document, definition);
   const widget = {
     ...existing,
-    definition: request.definition,
-    definitionHash: await definitionHash(request.definition, access.document.workspaceId),
+    definition,
+    definitionHash: await definitionHash(definition, access.document.workspaceId),
   };
   const updated = {
     ...access.document,
@@ -1470,6 +1474,30 @@ function widgetById(document: DashboardDocument, widgetId: string) {
   const widget = document.widgets.find((item) => item.id === widgetId);
   if (!widget) throw new ApiError(404, 'widget_not_found', 'Widget not found.');
   return widget;
+}
+
+function assertSingleDateControl(
+  document: DashboardDocument,
+  definition: WidgetDefinition,
+  replacingWidgetId?: string,
+) {
+  if (
+    definition.type === 'dateControl' &&
+    document.widgets.some(
+      (widget) => widget.id !== replacingWidgetId && widget.definition.type === 'dateControl',
+    )
+  )
+    throw new ApiError(
+      400,
+      'date_control_exists',
+      'A dashboard can contain only one date control.',
+    );
+}
+
+function withDateControlDefault(definition: WidgetDefinition): WidgetDefinition {
+  return definition.type === 'dateControl' && !definition.defaultDateRange
+    ? { ...definition, defaultDateRange: yearToDateRange }
+    : definition;
 }
 
 async function validateDefinition(dashboard: DashboardDocument, definition: WidgetDefinition) {

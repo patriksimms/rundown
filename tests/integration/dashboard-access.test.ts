@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest';
+import { yearToDateRange } from '#/domain/dates';
 import { setClerkDirectory, signOut } from './doubles/clerk';
 import {
   addWidget,
@@ -202,5 +203,48 @@ describe('share links', () => {
       callService({ action: 'getDashboard', dashboardId: unshared.id, shareToken: link.token }),
       { status: 403, code: 'invalid_share_link' },
     );
+  });
+});
+
+describe('date controls', () => {
+  test('a dashboard accepts only one date control across add and update operations', async () => {
+    await signInToNewWorkspace();
+    const dashboard = await createDashboard();
+    const dateControl = await addWidget(dashboard.id, { type: 'dateControl' });
+    const opened = (await callService({
+      action: 'getDashboard',
+      dashboardId: dashboard.id,
+    })) as { dashboard: { widgets: Array<{ id: string; definition: unknown }> } };
+    expect(opened.dashboard.widgets.find((widget) => widget.id === dateControl.id)).toMatchObject({
+      definition: { type: 'dateControl', defaultDateRange: yearToDateRange },
+    });
+
+    await expectApiError(addWidget(dashboard.id, { type: 'dateControl' }), {
+      status: 400,
+      code: 'date_control_exists',
+    });
+
+    const text = await addWidget(dashboard.id, {
+      type: 'text',
+      content: { schemaVersion: 'plain-text-v1', document: 'Notes' },
+    });
+    await expectApiError(
+      callService({
+        action: 'updateWidget',
+        dashboardId: dashboard.id,
+        widgetId: text.id,
+        definition: { type: 'dateControl' },
+      }),
+      { status: 400, code: 'date_control_exists' },
+    );
+
+    await expect(
+      callService({
+        action: 'updateWidget',
+        dashboardId: dashboard.id,
+        widgetId: dateControl.id,
+        definition: { type: 'dateControl' },
+      }),
+    ).resolves.toMatchObject({ widget: { id: dateControl.id } });
   });
 });
