@@ -153,6 +153,10 @@ const dimensionSchema = z.object({
   styling: stylingSchema,
 });
 
+// Recharts paints a colour per series, so a bar chart with a single series draws every bar in the
+// same colour. 'category' hands each bar its own palette slot instead.
+export const barColorBySchema = z.enum(['series', 'category']);
+
 const comparisonSchema = z.object({ mode: z.enum(['none', 'previousPeriod', 'previousYear']) });
 const sortSchema = z.object({
   target: z.discriminatedUnion('kind', [
@@ -225,6 +229,7 @@ export const widgetDefinitionSchema = z.discriminatedUnion('type', [
     dimension: dimensionSchema,
     breakdownDimension: dimensionSchema.optional(),
     comparison: comparisonSchema.optional(),
+    colorBy: barColorBySchema.optional(),
     sort: z.array(sortSchema).optional(),
     limit: z.number().int().positive().max(500).optional(),
   }),
@@ -327,6 +332,7 @@ export type SemanticType = z.infer<typeof semanticTypeSchema>;
 export type Aggregation = z.infer<typeof aggregationSchema>;
 export type DataSourceLocation = z.infer<typeof dataSourceLocationSchema>;
 export type TextStyle = z.infer<typeof textStyleSchema>;
+export type BarColorBy = z.infer<typeof barColorBySchema>;
 
 export const defaultDateRange: DateRange = {
   startDate: { relative: { amount: 30, unit: 'day', direction: 'past', anchor: 'startOfDay' } },

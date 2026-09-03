@@ -107,6 +107,7 @@ import { fieldRoleSchema, textStyleSchema } from '#/domain/schema';
 import type {
   ControlState,
   Aggregation,
+  BarColorBy,
   DashboardDocument,
   DashboardWidget,
   DateGranularity,
@@ -2264,6 +2265,14 @@ function TypeSettings({
               commit({ ...definition, breakdownDimension: fieldId ? { fieldId } : undefined })
             }
           />
+          {/* A breakdown or a comparison already spends the palette on series, so the choice is
+              only offered while the chart draws a single series. */}
+          {!definition.breakdownDimension && (definition.comparison?.mode ?? 'none') === 'none' ? (
+            <ColorBySetting
+              value={definition.colorBy ?? 'series'}
+              onChange={(colorBy) => commit({ ...definition, colorBy })}
+            />
+          ) : null}
           <LimitSetting
             value={definition.limit ?? 20}
             onChange={(limit) => commit({ ...definition, limit })}
@@ -2418,6 +2427,32 @@ function LimitSetting({
     <Field>
       <FieldLabel htmlFor={id}>{label}</FieldLabel>
       <LayoutNumberInput id={id} min={1} max={500} value={value} onCommit={onChange} />
+    </Field>
+  );
+}
+
+/**
+ * Bar charts colour per series, which leaves a single-series chart in one colour. This offers the
+ * alternative of a palette slot per bar.
+ */
+function ColorBySetting({
+  value,
+  onChange,
+}: {
+  value: BarColorBy;
+  onChange: (value: BarColorBy) => Promise<void>;
+}) {
+  return (
+    <Field>
+      <FieldLabel htmlFor="bar-color-by">Color by</FieldLabel>
+      <NativeSelect
+        id="bar-color-by"
+        value={value}
+        onChange={(event) => void onChange(event.target.value as BarColorBy)}
+      >
+        <NativeSelectOption value="series">Metric</NativeSelectOption>
+        <NativeSelectOption value="category">Bar</NativeSelectOption>
+      </NativeSelect>
     </Field>
   );
 }

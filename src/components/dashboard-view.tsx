@@ -2,6 +2,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   Label,
   Line,
   LineChart,
@@ -31,6 +32,7 @@ import { Skeleton } from '#/components/ui/skeleton';
 import { widgetQueryRequest } from '#/domain/widget-query';
 import { cn } from '#/lib/utils';
 import { textStyleClasses } from '#/domain/text-style';
+import { colorsPerCategory, paletteColor } from '#/domain/chart-colors';
 import { controlDefaultValues, toggleControlValue } from '#/domain/control-state';
 import {
   pieBreakdownRows,
@@ -914,19 +916,35 @@ export function Result({
         `chart_slice_${index}`,
         {
           label: formatAxisValue(row[dimension.key], dimension),
-          color: `var(--chart-${(index % 8) + 1})`,
+          color: paletteColor(index),
         },
       ]),
     );
   }
+  // Recharts colours a bar chart per series, so a single-series chart draws every bar the same.
+  // 'category' hands each row its own palette slot instead, through the config so the colours stay
+  // theme-aware like every other series colour.
+  const barCellColors =
+    definition.type === 'bar' && colorsPerCategory(definition.colorBy, series.length)
+      ? chartRows.map((_, index) => `chart_bar_${index}`)
+      : undefined;
+  let barConfig = {};
+  if (barCellColors) {
+    // The row carries the colour too so the tooltip swatch matches the bar it points at.
+    chartRows = chartRows.map((row, index) => ({
+      ...row,
+      fill: `var(--color-${barCellColors[index]})`,
+    }));
+    barConfig = Object.fromEntries(
+      barCellColors.map((key, index) => [key, { color: paletteColor(index) }]),
+    );
+  }
   const config = {
     ...Object.fromEntries(
-      series.map((item) => [
-        item.key,
-        { label: item.label, color: `var(--chart-${(item.colorIndex % 8) + 1})` },
-      ]),
+      series.map((item) => [item.key, { label: item.label, color: paletteColor(item.colorIndex) }]),
     ),
     ...pieConfig,
+    ...barConfig,
   };
   const tooltip = (
     <ChartTooltip
@@ -993,9 +1011,15 @@ export function Result({
               fillOpacity={item.isComparison ? 0.5 : 1}
               radius={6}
               isAnimationActive={false}
-            />
+            >
+              {barCellColors?.map((key) => (
+                <Cell key={key} fill={`var(--color-${key})`} />
+              ))}
+            </Bar>
           ))}
-          <ChartLegend content={<ChartLegendContent />} />
+          {/* A legend naming the single metric would contradict bars that each carry their own
+              colour, and the x-axis already labels them. */}
+          {barCellColors ? null : <ChartLegend content={<ChartLegendContent />} />}
         </BarChart>
       </ChartContainer>
     );

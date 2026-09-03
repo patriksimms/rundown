@@ -267,6 +267,31 @@ describe('widget result rendering', () => {
     expect(markup).not.toContain('Dimension 3');
   });
 
+  it('colours bars individually only while the chart draws one series', () => {
+    const bar = {
+      ...base,
+      type: 'bar' as const,
+      metric,
+      dimension: { fieldId: 'channel' },
+      colorBy: 'category' as const,
+    };
+    const rows = [
+      { dimension_1: 'Paid Search', metric_1: 10 },
+      { dimension_1: 'Organic Social', metric_1: 8 },
+    ];
+    const perBar = render(bar, rows);
+    expect(perBar).toContain('--color-chart_bar_0: var(--chart-1)');
+    expect(perBar).toContain('--color-chart_bar_1: var(--chart-2)');
+    // A comparison adds a second series, so the palette goes back to marking series.
+    const withComparison = render({ ...bar, comparison: { mode: 'previousPeriod' } }, rows, [
+      { dimension_1: 'Paid Search', metric_1: 6 },
+    ]);
+    expect(withComparison).not.toContain('chart_bar_');
+    expect(withComparison).toContain('--color-chart_series_1');
+    // Without the setting a single-series chart keeps one colour for the whole metric.
+    expect(render({ ...bar, colorBy: 'series' }, rows)).not.toContain('chart_bar_');
+  });
+
   it('uses stable chart keys while retaining the custom display label', () => {
     const html = renderToStaticMarkup(
       <Result
