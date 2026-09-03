@@ -93,6 +93,7 @@ test('charts show legends without widget configuration', async ({ page }) => {
     timeout: 15_000,
   });
   await expect(line.locator('.recharts-line-curve')).toBeVisible();
+  await expect(line.getByRole('img', { name: 'Spend trend chart' })).toBeVisible();
   await expect(line.getByText('Jan 5', { exact: true })).toBeVisible();
   await expect(line.getByText('Jan 6', { exact: true })).toBeVisible();
   await expect(pie.locator('.recharts-legend-wrapper')).toContainText('Spring sale', {

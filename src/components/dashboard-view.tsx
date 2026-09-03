@@ -933,6 +933,8 @@ export function Result({
   if (definition.type === 'pie')
     return (
       <ChartContainer
+        role="img"
+        aria-label={`${definition.title} chart`}
         className="mx-auto aspect-square max-h-72 md:h-full md:max-h-full md:min-h-0"
         config={config}
       >
@@ -951,7 +953,12 @@ export function Result({
     );
   if (definition.type === 'bar')
     return (
-      <ChartContainer className="h-72 w-full md:h-full md:min-h-0" config={config}>
+      <ChartContainer
+        role="img"
+        aria-label={`${definition.title} chart`}
+        className="h-72 w-full md:h-full md:min-h-0"
+        config={config}
+      >
         <BarChart data={chartRows}>
           <CartesianGrid vertical={false} />
           <XAxis
@@ -975,7 +982,12 @@ export function Result({
     );
   const axes = lineChartAxes(chartMetrics);
   return (
-    <ChartContainer className="h-72 w-full md:h-full md:min-h-0" config={config}>
+    <ChartContainer
+      role="img"
+      aria-label={`${definition.title} chart`}
+      className="h-72 w-full md:h-full md:min-h-0"
+      config={config}
+    >
       <LineChart data={chartRows}>
         <CartesianGrid vertical={false} />
         <XAxis
