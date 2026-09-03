@@ -73,6 +73,6 @@ export default defineConfig(({ command }) => ({
     }),
     tailwindcss(),
     tanstackStart(),
-    viteReact(),
+    viteReact({ compiler: true }),
   ],
 }));
