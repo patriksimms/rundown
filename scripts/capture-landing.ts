@@ -3,7 +3,7 @@
  *
  * It signs in to the Clerk development instance with a sign-in token, uploads the generated demo
  * export, builds a dashboard that uses the widget types the product actually ships, shares it, and
- * captures the shared view plus the field metadata screen.
+ * captures the shared view plus the field metadata screen, each in the light and the dark theme.
  *
  *   bun run dev                     # in another shell, or set RUNDOWN_BASE_URL
  *   bun run scripts/capture-landing.ts
@@ -22,6 +22,8 @@ const clerkSecretKey = process.env.CLERK_SECRET_KEY;
 const outputDirectory = 'public/landing';
 
 const viewport = { width: 1440, height: 1000 };
+const themes = ['light', 'dark'] as const;
+type Theme = (typeof themes)[number];
 const deviceScaleFactor = 2;
 const dashboardName = 'Acme Media, Q1 delivery';
 const datasourceName = 'Campaign delivery';
@@ -71,8 +73,11 @@ async function capture(browser: Browser) {
   });
 
   await mkdir(outputDirectory, { recursive: true });
-  await captureDashboard(page, share.token);
-  await captureFieldMetadata(page, source.id);
+  for (const theme of themes) {
+    await useTheme(page, theme);
+    await captureDashboard(page, share.token, theme);
+    await captureFieldMetadata(page, source.id, theme);
+  }
   await context.close();
 }
 
@@ -187,9 +192,21 @@ async function describeFields(page: Page, dataSourceId: string) {
     await callApi(page, { action: 'updateFieldMetadata', dataSourceId, columnName, patch });
 
   // One calculated field, so the screen shows a formula sitting next to the registered columns.
+  // A repeat run reuses the datasource, so the field has to be updated instead of inserted again.
+  const described = await callApi<{ calculatedFields: Array<{ id: string; label: string }> }>(
+    page,
+    {
+      action: 'describeDatasource',
+      dataSourceId,
+    },
+  );
+  const calculatedFieldId = described.calculatedFields.find(
+    (entry) => entry.label === 'Effective CPM',
+  )?.id;
   await callApi(page, {
     action: 'upsertCalculatedField',
     dataSourceId,
+    ...(calculatedFieldId ? { id: calculatedFieldId } : {}),
     name: 'Effective CPM',
     expression: 'media_spend / nullif(impressions, 0) * 1000',
     role: 'metric',
@@ -231,7 +248,7 @@ async function buildDashboard(
     placements.push({ widgetId: widget.id, placement });
   };
 
-  await add({ type: 'dateControl', defaultDateRange: dateRange }, at(0, 0, 4, 2));
+  await add({ type: 'dateControl', defaultDateRange: dateRange }, at(0, 0, 4, 1));
   for (const [index, [columnName, label]] of (
     [
       ['Market', 'Market'],
@@ -247,7 +264,7 @@ async function buildDashboard(
         allowMultiple: true,
         optionsSortDirection: 'asc',
       },
-      at(4 + index * 4, 0, 4, 2),
+      at(4 + index * 4, 0, 4, 1),
     );
 
   await add(
@@ -258,7 +275,7 @@ async function buildDashboard(
       metric: sum('Impressions', 'number'),
       comparison: { mode: 'previousPeriod' },
     },
-    at(0, 2, 3, 2),
+    at(0, 1, 3, 2),
   );
   await add(
     {
@@ -268,7 +285,7 @@ async function buildDashboard(
       metric: sum('Clicks', 'number'),
       comparison: { mode: 'previousPeriod' },
     },
-    at(3, 2, 3, 2),
+    at(3, 1, 3, 2),
   );
   await add(
     {
@@ -278,7 +295,7 @@ async function buildDashboard(
       metric: sum('MediaSpend', 'currency'),
       comparison: { mode: 'previousPeriod' },
     },
-    at(6, 2, 3, 2),
+    at(6, 1, 3, 2),
   );
   await add(
     {
@@ -292,7 +309,7 @@ async function buildDashboard(
         conditionalFormat: [{ comparator: 'gte', value: 0.004, color: 'positive' }],
       },
     },
-    at(9, 2, 3, 2),
+    at(9, 1, 3, 2),
   );
 
   // Volume and rate move independently, so the second axis earns its place instead of tracing
@@ -312,7 +329,7 @@ async function buildDashboard(
         },
       ],
     },
-    at(0, 4, 8, 6),
+    at(0, 3, 8, 6),
   );
   await add(
     {
@@ -322,7 +339,7 @@ async function buildDashboard(
       metric: sum('MediaSpend', 'currency'),
       upperLimit: { kind: 'manual', value: 260_000 },
     },
-    at(8, 4, 4, 3),
+    at(8, 3, 4, 3),
   );
   await add(
     {
@@ -334,7 +351,7 @@ async function buildDashboard(
           'moves to TikTok video in April.',
       },
     },
-    at(8, 7, 4, 3),
+    at(8, 6, 4, 3),
   );
 
   await add(
@@ -348,7 +365,7 @@ async function buildDashboard(
       sort: [{ target: { kind: 'metric', index: 0 }, direction: 'desc' }],
       limit: 24,
     },
-    at(0, 10, 8, 6),
+    at(0, 9, 8, 6),
   );
   await add(
     {
@@ -359,7 +376,7 @@ async function buildDashboard(
       dimension: { fieldId: field('Platform').id },
       sort: [{ target: { kind: 'metric', index: 0 }, direction: 'desc' }],
     },
-    at(8, 10, 4, 6),
+    at(8, 9, 4, 6),
   );
 
   await add(
@@ -374,13 +391,13 @@ async function buildDashboard(
       showSummaryRow: true,
       sort: [{ target: { kind: 'metric', index: 0 }, direction: 'desc' }],
     },
-    at(0, 16, 12, 5),
+    at(0, 15, 12, 5),
   );
 
   await callApi(page, {
     action: 'updateLayout',
     dashboardId: dashboard.id,
-    canvasRows: 23,
+    canvasRows: 22,
     placements,
   });
   return dashboard.id;
@@ -390,24 +407,24 @@ async function buildDashboard(
  * The hero shows the controls, headline numbers and trend; the second image picks up where it
  * stops, so the two read as one dashboard scrolled down rather than two unrelated products.
  */
-async function captureDashboard(page: Page, shareToken: string) {
+async function captureDashboard(page: Page, shareToken: string, theme: Theme) {
   await page.goto(`${baseUrl}/share/${shareToken}`);
   await settle(page);
   const split = await topOf(page, 'Impressions by campaign and format');
   const end = await bottomOf(page, 'Campaign breakdown by platform');
   await page.screenshot({
-    path: `${outputDirectory}/dashboard.png`,
+    path: imagePath('dashboard', theme),
     fullPage: true,
     clip: { x: 0, y: 0, width: viewport.width, height: split - 8 },
   });
   await page.screenshot({
-    path: `${outputDirectory}/dashboard-breakdown.png`,
+    path: imagePath('dashboard-breakdown', theme),
     fullPage: true,
     clip: { x: 0, y: split - 8, width: viewport.width, height: end + 24 - (split - 8) },
   });
 }
 
-async function captureFieldMetadata(page: Page, dataSourceId: string) {
+async function captureFieldMetadata(page: Page, dataSourceId: string, theme: Theme) {
   await page.goto(`${baseUrl}/datasources/${dataSourceId}`);
   await settle(page);
   // Cutting on the last field row keeps the image from ending inside a half-rendered one.
@@ -417,10 +434,25 @@ async function captureFieldMetadata(page: Page, dataSourceId: string) {
     .boundingBox();
   if (!lastRow) throw new Error('The calculated field row never rendered.');
   await page.screenshot({
-    path: `${outputDirectory}/field-metadata.png`,
+    path: imagePath('field-metadata', theme),
     fullPage: true,
     clip: { x: 0, y: 0, width: viewport.width, height: lastRow.y + lastRow.height },
   });
+}
+
+/**
+ * The app reads the stored theme before first paint, so writing it and navigating afterwards gives
+ * a genuine dark render: chart colours are read at render time and would keep their light values
+ * if the class were only toggled on an already painted page.
+ */
+async function useTheme(page: Page, theme: Theme) {
+  await page.goto(baseUrl);
+  await page.evaluate((value) => localStorage.setItem('theme', value), theme);
+}
+
+/** The landing page pairs each image with its dark twin, named after the light one. */
+function imagePath(name: string, theme: Theme) {
+  return `${outputDirectory}/${name}${theme === 'dark' ? '-dark' : ''}.png`;
 }
 
 /** Waits for every widget to have finished querying, then lets the chart animations land. */

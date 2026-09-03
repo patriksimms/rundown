@@ -1,6 +1,7 @@
 import { SignInAction, SignUpAction } from '#/components/auth-actions';
 import { BrowserFrame } from '#/components/browser-frame';
 import { Button } from '#/components/ui/button';
+import { cn } from '#/lib/utils';
 import { usePageTitle } from '#/lib/page-title';
 
 const claims = [
@@ -17,6 +18,47 @@ const claims = [
     body: 'Send a link or grant a colleague access. Viewers get the stored widgets and controls and nothing else.',
   },
 ];
+
+/**
+ * Shows the screenshot that matches the active theme. The theme is a class on the document rather
+ * than a media query, so CSS picks the variant the same way the header icons do and the server
+ * needs no theme state. `bun run scripts/capture-landing.ts` writes both files.
+ *
+ * Only the visible image is in the accessibility tree, and the hidden one is never fetched unless
+ * `priority` opts it out of lazy loading, which the hero needs for its own paint.
+ */
+function Screenshot({
+  name,
+  alt,
+  width,
+  height,
+  className,
+  priority = false,
+}: {
+  name: string;
+  alt: string;
+  width: number;
+  height: number;
+  className?: string;
+  priority?: boolean;
+}) {
+  const shared = {
+    alt,
+    width,
+    height,
+    ...(priority ? ({ fetchPriority: 'high' } as const) : ({ loading: 'lazy' } as const)),
+  };
+  return (
+    <>
+      <img src={`/landing/${name}.png`} className={cn('dark:hidden', className)} {...shared} />
+      <img
+        src={`/landing/${name}-dark.png`}
+        className={cn('hidden dark:block', className)}
+        {...shared}
+      />
+    </>
+  );
+}
 
 export function LandingPage() {
   usePageTitle();
@@ -50,12 +92,12 @@ export function LandingPage() {
           url="rundown.workers.dev/dashboards/q1-delivery"
           className="reveal-on-scroll mt-14"
         >
-          <img
-            src="/landing/dashboard.png"
+          <Screenshot
+            name="dashboard"
             alt="A Rundown dashboard with a date range and two filter controls, impressions, clicks, media spend and click-through rate against the previous period, a chart pairing impressions with click-through rate, a gauge for media spend against plan and a written note."
             width={2880}
-            height={1792}
-            fetchPriority="high"
+            height={1632}
+            priority
             className="h-auto w-full"
           />
         </BrowserFrame>
@@ -83,12 +125,11 @@ export function LandingPage() {
           </p>
         </div>
         {/* The image continues the dashboard above, so it carries no browser chrome of its own. */}
-        <img
-          src="/landing/dashboard-breakdown.png"
+        <Screenshot
+          name="dashboard-breakdown"
           alt="Impressions by campaign and ad format as grouped bars, spend share by platform as a pie chart, and a pivot table of impressions and media spend per campaign and platform ending in a grand total row."
           width={2880}
           height={1792}
-          loading="lazy"
           className="reveal-on-scroll mt-10 h-auto w-full rounded-xl border"
         />
       </section>
@@ -107,12 +148,11 @@ export function LandingPage() {
           url="rundown.workers.dev/datasources/campaign-delivery"
           className="reveal-on-scroll mt-10"
         >
-          <img
-            src="/landing/field-metadata.png"
+          <Screenshot
+            name="field-metadata"
             alt="The Rundown datasource screen listing each column of a registered file with its label, source, role, type and description, ending with a calculated field."
             width={2880}
             height={1960}
-            loading="lazy"
             className="h-auto max-h-[32rem] w-full object-cover object-top"
           />
         </BrowserFrame>

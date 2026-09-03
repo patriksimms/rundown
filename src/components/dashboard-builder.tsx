@@ -171,12 +171,13 @@ const catalog: Array<{
   { type: 'bar', label: 'Bar chart', icon: BarChart3Icon, size: { width: 8, height: 5 } },
   { type: 'pie', label: 'Pie chart', icon: PieChartIcon, size: { width: 6, height: 5 } },
   { type: 'table', label: 'Table', icon: Table2Icon, size: { width: 8, height: 5 } },
-  { type: 'control', label: 'Filter control', icon: ListFilterIcon, size: { width: 4, height: 2 } },
+  // Controls hold a label and one input, so a single row fits them without leaving dead space.
+  { type: 'control', label: 'Filter control', icon: ListFilterIcon, size: { width: 4, height: 1 } },
   {
     type: 'dateControl',
     label: 'Date control',
     icon: CalendarDaysIcon,
-    size: { width: 4, height: 2 },
+    size: { width: 4, height: 1 },
   },
   { type: 'text', label: 'Text', icon: CaseUpperIcon, size: { width: 6, height: 2 } },
 ];
