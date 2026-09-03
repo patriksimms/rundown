@@ -1,13 +1,99 @@
 # Rundown
 
-Rundown turns reporting intent into query-backed client dashboards. Editors build in the GUI or
-through WebMCP tools, viewers use stored widgets and controls, and editors register uploaded or
-existing CSV and Parquet files from tenant-scoped R2 prefixes.
+Client reporting without the rebuild. Describe the report, fine-tune it in the browser.
+
+Rundown is a dashboard builder for agency account managers. An agent and a human edit the same
+dashboard in the same browser: the agent through [WebMCP](https://webmachinelearning.github.io/webmcp/)
+tools, the human through the GUI. Every widget is backed by a real query, and clients get a link
+they can open and interrogate without ever typing a formula.
+
+- Live app: [rundown.rundown.workers.dev](https://rundown.rundown.workers.dev)
+- Demo video: TODO add the YouTube link before submitting
+- License: [MIT](./LICENSE)
+- Built for the [OpenAI WebMCP Challenge](https://webmcp.devpost.com/)
+
+## The problem
+
+Account managers rebuild client dashboards every week. Looker Studio has the capabilities but is
+unreliable and hard to adjust. Whatagraph is reliable but has no blends, no formulas, and costs too
+much. Neither turns intent into widgets: "a targeting report on adset level" still has to be
+translated into charts, fields, and filters by hand, for every new client.
+
+Rundown lets the account manager describe the report to an agent, then fix what they already know
+how to fix in the GUI, like a `CASE WHEN` that maps campaign ids to readable names. The agent sees
+that change immediately because its tools read the live dashboard, not a snapshot.
+
+## Try it with ChatGPT
+
+1. Open the live app in the ChatGPT desktop app browser, or in Chrome with WebMCP enabled.
+2. Sign in. Judges can use the editor account provided in the submission.
+3. Open a dashboard, or start on the dashboards page and ask ChatGPT for a new one.
+
+Prompts that show the full loop:
+
+```text
+Create a dashboard called "Acme Q3 video" for the Acme datasource. Add a scorecard row with
+impressions, VTR and CPV, a line chart of VTR by day, a bar chart of CPV by adset, a date control
+and a campaign filter.
+
+Copy the CPV bar chart, but break it down by campaign name instead of adset.
+
+Why did CPV rise in the last week? Compare adsets and tell me which one drove it.
+
+Create an unlisted link for this dashboard.
+```
+
+Open the unlisted link in a fresh tab. The same question tools work there, the editing tools are
+not registered.
+
+## How Rundown uses WebMCP
+
+Each page registers tools through `document.modelContext.registerTool()`, scoped to what the page
+shows and what the signed-in user may do. Tools are unregistered through an `AbortSignal` when the
+page changes. The UI keeps working in browsers without WebMCP.
+
+Tools are generic on purpose. `addWidget`, `updateWidget`, `moveWidget`, and `updateLayout` cover
+every widget type, so the agent composes them instead of learning one tool per feature. Each tool's
+input schema is generated from the same Zod contract the app's own API uses, so the agent and the
+GUI go through one validated path. Ids the page already knows, like the open dashboard, are
+filled in by the page and removed from the schema the agent sees.
+
+Tools by page, read-only first, then writes:
+
+- Dashboards list: `listDashboards`, `listLibraryMetrics`. Writes: `createDashboard`.
+- Dashboard editor: `listDashboards`, `listLibraryMetrics`, `getDashboard`, `queryWidget`,
+  `explainWidget`, `getControlOptions`, `describeDatasource`, `previewWidget`. Writes:
+  `updateDashboard`, `addWidget`, `updateWidget`, `removeWidget`, `moveWidget`, `updateLayout`,
+  `copyWidget`, `upsertCalculatedField`, `updateFieldMetadata`, `upsertLibraryMetric`,
+  `shareDashboard`, `createDashboard`.
+- Unlisted link: `getDashboard`, `queryWidget`, `explainWidget`, `getControlOptions`,
+  `describeDatasource`. No writes.
+- Datasources: `listDataSources`, `listR2Objects`. Writes: `registerDatasource`.
+- Admins additionally get `updateFieldMetadata` and `upsertLibraryMetric` on the datasource and
+  metrics pages.
+
+Every tool carries `annotations.readOnlyHint`, so the agent host only asks for confirmation on
+writes. `shareDashboard` and `removeWidget` say in their description that they change access or
+delete data. Write tools return the stored result so the agent can verify what happened, and the
+page refreshes after each write.
+
+Security model: clients never send SQL or column names. The only query path is
+`queryWidget(widgetId, controlState)`, used by the GUI and the WebMCP tool alike. Viewers and agents
+on a shared link can only run queries the dashboard already defines. Formulas are written in
+Rundown's own text syntax, parsed to an AST, validated, and compiled to SQL on the server.
+
+## Architecture
 
 The TanStack Start app and API run in a Cloudflare Worker. Query execution runs in a Bun Cloudflare
 Container with native DuckDB. The Worker authorizes exact Parquet objects, compiles Rundown formulas
 to SQL, and gives DuckDB short-lived internal URLs for those objects. The container has no internet
 access or R2 credentials.
+
+Editors register uploaded or existing CSV and Parquet files from tenant-scoped R2 prefixes. Auth is
+Clerk, with workspaces mapped to Clerk organizations. Application data lives in D1 with Drizzle.
+Nothing domain-specific is hardcoded: metrics such as VTR or CPV are workspace data, not code.
+
+More detail: [docs/plan.md](./docs/plan.md) and [docs/datastructure](./docs/datastructure).
 
 ## Local development
 
