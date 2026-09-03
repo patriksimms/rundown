@@ -115,7 +115,9 @@ test.describe('signed-in dashboard flow', () => {
     const line = widget(page, 'Impressions over time');
     await expect(scorecard.getByText(TOTAL_IMPRESSIONS, { exact: true })).toBeVisible();
     await line.scrollIntoViewIfNeeded();
-    await expect(line.locator('.recharts-line-curve')).toBeVisible({ timeout: 15_000 });
+    // The query container starts on demand and serializes the scorecard and chart queries.
+    // Match the UI's 45 second query deadline instead of failing while the chart is queued.
+    await expect(line.locator('.recharts-line-curve')).toBeVisible({ timeout: 45_000 });
     await expect(line.getByText('No rows for this date range.')).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Choose date range' }).click();
@@ -125,7 +127,8 @@ test.describe('signed-in dashboard flow', () => {
     await page.getByRole('button', { name: /January 7th, 2026/u }).click();
     await expect(scorecard.getByText(NARROWED_IMPRESSIONS, { exact: true })).toBeVisible();
     await line.scrollIntoViewIfNeeded();
-    await expect(line.locator('.recharts-line-curve')).toBeVisible({ timeout: 15_000 });
+    await expect(line.getByText('Jan 6', { exact: true })).toBeVisible({ timeout: 45_000 });
+    await expect(line.getByText('Jan 7', { exact: true })).toBeVisible();
   });
 });
 

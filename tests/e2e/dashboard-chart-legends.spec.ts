@@ -56,6 +56,30 @@ test('charts show legends without widget configuration', async ({ page }) => {
       },
     },
   );
+  await page.route('**/api/rundown', async (route) => {
+    const request = route.request().postDataJSON() as Record<string, unknown>;
+    if (request.action !== 'queryWidget' || request.widgetId !== 'w_line_chart') {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        data: {
+          rows: [
+            { dimension_1: '2026-01-05 00:00:00', metric_1: '12340' },
+            { dimension_1: '2026-01-06 00:00:00', metric_1: '9870' },
+          ],
+          columns: [
+            { key: 'dimension_1', label: 'Date', kind: 'dimension', dataType: 'date' },
+            { key: 'metric_1', label: 'Media cost', kind: 'metric', dataType: 'currency' },
+          ],
+          hasMore: false,
+        },
+      }),
+    });
+  });
 
   await page.goto('/dashboards/dash_demo');
   const bar = page.locator('[data-widget-id="w_chart"]');
@@ -68,6 +92,9 @@ test('charts show legends without widget configuration', async ({ page }) => {
   await expect(line.locator('.recharts-legend-wrapper')).toContainText('Media cost', {
     timeout: 15_000,
   });
+  await expect(line.locator('.recharts-line-curve')).toBeVisible();
+  await expect(line.getByText('Jan 5', { exact: true })).toBeVisible();
+  await expect(line.getByText('Jan 6', { exact: true })).toBeVisible();
   await expect(pie.locator('.recharts-legend-wrapper')).toContainText('Spring sale', {
     timeout: 15_000,
   });
