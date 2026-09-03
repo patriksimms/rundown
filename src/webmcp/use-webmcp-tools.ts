@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { z } from 'zod';
 import { callApi } from '#/api/client';
 import { apiRequestSchema, type ApiRequest } from '#/api/contracts';
@@ -28,6 +28,7 @@ interface WebMcpOptions {
   canEdit?: boolean;
   canManageDataSources?: boolean;
   isAdmin?: boolean;
+  onToolUse?: (action: ApiRequest['action']) => void;
   onMutation?: () => void | Promise<void>;
 }
 
@@ -39,8 +40,11 @@ interface ToolSpec {
 }
 
 export function useWebMcpTools(options: WebMcpOptions) {
+  const [available, setAvailable] = useState(false);
+
   useEffect(() => {
     if (typeof document.modelContext?.registerTool !== 'function') return;
+    setAvailable(true);
     const controller = new AbortController();
     const fixed = options.dashboardId
       ? {
@@ -264,6 +268,7 @@ export function useWebMcpTools(options: WebMcpOptions) {
               ...spec.fixed,
               ...input,
             });
+            options.onToolUse?.(spec.action);
             const result = await callApi(request);
             if (!spec.readOnly) await options.onMutation?.();
             return result;
@@ -283,8 +288,11 @@ export function useWebMcpTools(options: WebMcpOptions) {
     options.canEdit,
     options.canManageDataSources,
     options.isAdmin,
+    options.onToolUse,
     options.onMutation,
   ]);
+
+  return { available };
 }
 
 export function inputSchemaFor(action: ApiRequest['action'], fixed?: Record<string, unknown>) {

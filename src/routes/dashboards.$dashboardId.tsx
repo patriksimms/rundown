@@ -20,6 +20,11 @@ import {
   parseDateRangeSearch,
   sameDateRange,
 } from '#/domain/date-range-search';
+import {
+  activateAgentModeFromToolUse,
+  initialAgentModeState,
+  selectAgentMode,
+} from '#/domain/agent-mode';
 import type { DashboardDocument } from '#/domain/schema';
 import { pageTitle, usePageTitle } from '#/lib/page-title';
 import { useWebMcpTools } from '#/webmcp/use-webmcp-tools';
@@ -57,6 +62,7 @@ function DashboardContent() {
   const [payload, setPayload] = useState<DashboardPayload>();
   const [error, setError] = useState<string>();
   const [saveStatus, setSaveStatus] = useState<DashboardSaveStatus>('saved');
+  const [agentMode, setAgentMode] = useState(initialAgentModeState);
   const refresh = useCallback(async () => {
     try {
       setPayload(await callApi<DashboardPayload>({ action: 'getDashboard', dashboardId }));
@@ -69,15 +75,17 @@ function DashboardContent() {
   useEffect(() => void refresh().catch(() => undefined), [refresh]);
   const canEdit = payload?.role === 'admin' || payload?.role === 'editor';
   const previewingAsViewer = canEdit && search.preview === 'viewer';
-  // Editing chrome, the builder, and the WebMCP write tools all follow this one flag, so the
-  // preview shows the same surface a viewer gets instead of an editor page with buttons hidden.
+  // Viewer preview removes editor permissions and WebMCP write tools. Agent mode only swaps out
+  // the editing controls, so the agent can keep changing the dashboard while the user watches.
   const editing = canEdit && !previewingAsViewer;
+  const activateAgentMode = useCallback(() => setAgentMode(activateAgentModeFromToolUse), []);
   usePageTitle(payload?.dashboard.name ?? 'Dashboard');
-  useWebMcpTools({
+  const { available: webMcpAvailable } = useWebMcpTools({
     dashboardId,
     canCreate: Boolean(payload),
     canEdit: editing,
     isAdmin: payload?.role === 'admin' && editing,
+    onToolUse: activateAgentMode,
     onMutation: refresh,
   });
   return (
@@ -99,6 +107,16 @@ function DashboardContent() {
                 cursor, even though a real viewer sees neither of them. */}
             {canEdit ? (
               <div className="flex items-center gap-3">
+                {editing && webMcpAvailable ? (
+                  <Label className="text-muted-foreground" htmlFor="agent-mode">
+                    Agent mode
+                    <Switch
+                      id="agent-mode"
+                      checked={agentMode.enabled}
+                      onCheckedChange={(checked) => setAgentMode(selectAgentMode(checked))}
+                    />
+                  </Label>
+                ) : null}
                 <Label className="text-muted-foreground" htmlFor="viewer-mode">
                   Viewer mode
                   <Switch
@@ -123,7 +141,7 @@ function DashboardContent() {
               </div>
             ) : null}
           </header>
-          {editing ? (
+          {editing && !agentMode.enabled ? (
             <DashboardBuilder
               dashboard={payload.dashboard}
               dataSources={payload.dataSources}
