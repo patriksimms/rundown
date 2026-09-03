@@ -132,8 +132,8 @@ const calculatedFields = [
     expression: 'impressions / 100',
     role: 'metric',
     semanticType: 'ratio',
-    defaultAggregation: 'average',
-    description: null,
+    defaultAggregation: 'average' as string | null,
+    description: null as string | null,
   },
 ];
 
@@ -219,23 +219,31 @@ export async function mockRundownApi(page: Page, options: MockOptions = {}) {
       case 'validateCalculatedField':
       case 'validateMetricExpression':
         return ok(route, { valid: true, type: 'number', identifiers: ['impressions'] });
-      case 'upsertCalculatedField':
+      case 'upsertCalculatedField': {
+        const existing = state.source.calculatedFields.find((field) => field.id === request.id);
+        const persisted = {
+          id: existing?.id ?? `calc_${Date.now()}`,
+          canonicalName:
+            existing?.canonicalName ??
+            request.canonicalName ??
+            request.name.toLowerCase().replaceAll(' ', '_'),
+          label: request.name,
+          expression: request.expression,
+          role: request.role,
+          semanticType: request.semanticType,
+          defaultAggregation: request.defaultAggregation ?? null,
+          description: request.description ?? null,
+        };
         state.source = {
           ...state.source,
-          calculatedFields: state.source.calculatedFields.map((field) =>
-            field.id === request.id
-              ? {
-                  ...field,
-                  label: request.name,
-                  expression: request.expression,
-                  role: request.role,
-                  semanticType: request.semanticType,
-                  defaultAggregation: request.defaultAggregation,
-                }
-              : field,
-          ),
+          calculatedFields: existing
+            ? state.source.calculatedFields.map((field) =>
+                field.id === existing.id ? persisted : field,
+              )
+            : [...state.source.calculatedFields, persisted],
         };
-        return ok(route, { ok: true });
+        return ok(route, persisted);
+      }
       case 'getControlOptions':
         return ok(route, { values: ['FB', 'IG', 'TikTok'] });
       case 'queryWidget':
