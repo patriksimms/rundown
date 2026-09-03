@@ -52,9 +52,9 @@ export function LandingPage() {
         >
           <img
             src="/landing/dashboard.png"
-            alt="A Rundown dashboard showing impressions, clicks, media spend and click-through rate, a delivery trend line, a bar chart by ad format and a campaign breakdown table."
+            alt="A Rundown dashboard with a date range and two filter controls, impressions, clicks, media spend and click-through rate against the previous period, a chart pairing impressions with click-through rate, a gauge for media spend against plan and a written note."
             width={2880}
-            height={2000}
+            height={1792}
             fetchPriority="high"
             className="h-auto w-full"
           />
@@ -75,6 +75,27 @@ export function LandingPage() {
       <section className="mx-auto w-full max-w-7xl px-4 py-16 sm:px-6">
         <div className="reveal-on-scroll max-w-2xl">
           <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+            Every breakdown the report needs
+          </h2>
+          <p className="mt-3 text-base leading-7 text-muted-foreground">
+            Grouped bars, share of spend and a pivot table with totals run on the same query. One
+            date range and one filter set drive all of them.
+          </p>
+        </div>
+        {/* The image continues the dashboard above, so it carries no browser chrome of its own. */}
+        <img
+          src="/landing/dashboard-breakdown.png"
+          alt="Impressions by campaign and ad format as grouped bars, spend share by platform as a pie chart, and a pivot table of impressions and media spend per campaign and platform ending in a grand total row."
+          width={2880}
+          height={1792}
+          loading="lazy"
+          className="reveal-on-scroll mt-10 h-auto w-full rounded-xl border"
+        />
+      </section>
+
+      <section className="mx-auto w-full max-w-7xl px-4 py-16 sm:px-6">
+        <div className="reveal-on-scroll max-w-2xl">
+          <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">
             Field metadata stays yours
           </h2>
           <p className="mt-3 text-base leading-7 text-muted-foreground">
@@ -82,12 +103,15 @@ export function LandingPage() {
             matter. Every dashboard built on that source follows.
           </p>
         </div>
-        <BrowserFrame url="rundown.workers.dev/datasources" className="reveal-on-scroll mt-10">
+        <BrowserFrame
+          url="rundown.workers.dev/datasources/campaign-delivery"
+          className="reveal-on-scroll mt-10"
+        >
           <img
             src="/landing/field-metadata.png"
-            alt="The Rundown datasources screen listing each column of a registered file with its label, canonical name, role and type."
+            alt="The Rundown datasource screen listing each column of a registered file with its label, source, role, type and description, ending with a calculated field."
             width={2880}
-            height={1888}
+            height={1960}
             loading="lazy"
             className="h-auto max-h-[32rem] w-full object-cover object-top"
           />
