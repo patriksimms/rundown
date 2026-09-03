@@ -175,10 +175,24 @@ export function useWebMcpTools(options: WebMcpOptions) {
               fixed,
             },
             {
+              action: 'validateCalculatedField',
+              description:
+                'Validate a row-level calculated field without saving it. Returns its type and referenced field IDs, or an error position.',
+              readOnly: true,
+              fixed,
+            },
+            {
               action: 'upsertCalculatedField',
               description:
                 'Create or update a row-level Rundown formula after static syntax, field, and type validation.',
               readOnly: false,
+              fixed,
+            },
+            {
+              action: 'validateMetricExpression',
+              description:
+                'Validate an aggregate metric formula without saving it. Every field reference must sit inside an aggregate function.',
+              readOnly: true,
               fixed,
             },
             {
@@ -233,6 +247,24 @@ export function useWebMcpTools(options: WebMcpOptions) {
       ? [
           ...(!options.dashboardId
             ? ([
+                {
+                  action: 'validateCalculatedField',
+                  description:
+                    'Validate a row-level calculated field without saving it. Returns its type and referenced field IDs, or an error position.',
+                  readOnly: true,
+                },
+                {
+                  action: 'upsertCalculatedField',
+                  description:
+                    'Create or update a row-level Rundown formula after static syntax, field, and type validation.',
+                  readOnly: false,
+                },
+                {
+                  action: 'validateMetricExpression',
+                  description:
+                    'Validate an aggregate metric formula without saving it. Every field reference must sit inside an aggregate function.',
+                  readOnly: true,
+                },
                 {
                   action: 'updateFieldMetadata',
                   description:

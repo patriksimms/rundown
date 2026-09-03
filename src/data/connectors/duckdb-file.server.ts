@@ -133,8 +133,24 @@ function expressionSql(definition: DatasourceExpression) {
       definition.metadata,
       definition.semanticType,
     ).sql;
-  return validateRowFormula(definition.expression, definition.metadata, definition.semanticType)
-    .sql;
+  const calculatedFields = [
+    ...definition.metadata.calculatedFields.filter((field) => field.id !== definition.id),
+    {
+      id: definition.id ?? '__candidate__',
+      dataSourceId: '',
+      canonicalName: definition.canonicalName,
+      label: definition.canonicalName,
+      expression: definition.expression,
+      role: 'dimension' as const,
+      semanticType: definition.semanticType,
+      description: null,
+    },
+  ];
+  return validateRowFormula(
+    definition.expression,
+    { fields: definition.metadata.fields, calculatedFields },
+    definition.semanticType,
+  ).sql;
 }
 
 function connectorError(

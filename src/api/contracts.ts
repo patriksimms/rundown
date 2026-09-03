@@ -17,6 +17,14 @@ import {
 
 const dashboardRef = { dashboardId: z.string().min(1), shareToken: z.string().min(1).optional() };
 
+const libraryMetricInputSchema = z.object({
+  name: z.string().trim().min(1),
+  canonicalName: z.string().trim().min(1).optional(),
+  expression: z.string().min(1),
+  semanticType: semanticTypeSchema,
+  description: z.string().optional(),
+});
+
 export const apiRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('bootstrap') }),
   z.object({ action: z.literal('listDashboards') }),
@@ -48,6 +56,7 @@ export const apiRequestSchema = z.discriminatedUnion('action', [
     dashboardId: z.string().min(1),
     widgetId: z.string().min(1),
     definition: widgetDefinitionSchema,
+    libraryMetric: libraryMetricInputSchema.optional(),
   }),
   z.object({
     action: z.literal('removeWidget'),
@@ -142,6 +151,26 @@ export const apiRequestSchema = z.discriminatedUnion('action', [
     }),
   }),
   z.object({
+    action: z.literal('validateCalculatedField'),
+    dashboardId: z.string().min(1).optional(),
+    dataSourceId: z.string().min(1),
+    id: z.string().optional(),
+    name: z.string().trim().min(1),
+    canonicalName: z.string().trim().min(1).optional(),
+    expression: z.string(),
+    semanticType: semanticTypeSchema.optional(),
+  }),
+  z.object({
+    action: z.literal('previewCalculatedFieldValues'),
+    dashboardId: z.string().min(1).optional(),
+    dataSourceId: z.string().min(1),
+    id: z.string().optional(),
+    name: z.string().trim().min(1),
+    canonicalName: z.string().trim().min(1).optional(),
+    expression: z.string().min(1),
+    semanticType: semanticTypeSchema,
+  }),
+  z.object({
     action: z.literal('upsertCalculatedField'),
     dashboardId: z.string().min(1).optional(),
     dataSourceId: z.string().min(1),
@@ -155,14 +184,16 @@ export const apiRequestSchema = z.discriminatedUnion('action', [
     description: z.string().optional(),
   }),
   z.object({
+    action: z.literal('validateMetricExpression'),
+    dashboardId: z.string().min(1).optional(),
+    dataSourceId: z.string().min(1),
+    expression: z.string(),
+  }),
+  z.object({
     action: z.literal('upsertLibraryMetric'),
     dashboardId: z.string().min(1).optional(),
     id: z.string().optional(),
-    name: z.string().trim().min(1),
-    canonicalName: z.string().trim().min(1).optional(),
-    expression: z.string().min(1),
-    semanticType: semanticTypeSchema,
-    description: z.string().optional(),
+    ...libraryMetricInputSchema.shape,
   }),
   z.object({
     action: z.literal('shareDashboard'),

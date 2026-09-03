@@ -150,9 +150,13 @@ describe('duckdb-file datasource connector', () => {
     await expect(
       duckdbFileConnector.validateExpression(dataSource, {
         kind: 'calculatedField',
+        canonicalName: 'lower_cost',
         expression: 'lower(media_cost)',
         semanticType: 'count',
-        metadata: { fields: [dateField, { ...costField, semanticType: 'text' }] },
+        metadata: {
+          fields: [dateField, { ...costField, semanticType: 'text' }],
+          calculatedFields: [],
+        },
       }),
     ).rejects.toThrow(/returns text/u);
   });

@@ -20,7 +20,6 @@ import { WorkspaceGate } from '#/components/workspace-gate';
 const navigation = [
   { to: '/', label: 'Dashboards', exact: true },
   { to: '/datasources', label: 'Datasources', exact: false },
-  { to: '/metrics', label: 'Metrics', exact: false },
 ] as const;
 
 // Active and inactive styling are kept apart so the two never both apply and

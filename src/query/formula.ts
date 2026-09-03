@@ -28,7 +28,31 @@ type FormulaNode =
   | { kind: 'binary'; operator: string; left: FormulaNode; right: FormulaNode }
   | { kind: 'call'; name: string; arguments: FormulaNode[] };
 
-const aggregateFunctions = new Set(['sum', 'avg', 'min', 'max', 'count', 'count_distinct']);
+export const aggregateFormulaFunctions = [
+  'sum',
+  'avg',
+  'min',
+  'max',
+  'count',
+  'count_distinct',
+] as const;
+const aggregateFunctions = new Set<string>(aggregateFormulaFunctions);
+export const rowFormulaFunctions = [
+  'abs',
+  'ceil',
+  'floor',
+  'round',
+  'lower',
+  'upper',
+  'length',
+  'contains',
+  'starts_with',
+  'ends_with',
+  'coalesce',
+  'if',
+  'date_part',
+  'nullif',
+] as const;
 const binaryPrecedence = new Map([
   ['or', 1],
   ['and', 2],
@@ -106,7 +130,9 @@ export function compileFormula(
     const aggregate = aggregateFunctions.has(name);
     if (aggregate) {
       if (options.mode === 'row')
-        throw new Error(`${current.name} is only allowed in aggregate formulas.`);
+        throw new Error(
+          `${current.name} is only allowed in aggregate formulas. Create a library metric instead.`,
+        );
       if (aggregateDepth > 0) throw new Error('Aggregate functions cannot be nested.');
     }
     const compiledArguments = current.arguments.map((argument) =>
@@ -117,6 +143,29 @@ export function compileFormula(
 
   const result = compile(node);
   return { ...result, identifiers: [...identifiers] };
+}
+
+export function formulaIdentifiers(source: string) {
+  const root = new FormulaParser(tokenize(source)).parse();
+  const identifiers = new Set<string>();
+  const visit = (node: FormulaNode) => {
+    if (node.kind === 'identifier') {
+      identifiers.add(node.name);
+      return;
+    }
+    if (node.kind === 'unary') {
+      visit(node.operand);
+      return;
+    }
+    if (node.kind === 'binary') {
+      visit(node.left);
+      visit(node.right);
+      return;
+    }
+    if (node.kind === 'call') for (const argument of node.arguments) visit(argument);
+  };
+  visit(root);
+  return [...identifiers];
 }
 
 export function formulaTypeForSemanticType(semanticType: string): FormulaType {

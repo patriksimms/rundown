@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { defaultDateRange, type DashboardDocument, type WidgetDefinition } from '#/domain/schema';
 import {
+  assertCalculatedFieldNameAvailable,
   compileLibraryExpression,
   compileSourceSqlFromBaseUrl,
   compileWidgetQuery,
+  validateRowFormula,
 } from './compiler';
-import type { DataSourceRecord, FieldRecord, LibraryMetricRecord } from './types';
+import type {
+  CalculatedFieldRecord,
+  DataSourceRecord,
+  FieldRecord,
+  LibraryMetricRecord,
+} from './types';
 
 const dataSource: DataSourceRecord = {
   id: 'source',
@@ -112,6 +119,67 @@ function compileScorecard(
 }
 
 describe('query compiler', () => {
+  const calculatedFields: CalculatedFieldRecord[] = [
+    {
+      id: 'net-cost',
+      dataSourceId: 'source',
+      canonicalName: 'net_cost',
+      label: 'Net cost',
+      expression: 'media_cost * 0.8',
+      role: 'metric',
+      semanticType: 'currency',
+      description: null,
+    },
+    {
+      id: 'doubled-net-cost',
+      dataSourceId: 'source',
+      canonicalName: 'doubled_net_cost',
+      label: 'Doubled net cost',
+      expression: 'net_cost * 2',
+      role: 'metric',
+      semanticType: 'currency',
+      description: null,
+    },
+  ];
+
+  it('inlines chained calculated fields in dependency order', () => {
+    expect(
+      validateRowFormula('doubled_net_cost + net_cost', { fields, calculatedFields }).sql,
+    ).toContain('"MediaCost" * 0.8');
+  });
+
+  it('names calculated field cycles and self-references', () => {
+    expect(() =>
+      validateRowFormula('first', {
+        fields,
+        calculatedFields: [
+          { ...calculatedFields[0], id: 'first', canonicalName: 'first', expression: 'second' },
+          { ...calculatedFields[1], id: 'second', canonicalName: 'second', expression: 'first' },
+        ],
+      }),
+    ).toThrow('Calculated field cycle: first -> second -> first.');
+    expect(() =>
+      validateRowFormula('self', {
+        fields,
+        calculatedFields: [
+          { ...calculatedFields[0], id: 'self', canonicalName: 'self', expression: 'self + 1' },
+        ],
+      }),
+    ).toThrow('Calculated field cycle: self -> self.');
+  });
+
+  it('rejects raw and calculated canonical name collisions', () => {
+    expect(() =>
+      assertCalculatedFieldNameAvailable('MEDIA_COST', { fields, calculatedFields }),
+    ).toThrow(/already used by raw field Cost/u);
+    expect(() =>
+      assertCalculatedFieldNameAvailable('NET_COST', { fields, calculatedFields }),
+    ).toThrow(/already used by Net cost/u);
+    expect(() =>
+      assertCalculatedFieldNameAvailable('net_cost', { fields, calculatedFields }, 'net-cost'),
+    ).not.toThrow();
+  });
+
   it('compiles explicit local files into an HTTP source', () => {
     expect(
       compileSourceSqlFromBaseUrl(dataSource, 'http://localhost:3000/__dev-data', [

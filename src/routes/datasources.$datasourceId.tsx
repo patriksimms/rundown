@@ -4,6 +4,7 @@ import { ArrowLeftIcon, PlusIcon } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { callApi } from '#/api/client';
 import { AppShell } from '#/components/app-shell';
+import { CalculatedFieldDialog } from '#/components/calculated-field-dialog';
 import {
   DataTable,
   DataTableSearch,
@@ -23,7 +24,6 @@ import {
 import { Field, FieldGroup, FieldLabel } from '#/components/ui/field';
 import { Input } from '#/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '#/components/ui/native-select';
-import { Textarea } from '#/components/ui/textarea';
 import {
   datasourceFieldOriginLabels,
   datasourceFieldRows,
@@ -248,30 +248,36 @@ function DatasourceContent() {
             )}
           />
           <p className="text-sm text-muted-foreground">
-            Column names come from the database and stay fixed so library metrics and widget
-            remapping keep resolving. Library metrics are edited in the{' '}
-            <Link className="underline underline-offset-4" to="/metrics">
-              metric library
-            </Link>
-            .
+            Column names come from the database and stay fixed so dashboards keep resolving them.
           </p>
           {/* Inside the loaded branch so a route change unmounts the dialog
               instead of leaving one datasource's field over another's page. */}
-          <FieldDialog
-            key={dialog.session}
-            dataSourceId={datasourceId}
-            field={dialog.field}
-            open={dialogOpen}
-            onOpenChange={setDialogOpen}
-            onSaved={refresh}
-          />
+          {dialog.field?.origin === 'raw' ? (
+            <RawFieldDialog
+              key={dialog.session}
+              dataSourceId={datasourceId}
+              field={dialog.field}
+              open={dialogOpen}
+              onOpenChange={setDialogOpen}
+              onSaved={refresh}
+            />
+          ) : (
+            <CalculatedFieldDialog
+              key={dialog.session}
+              datasource={description}
+              field={dialog.field}
+              open={dialogOpen}
+              onOpenChange={setDialogOpen}
+              onSaved={refresh}
+            />
+          )}
         </div>
       )}
     </main>
   );
 }
 
-function FieldDialog({
+function RawFieldDialog({
   dataSourceId,
   field,
   open,
@@ -279,19 +285,16 @@ function FieldDialog({
   onSaved,
 }: {
   dataSourceId: string;
-  field?: DatasourceFieldRow;
+  field: DatasourceFieldRow;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: () => Promise<void>;
 }) {
-  // Without a field the dialog creates a calculated field, which always needs an expression.
-  const isCalculated = field ? field.origin === 'calculated' : true;
-  const [label, setLabel] = useState(field?.label ?? '');
-  const [expression, setExpression] = useState(field?.expression ?? '');
-  const [role, setRole] = useState<FieldRole>(field?.role ?? 'metric');
-  const [semanticType, setSemanticType] = useState<SemanticType>(field?.semanticType ?? 'count');
-  const [aggregation, setAggregation] = useState<Aggregation | ''>(field?.defaultAggregation ?? '');
-  const [description, setDescription] = useState(field?.description ?? '');
+  const [label, setLabel] = useState(field.label);
+  const [role, setRole] = useState<FieldRole>(field.role);
+  const [semanticType, setSemanticType] = useState<SemanticType>(field.semanticType);
+  const [aggregation, setAggregation] = useState<Aggregation | ''>(field.defaultAggregation ?? '');
+  const [description, setDescription] = useState(field.description);
   const [saveError, setSaveError] = useState<string>();
   const [saving, setSaving] = useState(false);
 
@@ -301,32 +304,18 @@ function FieldDialog({
     setSaving(true);
     setSaveError(undefined);
     try {
-      if (field && field.origin === 'raw') {
-        await callApi({
-          action: 'updateFieldMetadata',
-          dataSourceId,
-          columnName: field.columnName ?? field.canonicalName,
-          patch: {
-            label,
-            role,
-            semanticType,
-            defaultAggregation: aggregation || null,
-            description: description || null,
-          },
-        });
-      } else {
-        await callApi({
-          action: 'upsertCalculatedField',
-          dataSourceId,
-          ...(field ? { id: field.id, canonicalName: field.canonicalName } : {}),
-          name: label,
-          expression,
+      await callApi({
+        action: 'updateFieldMetadata',
+        dataSourceId,
+        columnName: field.columnName ?? field.canonicalName,
+        patch: {
+          label,
           role,
           semanticType,
           defaultAggregation: aggregation || null,
-          description: description || undefined,
-        });
-      }
+          description: description || null,
+        },
+      });
       await onSaved();
       onOpenChange(false);
     } catch (caught) {
@@ -340,11 +329,9 @@ function FieldDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{field ? `Edit ${field.label}` : 'Create calculated field'}</DialogTitle>
+          <DialogTitle>{`Edit ${field.label}`}</DialogTitle>
           <DialogDescription>
-            {field
-              ? `Column ${field.canonicalName} is fixed. Rename the field with its label.`
-              : 'Define a row formula with canonical field names. Its column name comes from the label.'}
+            {`Column ${field.canonicalName} is fixed. Rename the field with its label.`}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit}>
@@ -358,17 +345,6 @@ function FieldDialog({
                 onChange={(event) => setLabel(event.target.value)}
               />
             </Field>
-            {isCalculated ? (
-              <Field>
-                <FieldLabel htmlFor="field-expression">Formula</FieldLabel>
-                <Textarea
-                  id="field-expression"
-                  value={expression}
-                  required
-                  onChange={(event) => setExpression(event.target.value)}
-                />
-              </Field>
-            ) : null}
             <Field>
               <FieldLabel htmlFor="field-role">Role</FieldLabel>
               <NativeSelect
@@ -423,7 +399,7 @@ function FieldDialog({
             {saveError ? <p className="text-sm text-destructive">{saveError}</p> : null}
             <div className="flex gap-2">
               <Button type="submit" disabled={saving}>
-                {saving ? 'Saving…' : field ? 'Save field' : 'Create field'}
+                {saving ? 'Saving…' : 'Save field'}
               </Button>
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                 Cancel

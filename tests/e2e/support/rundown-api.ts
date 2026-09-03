@@ -1,4 +1,5 @@
 import type { Page, Route } from '@playwright/test';
+import type { DatasourceDescription } from '#/domain/datasource-fields';
 import type { DashboardDocument, DashboardWidget } from '#/domain/schema';
 
 const fixedRange = {
@@ -123,6 +124,19 @@ const fields = [
   },
 ];
 
+const calculatedFields = [
+  {
+    id: 'calc_vtr',
+    canonicalName: 'vtr',
+    label: 'VTR',
+    expression: 'impressions / 100',
+    role: 'metric',
+    semanticType: 'ratio',
+    defaultAggregation: 'average' as string | null,
+    description: null as string | null,
+  },
+];
+
 const location = { kind: 'object', key: 'ws/demo/report.csv', format: 'csv' } as const;
 
 const description = () => ({
@@ -130,8 +144,8 @@ const description = () => ({
   name: 'Reporting example',
   location,
   fields: fields.map((field) => ({ ...field })),
-  calculatedFields: [],
-  libraryMetrics: [],
+  calculatedFields: calculatedFields.map((field) => ({ ...field })),
+  libraryMetrics: [] as DatasourceDescription['libraryMetrics'],
 });
 
 interface MockOptions {
@@ -160,6 +174,11 @@ export async function mockRundownApi(page: Page, options: MockOptions = {}) {
       placements?: Array<{ widgetId: string; placement: DashboardWidget['layout'] }>;
       canvasRows?: number;
       patch?: Record<string, unknown>;
+      libraryMetric?: {
+        name: string;
+        expression: string;
+        semanticType: 'count';
+      };
     };
     switch (request.action) {
       case 'bootstrap':
@@ -196,6 +215,35 @@ export async function mockRundownApi(page: Page, options: MockOptions = {}) {
           ),
         };
         return ok(route, { ok: true });
+      // The dialogs compile formulas locally too, so a permissive stub still exercises the rules.
+      case 'validateCalculatedField':
+      case 'validateMetricExpression':
+        return ok(route, { valid: true, type: 'number', identifiers: ['impressions'] });
+      case 'upsertCalculatedField': {
+        const existing = state.source.calculatedFields.find((field) => field.id === request.id);
+        const persisted = {
+          id: existing?.id ?? `calc_${Date.now()}`,
+          canonicalName:
+            existing?.canonicalName ??
+            request.canonicalName ??
+            request.name.toLowerCase().replaceAll(' ', '_'),
+          label: request.name,
+          expression: request.expression,
+          role: request.role,
+          semanticType: request.semanticType,
+          defaultAggregation: request.defaultAggregation ?? null,
+          description: request.description ?? null,
+        };
+        state.source = {
+          ...state.source,
+          calculatedFields: existing
+            ? state.source.calculatedFields.map((field) =>
+                field.id === existing.id ? persisted : field,
+              )
+            : [...state.source.calculatedFields, persisted],
+        };
+        return ok(route, persisted);
+      }
       case 'getControlOptions':
         return ok(route, { values: ['FB', 'IG', 'TikTok'] });
       case 'queryWidget':
@@ -236,6 +284,20 @@ export async function mockRundownApi(page: Page, options: MockOptions = {}) {
               : item,
           ),
         };
+        if (request.libraryMetric) {
+          state.source = {
+            ...state.source,
+            libraryMetrics: [
+              ...state.source.libraryMetrics,
+              {
+                id: `metric_${Date.now()}`,
+                canonicalName: request.libraryMetric.name.toLowerCase().replaceAll(' ', '_'),
+                description: null,
+                ...request.libraryMetric,
+              },
+            ],
+          };
+        }
         return ok(route, {
           widget: state.dashboard.widgets.find((i) => i.id === request.widgetId),
         });
