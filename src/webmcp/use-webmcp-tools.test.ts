@@ -2,6 +2,36 @@ import { describe, expect, it } from 'vitest';
 import { inputSchemaFor } from './use-webmcp-tools';
 
 describe('WebMCP input schemas', () => {
+  it('keeps the dashboard editor tool schemas below the WebMCP descriptor budget', () => {
+    const dashboardId = { dashboardId: 'dashboard' };
+    const schemas = [
+      inputSchemaFor('listDashboards'),
+      inputSchemaFor('listLibraryMetrics'),
+      inputSchemaFor('getDashboard', dashboardId),
+      inputSchemaFor('queryWidget', dashboardId),
+      inputSchemaFor('explainWidget', dashboardId),
+      inputSchemaFor('getControlOptions', dashboardId),
+      inputSchemaFor('describeDatasource', dashboardId),
+      inputSchemaFor('updateDashboard', dashboardId),
+      inputSchemaFor('addWidget', dashboardId),
+      inputSchemaFor('updateWidget', dashboardId),
+      inputSchemaFor('removeWidget', dashboardId),
+      inputSchemaFor('moveWidget', dashboardId),
+      inputSchemaFor('updateLayout', dashboardId),
+      inputSchemaFor('copyWidget', dashboardId),
+      inputSchemaFor('previewWidget', dashboardId),
+      inputSchemaFor('upsertCalculatedField', dashboardId),
+      inputSchemaFor('updateFieldMetadata', dashboardId),
+      inputSchemaFor('upsertLibraryMetric', dashboardId),
+      inputSchemaFor('shareDashboard', dashboardId),
+      inputSchemaFor('createDashboard'),
+    ];
+    const bytes = new TextEncoder().encode(JSON.stringify(schemas)).byteLength;
+
+    // Leave room for tool names, descriptions, annotations, and browser-added metadata.
+    expect(bytes).toBeLessThan(48 * 1024);
+  });
+
   it('derives viewer query inputs without exposing SQL or datasource locations', () => {
     const schema = inputSchemaFor('queryWidget', {
       dashboardId: 'dashboard',
@@ -40,5 +70,11 @@ describe('WebMCP input schemas', () => {
     const schema = inputSchemaFor('addWidget', { dashboardId: 'dashboard' });
     expect(JSON.stringify(schema)).toContain('startOfYear');
     expect(JSON.stringify(schema)).toContain('startOfQuarter');
+  });
+
+  it('reuses repeated widget schema fragments through local references', () => {
+    const schema = inputSchemaFor('addWidget', { dashboardId: 'dashboard' });
+    expect(schema).toHaveProperty('definitions');
+    expect(JSON.stringify(schema)).toContain('"$ref":"#/definitions/');
   });
 });

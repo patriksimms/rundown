@@ -293,6 +293,7 @@ export function inputSchemaFor(action: ApiRequest['action'], fixed?: Record<stri
   const json = z.toJSONSchema(option, {
     target: 'draft-07',
     unrepresentable: 'any',
+    reused: 'ref',
   });
   const removed = new Set(['action', ...Object.keys(fixed ?? {})]);
   if (json.properties) for (const key of removed) delete json.properties[key];
