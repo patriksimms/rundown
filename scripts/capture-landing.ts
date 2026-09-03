@@ -426,11 +426,11 @@ async function captureFieldMetadata(page: Page, dataSourceId: string) {
 /** Waits for every widget to have finished querying, then lets the chart animations land. */
 async function settle(page: Page) {
   await page.waitForLoadState('networkidle');
-  await page
-    .locator('[data-slot="skeleton"]')
-    .first()
-    .waitFor({ state: 'detached', timeout: 60_000 })
-    .catch(() => undefined);
+  await page.waitForFunction(
+    () => document.querySelectorAll('[data-slot="skeleton"]').length === 0,
+    undefined,
+    { timeout: 60_000 },
+  );
   await page.waitForTimeout(2_000);
 }
 
