@@ -1,4 +1,8 @@
+import { eq } from 'drizzle-orm';
+import { env } from 'cloudflare:workers';
 import { describe, expect, test } from 'vitest';
+import { createDatabase } from '#/db/client';
+import { libraryMetrics } from '#/db/schema';
 import { yearToDateRange } from '#/domain/dates';
 import { setClerkDirectory, signOut } from './doubles/clerk';
 import {
@@ -136,6 +140,62 @@ describe('dashboard grants', () => {
       status: 403,
       code: 'dashboard_access_denied',
     });
+  });
+});
+
+describe('widget updates', () => {
+  test('rolls back the widget when its library metric cannot be created', async () => {
+    const workspace = await signInToNewWorkspace();
+    const source = await seedDataSource(workspace);
+    const dashboard = await createDashboard();
+    const widget = await addWidget(dashboard.id, scorecardDefinition(source));
+    const database = createDatabase(env.DB);
+    await database.insert(libraryMetrics).values({
+      id: 'existing_metric',
+      workspaceId: workspace.workspaceId,
+      name: 'Existing metric',
+      canonicalName: 'cost_per_view',
+      expression: 'sum(revenue)',
+      semanticType: 'count',
+      description: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const error = await callService({
+      action: 'updateWidget',
+      dashboardId: dashboard.id,
+      widgetId: widget.id,
+      definition: {
+        ...scorecardDefinition(source),
+        title: 'Cost per view',
+        metric: {
+          source: { kind: 'expression', expression: 'sum(revenue)' },
+          dataType: 'number',
+        },
+      },
+      libraryMetric: {
+        name: 'Cost per view',
+        canonicalName: 'cost_per_view',
+        expression: 'sum(revenue)',
+        semanticType: 'count',
+      },
+    }).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(Error);
+
+    const opened = (await callService({
+      action: 'getDashboard',
+      dashboardId: dashboard.id,
+    })) as OpenedDashboard;
+    expect(opened.dashboard.widgets[0].definition.title).toBe('Revenue');
+    expect(
+      await database
+        .select()
+        .from(libraryMetrics)
+        .where(eq(libraryMetrics.workspaceId, workspace.workspaceId)),
+    ).toHaveLength(1);
   });
 });
 

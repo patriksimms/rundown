@@ -364,8 +364,24 @@ async function updateWidget(request: Extract<ApiRequest, { action: 'updateWidget
     widgets: access.document.widgets.map((item) => (item.id === widget.id ? widget : item)),
     updatedAt: new Date().toISOString(),
   };
-  await persistDashboard(updated);
-  return { widget, compiledSql: await compiledSql(updated, widget) };
+  const sql = await compiledSql(updated, widget);
+  if (!request.libraryMetric) {
+    await persistDashboard(updated);
+    return { widget, compiledSql: sql };
+  }
+
+  await validateLibraryMetricInput(request.libraryMetric, access.session!);
+  const libraryMetric = newLibraryMetricValues(request.libraryMetric, access.document.workspaceId);
+  dashboardDocumentSchema.parse(updated);
+  const db = database();
+  await db.batch([
+    db
+      .update(dashboards)
+      .set({ name: updated.name, document: updated, updatedAt: updated.updatedAt })
+      .where(eq(dashboards.id, updated.id)),
+    db.insert(libraryMetrics).values(libraryMetric),
+  ]);
+  return { widget, libraryMetric, compiledSql: sql };
 }
 
 async function removeWidget(request: Extract<ApiRequest, { action: 'removeWidget' }>) {
@@ -1405,34 +1421,7 @@ async function upsertLibraryMetric(
       );
     await authorizeDashboard(request.dashboardId, 'editor');
   }
-  const sourceRows = await database()
-    .select()
-    .from(dataSources)
-    .where(eq(dataSources.workspaceId, session.workspace.id));
-  let validated = false;
-  for (const row of sourceRows) {
-    const dataSource = await loadDataSource(row.id, session.workspace.id);
-    const metadata = await loadQueryMetadata(row.id, session.workspace.id);
-    if (
-      await datasourceOperation(() =>
-        libraryMetricApplies(dataSource, {
-          kind: 'libraryMetric',
-          expression: request.expression,
-          semanticType: request.semanticType,
-          metadata,
-        }),
-      )
-    ) {
-      validated = true;
-      break;
-    }
-  }
-  if (!validated)
-    throw new ApiError(
-      400,
-      'metric_not_applicable',
-      'No datasource contains every canonical field referenced by this metric.',
-    );
+  await validateLibraryMetricInput(request, session);
   const mutableValues = {
     name: request.name,
     canonicalName: request.canonicalName ?? slug(request.name),
@@ -1456,13 +1445,57 @@ async function upsertLibraryMetric(
     if (!updated) throw new ApiError(404, 'library_metric_not_found', 'Library metric not found.');
     return updated;
   }
-  const values = {
-    id: `metric_${crypto.randomUUID()}`,
-    workspaceId: session.workspace.id,
-    ...mutableValues,
-  };
+  const values = newLibraryMetricValues(request, session.workspace.id);
   const [created] = await db.insert(libraryMetrics).values(values).returning();
   return created;
+}
+
+type LibraryMetricInput = NonNullable<
+  Extract<ApiRequest, { action: 'updateWidget' }>['libraryMetric']
+>;
+
+async function validateLibraryMetricInput(input: LibraryMetricInput, session: SessionContext) {
+  const sourceRows = await database()
+    .select()
+    .from(dataSources)
+    .where(eq(dataSources.workspaceId, session.workspace.id));
+  let validated = false;
+  for (const row of sourceRows) {
+    const dataSource = await loadDataSource(row.id, session.workspace.id);
+    const metadata = await loadQueryMetadata(row.id, session.workspace.id);
+    if (
+      await datasourceOperation(() =>
+        libraryMetricApplies(dataSource, {
+          kind: 'libraryMetric',
+          expression: input.expression,
+          semanticType: input.semanticType,
+          metadata,
+        }),
+      )
+    ) {
+      validated = true;
+      break;
+    }
+  }
+  if (!validated)
+    throw new ApiError(
+      400,
+      'metric_not_applicable',
+      'No datasource contains every canonical field referenced by this metric.',
+    );
+}
+
+function newLibraryMetricValues(input: LibraryMetricInput, workspaceId: string) {
+  return {
+    id: `metric_${crypto.randomUUID()}`,
+    workspaceId,
+    name: input.name,
+    canonicalName: input.canonicalName ?? slug(input.name),
+    expression: input.expression,
+    semanticType: input.semanticType,
+    description: input.description ?? null,
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 async function shareDashboard(request: Extract<ApiRequest, { action: 'shareDashboard' }>) {

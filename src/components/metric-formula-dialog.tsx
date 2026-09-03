@@ -24,6 +24,12 @@ import { Input } from '#/components/ui/input';
 import type { DatasourceDescription } from '#/domain/datasource-fields';
 import type { WidgetMetric } from '#/domain/schema';
 
+export interface LibraryMetricDraft {
+  name: string;
+  expression: string;
+  semanticType: 'count';
+}
+
 /**
  * Formula editor for a widget's custom metric. Unlike a calculated field this expression is
  * aggregate-level, lives on the widget, and is optionally copied into the workspace library.
@@ -42,7 +48,7 @@ export function MetricFormulaDialog({
   source?: DatasourceDescription;
   /** Set when an existing expression metric is edited; absent when a new one is added. */
   metric?: WidgetMetric;
-  onSave: (metric: WidgetMetric) => Promise<void>;
+  onSave: (metric: WidgetMetric, libraryMetric?: LibraryMetricDraft) => Promise<boolean>;
 }) {
   const editing = metric?.source.kind === 'expression' ? metric.source : undefined;
   const [name, setName] = useState('');
@@ -119,22 +125,19 @@ export function MetricFormulaDialog({
     setSubmitting(true);
     setDialogError(undefined);
     try {
-      if (saveLibrary) {
-        if (!source) throw new Error('Datasource fields are still loading.');
-        await callApi({
-          action: 'upsertLibraryMetric',
-          dashboardId,
-          name,
-          expression,
-          semanticType: 'count',
-        });
+      const saved = await onSave(
+        {
+          dataType: 'number' as const,
+          ...metric,
+          userDefinedName: name,
+          source: { kind: 'expression', expression },
+        },
+        saveLibrary ? { name, expression, semanticType: 'count' } : undefined,
+      );
+      if (!saved) {
+        setDialogError('The metric could not be saved.');
+        return;
       }
-      await onSave({
-        dataType: 'number' as const,
-        ...metric,
-        userDefinedName: name,
-        source: { kind: 'expression', expression },
-      });
       onOpenChange(false);
     } catch (caught) {
       setDialogError(caught instanceof Error ? caught.message : String(caught));

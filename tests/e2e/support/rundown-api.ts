@@ -1,4 +1,5 @@
 import type { Page, Route } from '@playwright/test';
+import type { DatasourceDescription } from '#/domain/datasource-fields';
 import type { DashboardDocument, DashboardWidget } from '#/domain/schema';
 
 const fixedRange = {
@@ -144,7 +145,7 @@ const description = () => ({
   location,
   fields: fields.map((field) => ({ ...field })),
   calculatedFields: calculatedFields.map((field) => ({ ...field })),
-  libraryMetrics: [],
+  libraryMetrics: [] as DatasourceDescription['libraryMetrics'],
 });
 
 interface MockOptions {
@@ -173,6 +174,11 @@ export async function mockRundownApi(page: Page, options: MockOptions = {}) {
       placements?: Array<{ widgetId: string; placement: DashboardWidget['layout'] }>;
       canvasRows?: number;
       patch?: Record<string, unknown>;
+      libraryMetric?: {
+        name: string;
+        expression: string;
+        semanticType: 'count';
+      };
     };
     switch (request.action) {
       case 'bootstrap':
@@ -213,6 +219,23 @@ export async function mockRundownApi(page: Page, options: MockOptions = {}) {
       case 'validateCalculatedField':
       case 'validateMetricExpression':
         return ok(route, { valid: true, type: 'number', identifiers: ['impressions'] });
+      case 'upsertCalculatedField':
+        state.source = {
+          ...state.source,
+          calculatedFields: state.source.calculatedFields.map((field) =>
+            field.id === request.id
+              ? {
+                  ...field,
+                  label: request.name,
+                  expression: request.expression,
+                  role: request.role,
+                  semanticType: request.semanticType,
+                  defaultAggregation: request.defaultAggregation,
+                }
+              : field,
+          ),
+        };
+        return ok(route, { ok: true });
       case 'getControlOptions':
         return ok(route, { values: ['FB', 'IG', 'TikTok'] });
       case 'queryWidget':
@@ -253,6 +276,20 @@ export async function mockRundownApi(page: Page, options: MockOptions = {}) {
               : item,
           ),
         };
+        if (request.libraryMetric) {
+          state.source = {
+            ...state.source,
+            libraryMetrics: [
+              ...state.source.libraryMetrics,
+              {
+                id: `metric_${Date.now()}`,
+                canonicalName: request.libraryMetric.name.toLowerCase().replaceAll(' ', '_'),
+                description: null,
+                ...request.libraryMetric,
+              },
+            ],
+          };
+        }
         return ok(route, {
           widget: state.dashboard.widgets.find((i) => i.id === request.widgetId),
         });

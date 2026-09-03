@@ -41,7 +41,7 @@ import { callApi } from '#/api/client';
 import { DateRangePicker } from '#/components/date-range-picker';
 import { CalculatedFieldDialog } from '#/components/calculated-field-dialog';
 import { DashboardWidgetView, initialControlState } from '#/components/dashboard-view';
-import { MetricFormulaDialog } from '#/components/metric-formula-dialog';
+import { MetricFormulaDialog, type LibraryMetricDraft } from '#/components/metric-formula-dialog';
 import { Alert, AlertDescription } from '#/components/ui/alert';
 import { Button } from '#/components/ui/button';
 import {
@@ -386,7 +386,11 @@ export function DashboardBuilder({
     }
   }
 
-  async function updateWidget(widget: DashboardWidget, definition: WidgetDefinition) {
+  async function updateWidget(
+    widget: DashboardWidget,
+    definition: WidgetDefinition,
+    libraryMetric?: LibraryMetricDraft,
+  ) {
     const revision = ++mutationRevisionRef.current;
     const previous = widget;
     const controlFieldChanged =
@@ -415,6 +419,7 @@ export function DashboardBuilder({
           dashboardId: dashboardRef.current.id,
           widgetId: widget.id,
           definition,
+          libraryMetric,
         }),
       );
       updateDashboard((current) => ({
@@ -431,8 +436,13 @@ export function DashboardBuilder({
       }));
       if (revision === mutationRevisionRef.current) {
         setError(undefined);
-        await refresh();
+        try {
+          await refresh();
+        } catch (caught) {
+          if (revision === mutationRevisionRef.current) setError(message(caught));
+        }
       }
+      return true;
     } catch (caught) {
       if (
         controlFieldChanged &&
@@ -459,6 +469,7 @@ export function DashboardBuilder({
         ),
       }));
       if (revision === mutationRevisionRef.current) setError(message(caught));
+      return false;
     } finally {
       setPendingWidgets((current) => {
         const next = (current[widget.id] ?? 1) - 1;
@@ -532,7 +543,9 @@ export function DashboardBuilder({
           widget={selected}
           dataSources={dataSources}
           onClose={() => setSelectedId(undefined)}
-          onChange={(definition) => updateWidget(selected, definition)}
+          onChange={(definition, libraryMetric) =>
+            updateWidget(selected, definition, libraryMetric)
+          }
           onRemoveEmptyRowAbove={
             dashboard.canvasRows > 10 &&
             selected.layout.y > 0 &&
@@ -980,7 +993,7 @@ function WidgetSettings({
   widget: DashboardWidget;
   dataSources: BuilderDataSource[];
   onClose: () => void;
-  onChange: (definition: WidgetDefinition) => Promise<void>;
+  onChange: (definition: WidgetDefinition, libraryMetric?: LibraryMetricDraft) => Promise<boolean>;
   onRemoveEmptyRowAbove?: () => void;
   onRemoveEmptyRowBelow?: () => void;
 }) {
@@ -1023,6 +1036,12 @@ function WidgetSettings({
     definitionRef.current = next;
     setDefinition(next);
     await onChange(next);
+  }
+
+  function commitMetric(next: WidgetDefinition, libraryMetric?: LibraryMetricDraft) {
+    definitionRef.current = next;
+    setDefinition(next);
+    return onChange(next, libraryMetric);
   }
 
   function setLocalDefinition(next: WidgetDefinition) {
@@ -1203,7 +1222,7 @@ function WidgetSettings({
                 definition={definition}
                 fields={fields}
                 source={source}
-                commit={commit}
+                commit={commitMetric}
                 onEditCalculatedField={editCalculatedField}
               />
               <FilterSettings definition={definition} fields={fields} commit={commit} />
@@ -1613,9 +1632,10 @@ function MetricSettings({
   commit,
   dashboardId,
   onEditCalculatedField,
-}: QuerySettingsProps & {
+}: Omit<QuerySettingsProps, 'commit'> & {
   dashboardId: string;
   source?: SourceDescription;
+  commit: (definition: WidgetDefinition, libraryMetric?: LibraryMetricDraft) => Promise<boolean>;
   onEditCalculatedField: (fieldId: string) => void;
 }) {
   const [formulaOpen, setFormulaOpen] = useState(false);
@@ -1648,13 +1668,13 @@ function MetricSettings({
           itemIndex === index ? nextMetric : item,
         ),
       });
-    return Promise.resolve();
+    return Promise.resolve(false);
   }
-  function addMetric(next: WidgetMetric) {
-    if ('metric' in definition) return commit({ ...definition, metric: next });
+  function addMetric(next: WidgetMetric, libraryMetric?: LibraryMetricDraft) {
+    if ('metric' in definition) return commit({ ...definition, metric: next }, libraryMetric);
     if ('metrics' in definition)
-      return commit({ ...definition, metrics: [...definition.metrics, next] });
-    return Promise.resolve();
+      return commit({ ...definition, metrics: [...definition.metrics, next] }, libraryMetric);
+    return Promise.resolve(false);
   }
   function metricFor(id: string): WidgetMetric {
     const library = source?.libraryMetrics.find((item) => item.id === id);
@@ -1813,9 +1833,9 @@ function MetricSettings({
                 {definition.type === 'table' ? (
                   <ConditionalFormatSettings
                     metric={metric}
-                    onChange={(conditionalFormat) =>
-                      update(index, { ...metric, conditionalFormat })
-                    }
+                    onChange={async (conditionalFormat) => {
+                      await update(index, { ...metric, conditionalFormat });
+                    }}
                   />
                 ) : null}
               </div>
@@ -1844,7 +1864,9 @@ function MetricSettings({
         dashboardId={dashboardId}
         source={source}
         metric={editedIndex === undefined ? undefined : metrics[editedIndex]}
-        onSave={(next) => (editedIndex === undefined ? addMetric(next) : update(editedIndex, next))}
+        onSave={(next, libraryMetric) =>
+          editedIndex === undefined ? addMetric(next, libraryMetric) : update(editedIndex, next)
+        }
       />
     </>
   );

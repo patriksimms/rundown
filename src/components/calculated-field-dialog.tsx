@@ -66,6 +66,7 @@ export function CalculatedFieldDialog({
   const allowClose = useRef(false);
   const typeWasChanged = useRef(false);
   const roleWasChanged = useRef(false);
+  const preserveLoadedDefaults = useRef(Boolean(field));
 
   useEffect(() => {
     if (!open) return;
@@ -82,6 +83,7 @@ export function CalculatedFieldDialog({
     setPreviewValues(undefined);
     typeWasChanged.current = false;
     roleWasChanged.current = false;
+    preserveLoadedDefaults.current = Boolean(field);
     allowClose.current = false;
   }, [open, field]);
 
@@ -100,6 +102,10 @@ export function CalculatedFieldDialog({
     if (!localValidation.valid) return;
     const types = semanticTypesForFormulaType(localValidation.type);
     if (!types.length) return;
+    if (preserveLoadedDefaults.current) {
+      preserveLoadedDefaults.current = false;
+      return;
+    }
     if (!typeWasChanged.current || !types.includes(semanticType)) setSemanticType(types[0]);
     if (!roleWasChanged.current) {
       const nextRole = localValidation.type === 'number' ? 'metric' : 'dimension';
