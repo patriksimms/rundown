@@ -28,7 +28,7 @@ test('a keyboard-only editor selects, edits, and removes a widget', async ({ pag
   await expect(settings.getByRole('heading', { name: 'Media spend' })).toBeVisible();
 
   // Edit through the form
-  const title = settings.getByLabel('Title');
+  const title = settings.getByLabel('Title', { exact: true });
   await tabTo(page, title);
   await page.keyboard.press('ControlOrMeta+a');
   await page.keyboard.type('Spend to date');

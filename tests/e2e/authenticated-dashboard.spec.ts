@@ -35,7 +35,7 @@ test.describe('signed-in dashboard flow', () => {
     // Rename the widget through the builder sidebar.
     await page.getByRole('button', { name: 'Edit Revenue' }).click();
     const settings = page.getByRole('complementary');
-    const title = settings.getByLabel('Title');
+    const title = settings.getByLabel('Title', { exact: true });
     await expect(title).toHaveValue('Revenue');
     await title.fill('Revenue, verified');
     await title.blur();

@@ -24,7 +24,7 @@ test('the inspector releases the widget on Escape and on a canvas click', async 
   await expect(spendSettings).toBeVisible();
 
   // Working inside the inspector keeps the widget selected.
-  await settings.getByLabel('Title').click();
+  await settings.getByLabel('Title', { exact: true }).click();
   await expect(spendSettings).toBeVisible();
 
   await page.keyboard.press('Escape');

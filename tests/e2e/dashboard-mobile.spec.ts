@@ -59,7 +59,7 @@ test('a phone editor edits a widget in a sheet that closes on Escape', async ({ 
   await edit.click();
   const sheet = page.getByRole('dialog');
   await expect(sheet.getByRole('heading', { name: 'Media spend' })).toBeVisible();
-  await expect(sheet.getByLabel('Title')).toHaveValue('Media spend');
+  await expect(sheet.getByLabel('Title', { exact: true })).toHaveValue('Media spend');
 
   await page.keyboard.press('Escape');
   await expect(sheet).toBeHidden();
