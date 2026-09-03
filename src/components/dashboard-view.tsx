@@ -601,8 +601,11 @@ export function Result({
         ? parsedMaximum
         : undefined;
     return (
-      <div className="space-y-2">
-        <p className="text-4xl font-semibold tracking-tight">{formatValue(value, metric)}</p>
+      <div className="@container space-y-2">
+        {/* Fluid size: scales with tile width so long values don't get clipped on small screens */}
+        <p className="text-[clamp(1.25rem,13cqi,2.25rem)] font-semibold tracking-tight">
+          {formatValue(value, metric)}
+        </p>
         {previous !== undefined ? (
           <p className="text-sm text-muted-foreground">Previous: {formatValue(previous, metric)}</p>
         ) : null}
