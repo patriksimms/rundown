@@ -7,6 +7,25 @@ export interface LayoutUpdate {
 
 export const MIN_CANVAS_ROWS = 10;
 
+/** Why a single placement was rejected, with the widget or grid bound that caused it. */
+export type PlacementCheck =
+  | { ok: true }
+  | { ok: false; reason: 'out-of-grid'; placement: DashboardWidget['layout']; columns: number }
+  | { ok: false; reason: 'overlap'; widget: DashboardWidget };
+
+/** Why a whole-layout write was rejected. Widgets are carried so messages can name them. */
+export type LayoutValidation =
+  | { ok: true }
+  | { ok: false; reason: 'duplicate' | 'unknown' | 'missing'; widgetIds: string[] }
+  | {
+      ok: false;
+      reason: 'out-of-grid';
+      widget: DashboardWidget;
+      placement: DashboardWidget['layout'];
+      columns: number;
+    }
+  | { ok: false; reason: 'overlap'; widget: DashboardWidget; other: DashboardWidget };
+
 export function occupiedRowCount(widgets: DashboardWidget[]) {
   return widgets.reduce(
     (bottom, widget) => Math.max(bottom, widget.layout.y + widget.layout.height),
@@ -110,41 +129,64 @@ export function rollbackFailedLayoutState(
   };
 }
 
-export function placementFits(
+/**
+ * Checks a single placement against the grid width and the other widgets, naming what it collides
+ * with so callers can explain the rejection instead of only reporting that something is wrong.
+ */
+export function checkPlacement(
   widgets: DashboardWidget[],
   candidate: DashboardWidget['layout'],
   columns = 12,
   ignoredWidgetId?: string,
-) {
-  if (candidate.x + candidate.width > columns) return false;
-  return widgets.every((widget) => {
-    if (widget.id === ignoredWidgetId) return true;
-    const existing = widget.layout;
-    return (
-      candidate.x + candidate.width <= existing.x ||
-      existing.x + existing.width <= candidate.x ||
-      candidate.y + candidate.height <= existing.y ||
-      existing.y + existing.height <= candidate.y
-    );
+): PlacementCheck {
+  if (candidate.x + candidate.width > columns)
+    return { ok: false, reason: 'out-of-grid', placement: candidate, columns };
+  const collision = widgets.find((widget) => {
+    if (widget.id === ignoredWidgetId) return false;
+    return overlaps(candidate, widget.layout);
   });
+  return collision ? { ok: false, reason: 'overlap', widget: collision } : { ok: true };
 }
 
 export function validateLayoutUpdate(
   widgets: DashboardWidget[],
   updates: LayoutUpdate[],
   columns = 12,
-) {
+): LayoutValidation {
   const expectedIds = new Set(widgets.map((widget) => widget.id));
+  const duplicates = updates
+    .map((update) => update.widgetId)
+    .filter((id, index, ids) => ids.indexOf(id) !== index)
+    .filter((id, index, ids) => ids.indexOf(id) === index);
+  if (duplicates.length) return { ok: false, reason: 'duplicate', widgetIds: duplicates };
+
   const receivedIds = new Set(updates.map((update) => update.widgetId));
-  if (receivedIds.size !== updates.length) return false;
-  if (receivedIds.size !== expectedIds.size) return false;
-  if ([...receivedIds].some((id) => !expectedIds.has(id))) return false;
+  const unknown = [...receivedIds].filter((id) => !expectedIds.has(id));
+  if (unknown.length) return { ok: false, reason: 'unknown', widgetIds: unknown };
+  const missing = [...expectedIds].filter((id) => !receivedIds.has(id));
+  if (missing.length) return { ok: false, reason: 'missing', widgetIds: missing };
 
   const placed = updates.map((update) => ({
     ...widgets.find((widget) => widget.id === update.widgetId)!,
     layout: update.placement,
   }));
-  return placed.every((widget) => placementFits(placed, widget.layout, columns, widget.id));
+  for (const widget of placed) {
+    const check = checkPlacement(placed, widget.layout, columns, widget.id);
+    if (!check.ok)
+      return check.reason === 'out-of-grid'
+        ? { ...check, widget }
+        : { ok: false, reason: 'overlap', widget, other: check.widget };
+  }
+  return { ok: true };
+}
+
+function overlaps(left: DashboardWidget['layout'], right: DashboardWidget['layout']) {
+  return !(
+    left.x + left.width <= right.x ||
+    right.x + right.width <= left.x ||
+    left.y + left.height <= right.y ||
+    right.y + right.height <= left.y
+  );
 }
 
 export function rollbackFailedLayout(

@@ -38,10 +38,12 @@ import {
 } from '#/domain/schema';
 import {
   appendPlacement,
-  placementFits,
+  checkPlacement,
   requiredCanvasRows,
   validateLayoutUpdate,
 } from '#/domain/layout';
+import { widgetLabel } from '#/domain/widget-label';
+import { canvasRowsMessage, layoutMessage, placementMessage } from '#/domain/layout-messages';
 import { canUpdateFieldMetadata, detectFieldSemantics } from '#/domain/field-metadata';
 import { hashJson } from '#/domain/hash';
 import { comparisonDateRange, resolveDateRange, yearToDateRange } from '#/domain/dates';
@@ -370,14 +372,14 @@ async function removeWidget(request: Extract<ApiRequest, { action: 'removeWidget
 async function moveWidget(request: Extract<ApiRequest, { action: 'moveWidget' }>) {
   const access = await authorizeDashboard(request.dashboardId, 'editor');
   const existing = widgetById(access.document, request.widgetId);
-  if (
-    !placementFits(access.document.widgets, request.placement, access.document.columns, existing.id)
-  )
-    throw new ApiError(
-      400,
-      'invalid_placement',
-      'The widget placement overlaps another widget or exceeds the grid.',
-    );
+  const check = checkPlacement(
+    access.document.widgets,
+    request.placement,
+    access.document.columns,
+    existing.id,
+  );
+  if (!check.ok)
+    throw new ApiError(400, 'invalid_placement', placementMessage(check, widgetLabel(existing)));
   const updatedWidget = { ...existing, layout: request.placement };
   const updated = {
     ...access.document,
@@ -396,12 +398,13 @@ async function moveWidget(request: Extract<ApiRequest, { action: 'moveWidget' }>
 
 async function updateLayout(request: Extract<ApiRequest, { action: 'updateLayout' }>) {
   const access = await authorizeDashboard(request.dashboardId, 'editor');
-  if (!validateLayoutUpdate(access.document.widgets, request.placements, access.document.columns))
-    throw new ApiError(
-      400,
-      'invalid_layout',
-      'The layout must include every widget exactly once, fit the canvas and grid, and not overlap.',
-    );
+  const validation = validateLayoutUpdate(
+    access.document.widgets,
+    request.placements,
+    access.document.columns,
+  );
+  if (!validation.ok)
+    throw new ApiError(400, 'invalid_layout', layoutMessage(validation, access.document.widgets));
   const placements = new Map(
     request.placements.map((update) => [update.widgetId, update.placement]),
   );
@@ -410,7 +413,7 @@ async function updateLayout(request: Extract<ApiRequest, { action: 'updateLayout
     layout: placements.get(widget.id)!,
   }));
   if (request.canvasRows < requiredCanvasRows(widgets))
-    throw new ApiError(400, 'invalid_layout', 'The canvas must contain every widget.');
+    throw new ApiError(400, 'invalid_layout', canvasRowsMessage(widgets, request.canvasRows));
   const updated = {
     ...access.document,
     widgets,

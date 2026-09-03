@@ -103,6 +103,7 @@ import {
   rollbackFailedLayoutState,
   rowInsertionCuts,
 } from '#/domain/layout';
+import { widgetLabel } from '#/domain/widget-label';
 import { fieldRoleSchema, textStyleSchema } from '#/domain/schema';
 import type {
   ControlState,
@@ -3117,13 +3118,6 @@ function describeSource(sourceId: string, dashboardId?: string) {
     dataSourceId: sourceId,
     dashboardId,
   });
-}
-
-function widgetLabel(widget: DashboardWidget) {
-  if ('title' in widget.definition) return widget.definition.title;
-  if (widget.definition.type === 'control') return widget.definition.userDefinedName ?? 'Filter';
-  if (widget.definition.type === 'dateControl') return 'Date range';
-  return 'Text';
 }
 
 function message(error: unknown) {
