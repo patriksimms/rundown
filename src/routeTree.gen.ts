@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as HealthRouteImport } from './routes/health'
+import { Route as ImprintRouteImport } from './routes/imprint'
 import { Route as MetricsRouteImport } from './routes/metrics'
 import { Route as ReadyRouteImport } from './routes/ready'
 import { Route as ApiRundownRouteImport } from './routes/api.rundown'
@@ -30,6 +31,11 @@ const IndexRoute = IndexRouteImport.update({
 const HealthRoute = HealthRouteImport.update({
   id: '/health',
   path: '/health',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ImprintRoute = ImprintRouteImport.update({
+  id: '/imprint',
+  path: '/imprint',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MetricsRoute = MetricsRouteImport.update({
@@ -87,6 +93,7 @@ const ApiDatasourceUploadTokenRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/health': typeof HealthRoute
+  '/imprint': typeof ImprintRoute
   '/metrics': typeof MetricsRoute
   '/ready': typeof ReadyRoute
   '/api/rundown': typeof ApiRundownRoute
@@ -101,6 +108,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/health': typeof HealthRoute
+  '/imprint': typeof ImprintRoute
   '/metrics': typeof MetricsRoute
   '/ready': typeof ReadyRoute
   '/api/rundown': typeof ApiRundownRoute
@@ -116,6 +124,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/health': typeof HealthRoute
+  '/imprint': typeof ImprintRoute
   '/metrics': typeof MetricsRoute
   '/ready': typeof ReadyRoute
   '/api/rundown': typeof ApiRundownRoute
@@ -132,6 +141,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/health'
+    | '/imprint'
     | '/metrics'
     | '/ready'
     | '/api/rundown'
@@ -146,6 +156,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/health'
+    | '/imprint'
     | '/metrics'
     | '/ready'
     | '/api/rundown'
@@ -160,6 +171,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/health'
+    | '/imprint'
     | '/metrics'
     | '/ready'
     | '/api/rundown'
@@ -175,6 +187,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   HealthRoute: typeof HealthRoute
+  ImprintRoute: typeof ImprintRoute
   MetricsRoute: typeof MetricsRoute
   ReadyRoute: typeof ReadyRoute
   ApiRundownRoute: typeof ApiRundownRoute
@@ -201,6 +214,13 @@ declare module '@tanstack/react-router' {
       path: '/health'
       fullPath: '/health'
       preLoaderRoute: typeof HealthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/imprint': {
+      id: '/imprint'
+      path: '/imprint'
+      fullPath: '/imprint'
+      preLoaderRoute: typeof ImprintRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/metrics': {
@@ -279,6 +299,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   HealthRoute: HealthRoute,
+  ImprintRoute: ImprintRoute,
   MetricsRoute: MetricsRoute,
   ReadyRoute: ReadyRoute,
   ApiRundownRoute: ApiRundownRoute,

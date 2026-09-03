@@ -9,7 +9,7 @@ test('the signed-out product shell is usable', async ({ page }) => {
   await expect(
     page.getByRole('heading', {
       level: 1,
-      name: 'Describe the report. Fine-tune it in the browser.',
+      name: 'Describe the report. Fine-tune in the editor.',
     }),
   ).toBeVisible();
   await expect(page.getByRole('banner').getByRole('button', { name: 'Sign in' })).toBeVisible();
@@ -18,6 +18,21 @@ test('the signed-out product shell is usable', async ({ page }) => {
     page.getByRole('main').getByRole('button', { name: 'Create account' }).first(),
   ).toBeVisible();
   await expect(page.getByText('Client reporting without the rebuild')).toBeVisible();
+  await expect(page.getByRole('contentinfo').getByRole('link', { name: 'Imprint' })).toBeVisible();
+});
+
+test('the footer links to the imprint', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('contentinfo').getByRole('link', { name: 'Imprint' }).click();
+
+  await expect(page).toHaveURL('/imprint');
+  await expect(page).toHaveTitle('Imprint | Rundown');
+  await expect(page.getByRole('heading', { level: 1, name: 'Imprint' })).toBeVisible();
+  await expect(page.getByText('Patrik Simms')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'patriksimms@outlook.de' })).toHaveAttribute(
+    'href',
+    'mailto:patriksimms@outlook.de',
+  );
 });
 
 test('authentication opens in place and closing it preserves the URL', async ({ page }) => {

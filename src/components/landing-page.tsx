@@ -3,6 +3,7 @@ import { BrowserFrame } from '#/components/browser-frame';
 import { Button } from '#/components/ui/button';
 import { cn } from '#/lib/utils';
 import { usePageTitle } from '#/lib/page-title';
+import { Link } from '@tanstack/react-router';
 
 const claims = [
   {
@@ -71,7 +72,7 @@ export function LandingPage() {
             Client reporting without the rebuild
           </p>
           <h1 className="mt-3 text-4xl font-semibold tracking-tight text-balance sm:text-6xl">
-            Describe the report. Fine-tune it in the browser.
+            Describe the report. Fine-tune in the editor.
           </h1>
           <p className="mt-5 max-w-2xl text-base leading-7 text-muted-foreground">
             Rundown turns reporting intent into query-backed dashboards while keeping every formula,
@@ -170,9 +171,15 @@ export function LandingPage() {
           </div>
         </div>
       </section>
-
-      <footer className="mx-auto w-full max-w-7xl px-4 py-8 text-sm text-muted-foreground sm:px-6">
-        Rundown
+      <footer
+        className="mx-auto flex w-full max-w-7xl items-center gap-2 px-4 py-8 text-sm text-muted-foreground sm:px-6"
+        role="contentinfo"
+      >
+        <span>Rundown</span>
+        <span aria-hidden="true">·</span>
+        <Link className="hover:text-foreground hover:underline" to="/imprint">
+          Imprint
+        </Link>
       </footer>
     </main>
   );
