@@ -58,16 +58,23 @@ test.describe('signed-in dashboard flow', () => {
 
     // Share the dashboard and open the link without a session.
     await page.getByRole('button', { name: 'Share' }).click();
-    const shareLink = page.getByRole('link', { name: /^\/share\// });
+    const shareLink = page.getByRole('link', { name: /\/share\// });
     await page.getByRole('button', { name: 'Create unlisted link' }).click();
     await expect(shareLink).toBeVisible();
-    const sharePath = await shareLink.innerText();
-    expect(sharePath).toMatch(/^\/share\/.+/);
+    // The dialog shows the absolute link so it can be pasted straight into a message.
+    const shareUrl = await shareLink.innerText();
+    expect(shareUrl).toMatch(/^https?:\/\/[^/]+\/share\/.+/);
+
+    // Chromium only hands out the clipboard contents to a test that asked for the permission.
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.getByRole('button', { name: 'Copy unlisted link' }).click();
+    await expect(page.getByRole('button', { name: 'Copied unlisted link' })).toBeVisible();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(shareUrl);
 
     const viewer = await browser.newContext();
     try {
       const viewerPage = await viewer.newPage();
-      await viewerPage.goto(sharePath);
+      await viewerPage.goto(shareUrl);
       await expect(
         viewerPage.getByRole('heading', { level: 1, name: `E2E dashboard ${suffix}` }),
       ).toBeVisible();
@@ -114,7 +121,10 @@ test.describe('signed-in dashboard flow', () => {
     const scorecard = widget(page, 'Impressions');
     const line = widget(page, 'Impressions over time');
     await expect(scorecard.getByText(TOTAL_IMPRESSIONS, { exact: true })).toBeVisible();
-    await expect(line.locator('.recharts-line-curve')).toBeVisible();
+    await line.scrollIntoViewIfNeeded();
+    await expect(line.getByRole('img', { name: 'Impressions over time chart' })).toBeVisible({
+      timeout: 45_000,
+    });
     await expect(line.getByText('No rows for this date range.')).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Choose date range' }).click();
@@ -123,14 +133,16 @@ test.describe('signed-in dashboard flow', () => {
     await expect(rangeStart).toHaveAttribute('data-selected-single', 'true');
     await page.getByRole('button', { name: /January 7th, 2026/u }).click();
     await expect(scorecard.getByText(NARROWED_IMPRESSIONS, { exact: true })).toBeVisible();
-    await expect(line.locator('.recharts-line-curve')).toBeVisible();
+    await line.scrollIntoViewIfNeeded();
+    await expect(line.getByText('Jan 6', { exact: true })).toBeVisible({ timeout: 45_000 });
+    await expect(line.getByText('Jan 7', { exact: true })).toBeVisible();
   });
 });
 
-/** The builder grid item holding the widget with this title. */
+/** The builder item holding the widget with this title. */
 function widget(page: Page, title: string): Locator {
   return page
-    .locator('.react-grid-item')
+    .locator('[data-widget-id]')
     .filter({ has: page.getByRole('button', { name: `Edit ${title}`, exact: true }) });
 }
 

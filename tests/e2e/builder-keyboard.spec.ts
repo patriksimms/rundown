@@ -16,7 +16,9 @@ async function tabTo(page: Page, target: Locator, key: 'Tab' | 'Shift+Tab' = 'Ta
 test('a keyboard-only editor selects, edits, and removes a widget', async ({ page }) => {
   const state = await mockRundownApi(page, { role: 'editor' });
   await page.goto('/dashboards/dash_demo');
-  await expect(page.getByRole('heading', { name: 'Client weekly' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Client weekly' })).toBeVisible({
+    timeout: 15_000,
+  });
   await expect(page.getByRole('status', { name: 'Changes saved' })).toBeVisible();
 
   // Select

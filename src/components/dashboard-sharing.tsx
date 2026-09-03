@@ -1,5 +1,5 @@
-import { Trash2Icon } from 'lucide-react';
-import { useState, type FormEvent } from 'react';
+import { CheckIcon, CopyIcon, Trash2Icon } from 'lucide-react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { callApi } from '#/api/client';
 import { Button } from '#/components/ui/button';
 import {
@@ -39,6 +39,25 @@ export function DashboardSharing({
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<'viewer' | 'editor'>('viewer');
   const [message, setMessage] = useState<string>();
+  const [copiedToken, setCopiedToken] = useState<string>();
+  // The service returns share paths; the origin only exists in the browser, so it fills in
+  // after hydration and the displayed link stays a full URL people can paste anywhere.
+  const [origin, setOrigin] = useState('');
+  useEffect(() => setOrigin(window.location.origin), []);
+  useEffect(() => {
+    if (!copiedToken) return;
+    const timer = setTimeout(() => setCopiedToken(undefined), 2000);
+    return () => clearTimeout(timer);
+  }, [copiedToken]);
+  async function copyLink(token: string, url: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+      setMessage(undefined);
+      setCopiedToken(token);
+    } catch (caught) {
+      setMessage(caught instanceof Error ? caught.message : String(caught));
+    }
+  }
   async function mutate(action: () => Promise<void>, success: string) {
     setMessage(undefined);
     try {
@@ -91,31 +110,43 @@ export function DashboardSharing({
           >
             Create unlisted link
           </Button>
-          {sharing.links.map((link) => (
-            <div className="flex items-center gap-3" key={link.token}>
-              <a className="min-w-0 flex-1 break-all text-sm underline" href={link.url}>
-                {link.url}
-              </a>
-              <Button
-                aria-label="Revoke unlisted link"
-                size="icon-sm"
-                variant="ghost"
-                onClick={() =>
-                  void mutate(
-                    () =>
-                      callApi({
-                        action: 'shareDashboard',
-                        dashboardId,
-                        operation: { kind: 'revokeLink', token: link.token },
-                      }),
-                    'Revoked the unlisted link.',
-                  )
-                }
-              >
-                <Trash2Icon />
-              </Button>
-            </div>
-          ))}
+          {sharing.links.map((link) => {
+            const shareUrl = `${origin}${link.url}`;
+            const copied = copiedToken === link.token;
+            return (
+              <div className="flex items-center gap-3" key={link.token}>
+                <a className="min-w-0 flex-1 break-all text-sm underline" href={link.url}>
+                  {shareUrl}
+                </a>
+                <Button
+                  aria-label={copied ? 'Copied unlisted link' : 'Copy unlisted link'}
+                  size="icon-sm"
+                  variant="ghost"
+                  onClick={() => void copyLink(link.token, shareUrl)}
+                >
+                  {copied ? <CheckIcon /> : <CopyIcon />}
+                </Button>
+                <Button
+                  aria-label="Revoke unlisted link"
+                  size="icon-sm"
+                  variant="ghost"
+                  onClick={() =>
+                    void mutate(
+                      () =>
+                        callApi({
+                          action: 'shareDashboard',
+                          dashboardId,
+                          operation: { kind: 'revokeLink', token: link.token },
+                        }),
+                      'Revoked the unlisted link.',
+                    )
+                  }
+                >
+                  <Trash2Icon />
+                </Button>
+              </div>
+            );
+          })}
         </div>
         <Separator />
         <form onSubmit={grant}>

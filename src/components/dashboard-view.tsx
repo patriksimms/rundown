@@ -601,8 +601,11 @@ export function Result({
         ? parsedMaximum
         : undefined;
     return (
-      <div className="space-y-2">
-        <p className="text-4xl font-semibold tracking-tight">{formatValue(value, metric)}</p>
+      <div className="@container space-y-2">
+        {/* Fluid size: scales with tile width so long values don't get clipped on small screens */}
+        <p className="text-[clamp(1.25rem,13cqi,2.25rem)] font-semibold tracking-tight">
+          {formatValue(value, metric)}
+        </p>
         {previous !== undefined ? (
           <p className="text-sm text-muted-foreground">Previous: {formatValue(previous, metric)}</p>
         ) : null}
@@ -933,6 +936,8 @@ export function Result({
   if (definition.type === 'pie')
     return (
       <ChartContainer
+        role="img"
+        aria-label={`${definition.title} chart`}
         className="mx-auto aspect-square max-h-72 md:h-full md:max-h-full md:min-h-0"
         config={config}
       >
@@ -943,6 +948,7 @@ export function Result({
             dataKey={series[0]?.key ?? ''}
             nameKey={pieLegendKey}
             fill={`var(--color-${series[0]?.key ?? ''})`}
+            isAnimationActive={false}
           />
           <ChartLegend content={<ChartLegendContent nameKey={pieLegendKey} />} />
         </PieChart>
@@ -950,7 +956,12 @@ export function Result({
     );
   if (definition.type === 'bar')
     return (
-      <ChartContainer className="h-72 w-full md:h-full md:min-h-0" config={config}>
+      <ChartContainer
+        role="img"
+        aria-label={`${definition.title} chart`}
+        className="h-72 w-full md:h-full md:min-h-0"
+        config={config}
+      >
         <BarChart data={chartRows}>
           <CartesianGrid vertical={false} />
           <XAxis
@@ -965,6 +976,7 @@ export function Result({
               dataKey={item.key}
               fill={`var(--color-${item.key})`}
               fillOpacity={item.isComparison ? 0.5 : 1}
+              isAnimationActive={false}
             />
           ))}
           <ChartLegend content={<ChartLegendContent />} />
@@ -973,7 +985,12 @@ export function Result({
     );
   const axes = lineChartAxes(chartMetrics);
   return (
-    <ChartContainer className="h-72 w-full md:h-full md:min-h-0" config={config}>
+    <ChartContainer
+      role="img"
+      aria-label={`${definition.title} chart`}
+      className="h-72 w-full md:h-full md:min-h-0"
+      config={config}
+    >
       <LineChart data={chartRows}>
         <CartesianGrid vertical={false} />
         <XAxis
@@ -997,6 +1014,7 @@ export function Result({
             stroke={`var(--color-${item.key})`}
             strokeDasharray={item.isComparison ? '4 4' : undefined}
             dot={false}
+            isAnimationActive={false}
           />
         ))}
         <ChartLegend content={<ChartLegendContent />} />

@@ -157,6 +157,20 @@ Browser uploads stream through the Worker into its R2 binding. No bucket CORS po
 URL is needed. Managed CSV uploads convert to Parquet inside the query container before Rundown
 registers the datasource.
 
+## Landing page screenshots
+
+`public/landing/*.png` are captured from the running app, not drawn by hand:
+
+```sh
+bun run dev
+CLERK_SECRET_KEY=... bun run scripts/capture-landing.ts
+```
+
+The script signs in to the Clerk development instance with a sign-in token, seeds a demo datasource
+and dashboard from `scripts/landing-demo-data.ts`, shares the dashboard, and writes the shared view
+and the field metadata screen to `public/landing`. Reset the local environment before changing the
+demo data, because datasource names are unique per workspace.
+
 ## Environment reset
 
 The reset command requires an environment and `RESET_ADMIN_TOKEN`:

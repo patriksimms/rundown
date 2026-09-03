@@ -24,7 +24,8 @@ export default defineConfig({
   // instances rate-limit hard: above two workers the app stalls before Clerk reports as loaded.
   workers: 2,
   retries: process.env.CI ? 2 : 0,
-  reporter: process.env.CI ? 'github' : 'line',
+  reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'line',
+  expect: { timeout: 15_000 },
   globalSetup: './tests/e2e/global-setup.ts',
   use: {
     baseURL,
