@@ -58,16 +58,23 @@ test.describe('signed-in dashboard flow', () => {
 
     // Share the dashboard and open the link without a session.
     await page.getByRole('button', { name: 'Share' }).click();
-    const shareLink = page.getByRole('link', { name: /^\/share\// });
+    const shareLink = page.getByRole('link', { name: /\/share\// });
     await page.getByRole('button', { name: 'Create unlisted link' }).click();
     await expect(shareLink).toBeVisible();
-    const sharePath = await shareLink.innerText();
-    expect(sharePath).toMatch(/^\/share\/.+/);
+    // The dialog shows the absolute link so it can be pasted straight into a message.
+    const shareUrl = await shareLink.innerText();
+    expect(shareUrl).toMatch(/^https?:\/\/[^/]+\/share\/.+/);
+
+    // Chromium only hands out the clipboard contents to a test that asked for the permission.
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.getByRole('button', { name: 'Copy unlisted link' }).click();
+    await expect(page.getByRole('button', { name: 'Copied unlisted link' })).toBeVisible();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(shareUrl);
 
     const viewer = await browser.newContext();
     try {
       const viewerPage = await viewer.newPage();
-      await viewerPage.goto(sharePath);
+      await viewerPage.goto(shareUrl);
       await expect(
         viewerPage.getByRole('heading', { level: 1, name: `E2E dashboard ${suffix}` }),
       ).toBeVisible();

@@ -43,7 +43,7 @@ test('authentication opens in place and closing it preserves the URL', async ({ 
 test('the landing page serves both product screenshots', async ({ page }) => {
   await page.goto('/');
 
-  for (const name of [/Rundown dashboard/, /Rundown datasources screen/]) {
+  for (const name of [/Rundown dashboard/, /Rundown datasource screen/]) {
     const screenshot = page.getByRole('img', { name });
     await expect(screenshot).toBeAttached();
     await expect
