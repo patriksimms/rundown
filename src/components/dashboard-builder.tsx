@@ -655,7 +655,9 @@ export function DashboardBuilder({
                       margin={[8, 8]}
                       rows={gridRows}
                       color="color-mix(in srgb, var(--color-muted) 96%, var(--color-foreground) 4%)"
-                      borderRadius={6}
+                      // Numeric prop, so --radius-xl (0.625rem * 1.4) is inlined here to keep the
+                      // empty cells on the same radius as the widget cards that land on them.
+                      borderRadius={14}
                     />
                     {insertionCuts.map((cut) => (
                       <RowInsertionControl
@@ -1144,6 +1146,7 @@ function WidgetSettings({
             legend="Text style"
             value={definition.textStyle}
             onChange={(textStyle) => void commit({ ...definition, textStyle })}
+            hasFreeHeight
           />
         </>
       ) : null}
@@ -1437,6 +1440,12 @@ const textStyleFields = [
   { key: 'transform', label: 'Case', options: { none: 'As typed', uppercase: 'Uppercase' } },
   { key: 'align', label: 'Align', options: { left: 'Left', center: 'Center', right: 'Right' } },
   {
+    key: 'verticalAlign',
+    label: 'Vertical',
+    options: { top: 'Top', center: 'Middle', bottom: 'Bottom' },
+    needsFreeHeight: true,
+  },
+  {
     key: 'tone',
     label: 'Tone',
     options: { default: 'Normal', muted: 'Muted', primary: 'Accent' },
@@ -1449,6 +1458,8 @@ const textStyleFields = [
   label: string;
   options: Record<string, string>;
   swatches?: Record<string, string>;
+  // Set on properties that only make sense when the element can grow taller than its text.
+  needsFreeHeight?: boolean;
 }>;
 
 // The option previews itself by running through the same mapping that styles the real widget, so a
@@ -1466,10 +1477,13 @@ function TextStyleSettings({
   legend,
   value,
   onChange,
+  hasFreeHeight = false,
 }: {
   legend: string;
   value: TextStyle | undefined;
   onChange: (style: TextStyle | undefined) => void;
+  /** Whether the styled element fills its widget, which is what makes vertical alignment do anything. */
+  hasFreeHeight?: boolean;
 }) {
   const update = (key: keyof TextStyle, selected: string | null) => {
     const draft: Record<string, string | undefined> = { ...value };
@@ -1482,60 +1496,62 @@ function TextStyleSettings({
     <Field>
       <FieldLabel>{legend}</FieldLabel>
       <div className="grid grid-cols-2 gap-2">
-        {textStyleFields.map((setting) => {
-          const options: Record<string, string> = setting.options;
-          const swatches: Record<string, string> | undefined =
-            'swatches' in setting ? setting.swatches : undefined;
-          // `w-full` is what lets the align preview work: the label fills the row, so `text-right`
-          // actually moves it. The other properties are unaffected by the extra width.
-          const optionContent = (option: string, preview: boolean) => (
-            <>
-              {/* The empty slot for the unset option keeps every label in the list on one line. */}
-              {swatches ? (
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    'size-2.5 shrink-0 rounded-full',
-                    swatches[option] ?? 'bg-transparent',
-                  )}
-                />
-              ) : null}
-              <span className={cn('w-full', preview && textStylePreview(setting.key, option))}>
-                {options[option] ?? 'Default'}
-              </span>
-            </>
-          );
-          return (
-            <div key={setting.key} className="grid gap-1">
-              <span className="text-xs text-muted-foreground">{setting.label}</span>
-              <Select
-                value={value?.[setting.key] ?? ''}
-                onValueChange={(selected) => update(setting.key, selected)}
-              >
-                <SelectTrigger
-                  aria-label={`${legend}: ${setting.label.toLowerCase()}`}
-                  className="w-full"
+        {textStyleFields
+          .filter((setting) => hasFreeHeight || !('needsFreeHeight' in setting))
+          .map((setting) => {
+            const options: Record<string, string> = setting.options;
+            const swatches: Record<string, string> | undefined =
+              'swatches' in setting ? setting.swatches : undefined;
+            // `w-full` is what lets the align preview work: the label fills the row, so `text-right`
+            // actually moves it. The other properties are unaffected by the extra width.
+            const optionContent = (option: string, preview: boolean) => (
+              <>
+                {/* The empty slot for the unset option keeps every label in the list on one line. */}
+                {swatches ? (
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      'size-2.5 shrink-0 rounded-full',
+                      swatches[option] ?? 'bg-transparent',
+                    )}
+                  />
+                ) : null}
+                <span className={cn('w-full', preview && textStylePreview(setting.key, option))}>
+                  {options[option] ?? 'Default'}
+                </span>
+              </>
+            );
+            return (
+              <div key={setting.key} className="grid gap-1">
+                <span className="text-xs text-muted-foreground">{setting.label}</span>
+                <Select
+                  value={value?.[setting.key] ?? ''}
+                  onValueChange={(selected) => update(setting.key, selected)}
                 >
-                  {/* The trigger stays at the control's own size so the two columns keep an even
+                  <SelectTrigger
+                    aria-label={`${legend}: ${setting.label.toLowerCase()}`}
+                    className="w-full"
+                  >
+                    {/* The trigger stays at the control's own size so the two columns keep an even
                       height. Only the options preview themselves. */}
-                  <SelectValue>
-                    {(selected: string | null) => optionContent(selected ?? '', false)}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent className="min-w-40" align="start" alignItemWithTrigger={false}>
-                  <SelectGroup>
-                    <SelectItem value="">{optionContent('', false)}</SelectItem>
-                    {Object.keys(options).map((option) => (
-                      <SelectItem key={option} value={option}>
-                        {optionContent(option, true)}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-          );
-        })}
+                    <SelectValue>
+                      {(selected: string | null) => optionContent(selected ?? '', false)}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent className="min-w-40" align="start" alignItemWithTrigger={false}>
+                    <SelectGroup>
+                      <SelectItem value="">{optionContent('', false)}</SelectItem>
+                      {Object.keys(options).map((option) => (
+                        <SelectItem key={option} value={option}>
+                          {optionContent(option, true)}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </div>
+            );
+          })}
       </div>
     </Field>
   );

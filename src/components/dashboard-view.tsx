@@ -31,7 +31,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '#/components/ui/popover
 import { Skeleton } from '#/components/ui/skeleton';
 import { widgetQueryRequest } from '#/domain/widget-query';
 import { cn } from '#/lib/utils';
-import { textStyleClasses } from '#/domain/text-style';
+import { textBoxClasses, textStyleClasses } from '#/domain/text-style';
 import { colorsPerCategory, paletteColor } from '#/domain/chart-colors';
 import { controlDefaultValues, toggleControlValue } from '#/domain/control-state';
 import {
@@ -169,7 +169,14 @@ function Widget({
   if (widget.definition.type === 'text')
     return (
       <Card>
-        <CardContent className="pt-(--card-spacing)">
+        {/* The card is stretched to its grid row, so the content takes the leftover height and the
+            stored vertical alignment decides where the text sits in it. */}
+        <CardContent
+          className={cn(
+            'flex flex-1 flex-col pt-(--card-spacing)',
+            textBoxClasses(widget.definition.textStyle),
+          )}
+        >
           <p className={cn('whitespace-pre-wrap', textStyleClasses(widget.definition.textStyle))}>
             {richText(widget.definition.content.document)}
           </p>

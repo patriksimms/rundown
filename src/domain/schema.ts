@@ -71,6 +71,8 @@ export const textStyleSchema = z.object({
   weight: z.enum(['normal', 'medium', 'semibold', 'bold']).optional(),
   transform: z.enum(['none', 'uppercase']).optional(),
   align: z.enum(['left', 'center', 'right']).optional(),
+  // Only meaningful for elements that own free vertical space, which today is the text widget.
+  verticalAlign: z.enum(['top', 'center', 'bottom']).optional(),
   tone: z.enum(['default', 'muted', 'primary']).optional(),
 });
 // One shared instance so the emitted WebMCP JSON Schema references it instead of inlining a copy

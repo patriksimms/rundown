@@ -22,6 +22,14 @@ const transforms = { none: 'normal-case', uppercase: 'uppercase tracking-wide' }
 
 const alignments = { left: 'text-left', center: 'text-center', right: 'text-right' } as const;
 
+// Vertical alignment moves the text inside its box rather than styling the text, so it maps to
+// flex classes for the container and is kept out of `textStyleClasses`.
+const verticalAlignments = {
+  top: 'justify-start',
+  center: 'justify-center',
+  bottom: 'justify-end',
+} as const;
+
 const tones = {
   default: 'text-foreground',
   muted: 'text-muted-foreground',
@@ -42,4 +50,13 @@ export function textStyleClasses(style: TextStyle | undefined) {
     style.tone && tones[style.tone],
   ].filter(Boolean);
   return classes.length ? classes.join(' ') : undefined;
+}
+
+/**
+ * Classes for the box around a text block, which is where vertical alignment has to live: the
+ * element that owns the leftover height, not the text itself. The caller supplies the flex column,
+ * this only picks where the text sits inside it.
+ */
+export function textBoxClasses(style: TextStyle | undefined) {
+  return style?.verticalAlign ? verticalAlignments[style.verticalAlign] : undefined;
 }
