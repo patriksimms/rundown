@@ -12,6 +12,9 @@ export interface DatasourceDescription {
     semanticType: SemanticType;
     defaultAggregation: Aggregation | null;
     description: string | null;
+    castTo?: string | null;
+    sampleValues?: unknown[] | null;
+    cardinality?: number | null;
   }>;
   calculatedFields: Array<{
     id: string;
@@ -51,6 +54,8 @@ export interface DatasourceFieldRow {
   /** Raw fields are patched by column name; library metrics belong to the metric library. */
   columnName?: string;
   editable: boolean;
+  sampleValues?: unknown[] | null;
+  cardinality?: number | null;
 }
 
 export const datasourceFieldOriginLabels: Record<DatasourceFieldOrigin, string> = {
@@ -79,6 +84,8 @@ export function datasourceFieldRows(description: DatasourceDescription): Datasou
       expression: '',
       columnName: field.columnName,
       editable: true,
+      sampleValues: field.sampleValues,
+      cardinality: field.cardinality,
     })),
     ...description.calculatedFields.map((field) => ({
       key: `calculated:${field.id}`,

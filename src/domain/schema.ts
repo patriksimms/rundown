@@ -326,6 +326,7 @@ export const dataSourceLocationSchema = z.object({
 export type DashboardDocument = z.infer<typeof dashboardDocumentSchema>;
 export type DashboardWidget = z.infer<typeof dashboardWidgetSchema>;
 export type WidgetDefinition = z.infer<typeof widgetDefinitionSchema>;
+export type WidgetMetric = z.infer<typeof metricSchema>;
 export type DateGranularity = z.infer<typeof dateGranularitySchema>;
 export type ControlState = z.infer<typeof controlStateSchema>;
 export type DateRange = z.infer<typeof dateRangeSchema>;

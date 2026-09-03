@@ -31,7 +31,7 @@ test('a phone browses datasources and edits a field without scrolling sideways',
   await page.getByLabel('Sort fields by').selectOption('label');
   await expect(page.getByRole('listitem').first()).toContainText('Campaign');
   await page.getByRole('button', { name: 'Sort descending' }).click();
-  await expect(page.getByRole('listitem').first()).toContainText('Platform');
+  await expect(page.getByRole('listitem').first()).toContainText('VTR');
 
   const saved = page.waitForResponse(
     (response) =>

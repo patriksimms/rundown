@@ -23,12 +23,13 @@ import {
   PlusIcon,
   Settings2Icon,
   SigmaIcon,
+  SquareFunctionIcon,
   Table2Icon,
   Trash2Icon,
   XIcon,
   type LucideIcon,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import GridLayout, {
   noCompactor,
   useContainerWidth,
@@ -38,7 +39,9 @@ import GridLayout, {
 import { GridBackground } from 'react-grid-layout/extras';
 import { callApi } from '#/api/client';
 import { DateRangePicker } from '#/components/date-range-picker';
+import { CalculatedFieldDialog } from '#/components/calculated-field-dialog';
 import { DashboardWidgetView, initialControlState } from '#/components/dashboard-view';
+import { MetricFormulaDialog } from '#/components/metric-formula-dialog';
 import { Alert, AlertDescription } from '#/components/ui/alert';
 import { Button } from '#/components/ui/button';
 import {
@@ -59,7 +62,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '#/components/ui/dialog';
-import { Field, FieldDescription, FieldGroup, FieldLabel } from '#/components/ui/field';
+import { Field, FieldDescription, FieldLabel } from '#/components/ui/field';
 import { Input } from '#/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '#/components/ui/native-select';
 import { Popover, PopoverContent, PopoverTrigger } from '#/components/ui/popover';
@@ -104,6 +107,7 @@ import {
   rowInsertionCuts,
 } from '#/domain/layout';
 import { widgetLabel } from '#/domain/widget-label';
+import type { DatasourceDescription, DatasourceFieldRow } from '#/domain/datasource-fields';
 import { fieldRoleSchema, textStyleSchema } from '#/domain/schema';
 import type {
   ControlState,
@@ -117,6 +121,7 @@ import type {
   SemanticType,
   TextStyle,
   WidgetDefinition,
+  WidgetMetric,
 } from '#/domain/schema';
 
 export interface BuilderDataSource {
@@ -126,31 +131,10 @@ export interface BuilderDataSource {
 
 export type DashboardSaveStatus = 'saved' | 'saving' | 'error';
 
-interface SourceField {
-  id: string;
-  label: string;
-  canonicalName: string;
-  role: FieldRole;
-  semanticType: SemanticType;
-  description?: string | null;
-  columnName?: string;
-  expression?: string;
-  defaultAggregation?: Aggregation | null;
-}
-
-interface SourceDescription {
-  id: string;
-  name: string;
-  fields: SourceField[];
-  calculatedFields: SourceField[];
-  libraryMetrics: Array<{
-    id: string;
-    name: string;
-    expression: string;
-    semanticType: SemanticType;
-    description?: string | null;
-  }>;
-}
+type SourceField =
+  | DatasourceDescription['fields'][number]
+  | DatasourceDescription['calculatedFields'][number];
+type SourceDescription = DatasourceDescription;
 
 type BuilderType = WidgetDefinition['type'];
 
@@ -1003,8 +987,8 @@ function WidgetSettings({
   const [definition, setDefinition] = useState(widget.definition);
   const [source, setSource] = useState<SourceDescription>();
   const [sourceOpen, setSourceOpen] = useState(false);
-  const [formulaOpen, setFormulaOpen] = useState(false);
-  const [dimensionOpen, setDimensionOpen] = useState(false);
+  const [fieldEditorOpen, setFieldEditorOpen] = useState(false);
+  const [editedField, setEditedField] = useState<DatasourceFieldRow>();
   const [settingsError, setSettingsError] = useState<string>();
   const sourceRequestRef = useRef(0);
   const definitionRef = useRef(widget.definition);
@@ -1065,6 +1049,15 @@ function WidgetSettings({
   }
 
   const fields = [...(source?.fields ?? []), ...(source?.calculatedFields ?? [])];
+
+  /** Opens the formula editor on an existing calculated field the widget already references. */
+  function editCalculatedField(fieldId: string) {
+    const calculated = source?.calculatedFields.find((item) => item.id === fieldId);
+    if (!calculated) return;
+    setEditedField(calculatedFieldRow(calculated));
+    setFieldEditorOpen(true);
+  }
+
   return (
     <div className="flex flex-col gap-5">
       <div className="flex items-center gap-2">
@@ -1186,7 +1179,7 @@ function WidgetSettings({
             <FieldPicker
               label="Field"
               value={definition.fieldId}
-              fields={fields.filter((field) => field.role !== 'metric')}
+              fields={fieldChoices(fields.filter((field) => field.role !== 'metric'))}
               onChange={(fieldId) =>
                 void commit({ ...definition, fieldId, defaultValues: undefined })
               }
@@ -1196,16 +1189,22 @@ function WidgetSettings({
               <FieldPicker
                 label="Date field"
                 value={definition.dateRangeFieldId}
-                fields={fields.filter((field) => field.semanticType === 'date')}
+                fields={fieldChoices(fields.filter((field) => field.semanticType === 'date'))}
                 onChange={(dateRangeFieldId) => void commit({ ...definition, dateRangeFieldId })}
               />
-              <DimensionSettings definition={definition} fields={fields} commit={commit} />
+              <DimensionSettings
+                definition={definition}
+                fields={fields}
+                commit={commit}
+                onEditCalculatedField={editCalculatedField}
+              />
               <MetricSettings
+                dashboardId={dashboardId}
                 definition={definition}
                 fields={fields}
                 source={source}
                 commit={commit}
-                onCreate={() => setFormulaOpen(true)}
+                onEditCalculatedField={editCalculatedField}
               />
               <FilterSettings definition={definition} fields={fields} commit={commit} />
               <TypeSettings
@@ -1218,7 +1217,10 @@ function WidgetSettings({
                 className="justify-self-start"
                 variant="outline"
                 size="sm"
-                onClick={() => setDimensionOpen(true)}
+                onClick={() => {
+                  setEditedField(undefined);
+                  setFieldEditorOpen(true);
+                }}
               >
                 <PlusIcon data-icon="inline-start" /> New field
               </Button>
@@ -1233,21 +1235,16 @@ function WidgetSettings({
               onRefresh={() => describeSource(source.id, dashboardId).then(setSource)}
             />
           ) : null}
-          <MetricFormulaDialog
-            open={formulaOpen}
-            onOpenChange={setFormulaOpen}
-            dashboardId={dashboardId}
-            definition={definition}
-            source={source}
-            onSave={commit}
-          />
-          <CalculatedFieldDialog
-            open={dimensionOpen}
-            onOpenChange={setDimensionOpen}
-            dashboardId={dashboardId}
-            sourceId={definition.dataSourceId}
-            onSaved={() => describeSource(definition.dataSourceId, dashboardId).then(setSource)}
-          />
+          {source ? (
+            <CalculatedFieldDialog
+              open={fieldEditorOpen}
+              onOpenChange={setFieldEditorOpen}
+              dashboardId={dashboardId}
+              datasource={source}
+              field={editedField}
+              onSaved={() => describeSource(definition.dataSourceId, dashboardId).then(setSource)}
+            />
+          ) : null}
         </>
       ) : null}
     </div>
@@ -1287,14 +1284,14 @@ function LayoutNumberInput({
   );
 }
 
-function DimensionSettings({ definition, fields, commit }: QuerySettingsProps) {
+function DimensionSettings({
+  definition,
+  fields,
+  commit,
+  onEditCalculatedField,
+}: QuerySettingsProps & { onEditCalculatedField: (fieldId: string) => void }) {
   const dimensions = fields.filter((field) => field.role === 'dimension');
-  const choices = dimensions.map((field) => ({
-    id: field.id,
-    label: field.label,
-    group: 'Fields',
-    prefix: fieldTypePrefix(field.semanticType),
-  }));
+  const choices = fieldChoices(dimensions, 'Fields');
   if ('dimension' in definition) {
     const date = dimensions.find(
       (field) => field.id === definition.dimension.fieldId && field.semanticType === 'date',
@@ -1303,22 +1300,33 @@ function DimensionSettings({ definition, fields, commit }: QuerySettingsProps) {
       <>
         <Field>
           <FieldLabel>{axisLabel('dimension', definition.type, false)}</FieldLabel>
-          <FieldPicker
-            appearance="assignment"
-            label="Dimension"
-            prefix={
-              choices.find((field) => field.id === definition.dimension.fieldId)?.prefix ?? 'ABC'
-            }
-            tone="dimension"
-            value={definition.dimension.fieldId}
-            fields={choices}
-            onChange={(fieldId) =>
-              void commit({
-                ...definition,
-                dimension: dimensionForField(definition.dimension, fieldId, fields, 'auto'),
-              })
-            }
-          />
+          <div className="flex items-center gap-1">
+            <div className="min-w-0 flex-1">
+              <FieldPicker
+                appearance="assignment"
+                label="Dimension"
+                prefix={
+                  choices.find((field) => field.id === definition.dimension.fieldId)?.prefix ??
+                  'ABC'
+                }
+                tone="dimension"
+                value={definition.dimension.fieldId}
+                fields={choices}
+                onChange={(fieldId) =>
+                  void commit({
+                    ...definition,
+                    dimension: dimensionForField(definition.dimension, fieldId, fields, 'auto'),
+                  })
+                }
+              />
+            </div>
+            {formulaFieldId(fields, definition.dimension.fieldId) ? (
+              <EditFormulaButton
+                label="Edit dimension formula"
+                onClick={() => onEditCalculatedField(definition.dimension.fieldId)}
+              />
+            ) : null}
+          </div>
         </Field>
         {date ? (
           <DateGranularitySetting
@@ -1357,6 +1365,12 @@ function DimensionSettings({ definition, fields, commit }: QuerySettingsProps) {
                     })
                   }
                 />
+                {formulaFieldId(fields, dimension.fieldId) ? (
+                  <EditFormulaButton
+                    label={`Edit formula for dimension ${index + 1}`}
+                    onClick={() => onEditCalculatedField(dimension.fieldId)}
+                  />
+                ) : null}
                 <Button
                   variant="ghost"
                   size="icon-sm"
@@ -1592,19 +1606,25 @@ function DateGranularitySetting({
   );
 }
 
-type MetricDefinition = Extract<WidgetDefinition, { type: 'scorecard' }>['metric'];
-
 function MetricSettings({
   definition,
   fields,
   source,
   commit,
-  onCreate,
-}: QuerySettingsProps & { source?: SourceDescription; onCreate: () => void }) {
+  dashboardId,
+  onEditCalculatedField,
+}: QuerySettingsProps & {
+  dashboardId: string;
+  source?: SourceDescription;
+  onEditCalculatedField: (fieldId: string) => void;
+}) {
+  const [formulaOpen, setFormulaOpen] = useState(false);
+  const [editedIndex, setEditedIndex] = useState<number>();
   const choices = [
-    ...fields
-      .filter((field) => field.role === 'metric')
-      .map((field) => ({ id: field.id, label: field.label, group: 'Fields', prefix: '123' })),
+    ...fieldChoices(
+      fields.filter((field) => field.role === 'metric'),
+      'Fields',
+    ),
     ...(source?.libraryMetrics ?? []).map((item) => ({
       id: item.id,
       label: item.name,
@@ -1619,7 +1639,7 @@ function MetricSettings({
         ? definition.metrics
         : [];
   if (!metrics.length) return null;
-  function update(index: number, nextMetric: MetricDefinition) {
+  function update(index: number, nextMetric: WidgetMetric) {
     if ('metric' in definition) return commit({ ...definition, metric: nextMetric });
     if ('metrics' in definition)
       return commit({
@@ -1630,7 +1650,13 @@ function MetricSettings({
       });
     return Promise.resolve();
   }
-  function metricFor(id: string): MetricDefinition {
+  function addMetric(next: WidgetMetric) {
+    if ('metric' in definition) return commit({ ...definition, metric: next });
+    if ('metrics' in definition)
+      return commit({ ...definition, metrics: [...definition.metrics, next] });
+    return Promise.resolve();
+  }
+  function metricFor(id: string): WidgetMetric {
     const library = source?.libraryMetrics.find((item) => item.id === id);
     const field = fields.find((item) => item.id === id);
     return {
@@ -1650,168 +1676,187 @@ function MetricSettings({
     };
   }
   return (
-    <Field>
-      <FieldLabel>{axisLabel('metric', definition.type, metrics.length > 1)}</FieldLabel>
-      <div className="flex flex-col gap-1.5">
-        {metrics.map((metric, index) => {
-          const value =
-            metric.source.kind === 'field'
-              ? metric.source.fieldId
-              : metric.source.kind === 'library'
-                ? metric.source.libraryMetricId
-                : `expression:${index}`;
-          const metricChoices =
-            metric.source.kind === 'expression'
-              ? [
-                  {
-                    id: value,
-                    label: metric.userDefinedName ?? 'Custom expression',
-                    group: 'Chart metrics',
-                    prefix: 'fx',
-                  },
-                  ...choices,
-                ]
-              : choices;
-          return (
-            <div key={`${value}-${index}`} className="flex flex-col gap-2">
-              <div className="flex items-center gap-1">
-                <div className="flex h-8 min-w-0 flex-1 overflow-hidden rounded-full border border-metric/40 bg-metric/10">
-                  {metric.source.kind === 'field' ? (
-                    <Select
-                      value={metric.source.aggregation}
-                      onValueChange={(aggregation) => {
-                        if (!aggregation) return;
-                        void update(index, {
-                          ...metric,
-                          source: {
-                            kind: 'field',
-                            fieldId: metric.source.kind === 'field' ? metric.source.fieldId : '',
-                            aggregation,
-                          },
-                        });
-                      }}
-                    >
-                      <SelectTrigger
-                        aria-label={`Aggregation for metric ${index + 1}`}
-                        className="w-28 shrink-0"
-                        variant="embedded"
+    <>
+      <Field>
+        <FieldLabel>{axisLabel('metric', definition.type, metrics.length > 1)}</FieldLabel>
+        <div className="flex flex-col gap-1.5">
+          {metrics.map((metric, index) => {
+            const value =
+              metric.source.kind === 'field'
+                ? metric.source.fieldId
+                : metric.source.kind === 'library'
+                  ? metric.source.libraryMetricId
+                  : `expression:${index}`;
+            const metricChoices =
+              metric.source.kind === 'expression'
+                ? [
+                    {
+                      id: value,
+                      label: metric.userDefinedName ?? 'Custom expression',
+                      group: 'Chart metrics',
+                      prefix: 'fx',
+                    },
+                    ...choices,
+                  ]
+                : choices;
+            return (
+              <div key={`${value}-${index}`} className="flex flex-col gap-2">
+                <div className="flex items-center gap-1">
+                  <div className="flex h-8 min-w-0 flex-1 overflow-hidden rounded-full border border-metric/40 bg-metric/10">
+                    {metric.source.kind === 'field' ? (
+                      <Select
+                        value={metric.source.aggregation}
+                        onValueChange={(aggregation) => {
+                          if (!aggregation) return;
+                          void update(index, {
+                            ...metric,
+                            source: {
+                              kind: 'field',
+                              fieldId: metric.source.kind === 'field' ? metric.source.fieldId : '',
+                              aggregation,
+                            },
+                          });
+                        }}
                       >
-                        <SelectValue>
-                          {(aggregation: Aggregation | null) => {
-                            if (!aggregation) return null;
-                            const Icon = aggregationIcons[aggregation];
-                            return (
-                              <>
-                                <Icon />
-                                {aggregationLabel(aggregation)}
-                              </>
-                            );
-                          }}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent
-                        className="min-w-40"
-                        align="start"
-                        alignItemWithTrigger={false}
-                      >
-                        <SelectGroup>
-                          {aggregations.map((item) => {
-                            const Icon = aggregationIcons[item];
-                            return (
-                              <Tooltip key={item}>
-                                <TooltipTrigger
-                                  render={<SelectItem className="pr-16" value={item} />}
-                                >
+                        <SelectTrigger
+                          aria-label={`Aggregation for metric ${index + 1}`}
+                          className="w-28 shrink-0"
+                          variant="embedded"
+                        >
+                          <SelectValue>
+                            {(aggregation: Aggregation | null) => {
+                              if (!aggregation) return null;
+                              const Icon = aggregationIcons[aggregation];
+                              return (
+                                <>
                                   <Icon />
-                                  <span>{aggregationLabel(item)}</span>
-                                  <CircleHelpIcon
-                                    data-slot="aggregation-help"
-                                    className="absolute right-8"
-                                    aria-hidden="true"
-                                  />
-                                </TooltipTrigger>
-                                <TooltipContent side="right">
-                                  {aggregationDescriptions[item]}
-                                </TooltipContent>
-                              </Tooltip>
-                            );
-                          })}
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <span className="flex w-12 shrink-0 items-center justify-center border-r border-metric/30 font-mono text-xs font-semibold text-muted-foreground">
-                      fx
-                    </span>
-                  )}
-                  <FieldPicker
-                    appearance="embedded"
-                    label={`Metric${metrics.length > 1 ? ` ${index + 1}` : ''}`}
-                    tone="metric"
-                    value={value}
-                    fields={metricChoices}
-                    onCreate={{ label: 'Add custom metric', action: onCreate }}
-                    onChange={(id) => {
-                      if (id !== value) void update(index, metricFor(id));
-                    }}
-                  />
+                                  {aggregationLabel(aggregation)}
+                                </>
+                              );
+                            }}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent
+                          className="min-w-40"
+                          align="start"
+                          alignItemWithTrigger={false}
+                        >
+                          <SelectGroup>
+                            {aggregations.map((item) => {
+                              const Icon = aggregationIcons[item];
+                              return (
+                                <Tooltip key={item}>
+                                  <TooltipTrigger
+                                    render={<SelectItem className="pr-16" value={item} />}
+                                  >
+                                    <Icon />
+                                    <span>{aggregationLabel(item)}</span>
+                                    <CircleHelpIcon
+                                      data-slot="aggregation-help"
+                                      className="absolute right-8"
+                                      aria-hidden="true"
+                                    />
+                                  </TooltipTrigger>
+                                  <TooltipContent side="right">
+                                    {aggregationDescriptions[item]}
+                                  </TooltipContent>
+                                </Tooltip>
+                              );
+                            })}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <span className="flex w-12 shrink-0 items-center justify-center border-r border-metric/30 font-mono text-xs font-semibold text-muted-foreground">
+                        fx
+                      </span>
+                    )}
+                    <FieldPicker
+                      appearance="embedded"
+                      label={`Metric${metrics.length > 1 ? ` ${index + 1}` : ''}`}
+                      tone="metric"
+                      value={value}
+                      fields={metricChoices}
+                      onCreate={{ label: 'Add custom metric', action: () => setFormulaOpen(true) }}
+                      onChange={(id) => {
+                        if (id !== value) void update(index, metricFor(id));
+                      }}
+                    />
+                  </div>
+                  {metric.source.kind === 'expression' ? (
+                    <EditFormulaButton
+                      label={`Edit formula for metric ${index + 1}`}
+                      onClick={() => setEditedIndex(index)}
+                    />
+                  ) : formulaFieldId(fields, value) ? (
+                    <EditFormulaButton
+                      label={`Edit formula for metric ${index + 1}`}
+                      onClick={() => onEditCalculatedField(value)}
+                    />
+                  ) : null}
+                  {'metrics' in definition && definition.metrics.length > 1 ? (
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`Remove metric ${index + 1}`}
+                      onClick={() =>
+                        void commit({
+                          ...definition,
+                          metrics: definition.metrics.filter((_, itemIndex) => itemIndex !== index),
+                        })
+                      }
+                    >
+                      <Trash2Icon />
+                    </Button>
+                  ) : null}
                 </div>
-                {'metrics' in definition && definition.metrics.length > 1 ? (
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={`Remove metric ${index + 1}`}
-                    onClick={() =>
-                      void commit({
-                        ...definition,
-                        metrics: definition.metrics.filter((_, itemIndex) => itemIndex !== index),
-                      })
+                {definition.type === 'table' ? (
+                  <ConditionalFormatSettings
+                    metric={metric}
+                    onChange={(conditionalFormat) =>
+                      update(index, { ...metric, conditionalFormat })
                     }
-                  >
-                    <Trash2Icon />
-                  </Button>
+                  />
                 ) : null}
               </div>
-              {metric.source.kind === 'expression' ? (
-                <MetricExpressionInput
-                  metric={metric}
-                  onCommit={(nextMetric) => update(index, nextMetric)}
-                />
-              ) : null}
-              {definition.type === 'table' ? (
-                <ConditionalFormatSettings
-                  metric={metric}
-                  onChange={(conditionalFormat) => update(index, { ...metric, conditionalFormat })}
-                />
-              ) : null}
-            </div>
-          );
-        })}
-        {'metrics' in definition ? (
-          <FieldPicker
-            appearance="add"
-            label="Add metric"
-            tone="metric"
-            value=""
-            fields={choices}
-            onCreate={{ label: 'Add custom metric', action: onCreate }}
-            onChange={(id) =>
-              void commit({ ...definition, metrics: [...definition.metrics, metricFor(id)] })
-            }
-          />
-        ) : null}
-      </div>
-    </Field>
+            );
+          })}
+          {'metrics' in definition ? (
+            <FieldPicker
+              appearance="add"
+              label="Add metric"
+              tone="metric"
+              value=""
+              fields={choices}
+              onCreate={{ label: 'Add custom metric', action: () => setFormulaOpen(true) }}
+              onChange={(id) => void addMetric(metricFor(id))}
+            />
+          ) : null}
+        </div>
+      </Field>
+      <MetricFormulaDialog
+        open={formulaOpen || editedIndex !== undefined}
+        onOpenChange={(next) => {
+          if (next) return;
+          setFormulaOpen(false);
+          setEditedIndex(undefined);
+        }}
+        dashboardId={dashboardId}
+        source={source}
+        metric={editedIndex === undefined ? undefined : metrics[editedIndex]}
+        onSave={(next) => (editedIndex === undefined ? addMetric(next) : update(editedIndex, next))}
+      />
+    </>
   );
 }
 
-type ConditionalFormat = NonNullable<MetricDefinition['conditionalFormat']>;
+type ConditionalFormat = NonNullable<WidgetMetric['conditionalFormat']>;
 
 function ConditionalFormatSettings({
   metric,
   onChange,
 }: {
-  metric: MetricDefinition;
+  metric: WidgetMetric;
   onChange: (rules: ConditionalFormat | undefined) => Promise<void>;
 }) {
   const rules = metric.conditionalFormat ?? [];
@@ -1982,50 +2027,44 @@ function fieldTypePrefix(type: SemanticType) {
   return '123';
 }
 
+/** Calculated fields carry a formula, so they read as fx instead of their value type. */
+function fieldPrefix(field: SourceField) {
+  return 'expression' in field ? 'fx' : fieldTypePrefix(field.semanticType);
+}
+
+function fieldChoices(fields: SourceField[], group?: string) {
+  return fields.map((field) => ({
+    id: field.id,
+    label: field.label,
+    group,
+    prefix: fieldPrefix(field),
+  }));
+}
+
+/** Returns the id back when it points at a calculated field, so callers can offer an edit. */
+function formulaFieldId(fields: SourceField[], fieldId: string) {
+  const field = fields.find((item) => item.id === fieldId);
+  return field && 'expression' in field ? field.id : undefined;
+}
+
+function EditFormulaButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={<Button variant="ghost" size="icon-sm" aria-label={label} onClick={onClick} />}
+      >
+        <SquareFunctionIcon />
+      </TooltipTrigger>
+      <TooltipContent>Edit formula</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function axisLabel(role: 'dimension' | 'metric', type: WidgetDefinition['type'], plural: boolean) {
   const label = `${role === 'dimension' ? 'Dimension' : 'Metric'}${plural ? 's' : ''}`;
   if (type === 'line' || type === 'bar')
     return `${label} · ${role === 'dimension' ? 'X' : 'Y'} axis`;
   return label;
-}
-
-function MetricExpressionInput({
-  metric,
-  onCommit,
-}: {
-  metric: MetricDefinition;
-  onCommit: (metric: MetricDefinition) => Promise<void>;
-}) {
-  const source = metric.source.kind === 'expression' ? metric.source : undefined;
-  const [name, setName] = useState(metric.userDefinedName ?? '');
-  const [expression, setExpression] = useState(source?.expression ?? '');
-  useEffect(() => {
-    setName(metric.userDefinedName ?? '');
-    setExpression(source?.expression ?? '');
-  }, [metric.userDefinedName, source?.expression]);
-  if (!source) return null;
-  const save = () =>
-    onCommit({
-      ...metric,
-      userDefinedName: name.trim() || undefined,
-      source: { kind: 'expression', expression },
-    });
-  return (
-    <div className="grid gap-2">
-      <Field>
-        <FieldLabel>Name</FieldLabel>
-        <Input value={name} onChange={(event) => setName(event.target.value)} onBlur={save} />
-      </Field>
-      <Field>
-        <FieldLabel>Expression</FieldLabel>
-        <Textarea
-          value={expression}
-          onChange={(event) => setExpression(event.target.value)}
-          onBlur={save}
-        />
-      </Field>
-    </div>
-  );
 }
 
 type QueryDefinition = Extract<WidgetDefinition, { dataSourceId: string }>;
@@ -2074,7 +2113,7 @@ function FilterSettings({ definition, fields, commit }: QuerySettingsProps) {
           <FieldPicker
             label={`Filter ${index + 1}`}
             value={condition.fieldId}
-            fields={fields}
+            fields={fieldChoices(fields)}
             onChange={(fieldId) => void updateCondition(index, { fieldId })}
           />
           <NativeSelect
@@ -2655,6 +2694,7 @@ function DatasourceDialog({
   onRefresh: () => Promise<void>;
 }) {
   const [newFieldOpen, setNewFieldOpen] = useState(false);
+  const [editingField, setEditingField] = useState<DatasourceFieldRow>();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-4xl">
@@ -2674,7 +2714,7 @@ function DatasourceDialog({
           <PlusIcon data-icon="inline-start" /> New field
         </Button>
         <div className="flex flex-col gap-2">
-          {[...source.fields, ...source.calculatedFields].map((field) => (
+          {source.fields.map((field) => (
             <DatasourceFieldRow
               key={field.id}
               field={field}
@@ -2682,6 +2722,29 @@ function DatasourceDialog({
               dashboardId={dashboardId}
               onSaved={onRefresh}
             />
+          ))}
+          {source.calculatedFields.map((field) => (
+            <div
+              key={field.id}
+              className={cn(
+                'flex items-center gap-3 border-l-4 bg-muted/60 p-3',
+                fieldRoleStyles[field.role],
+              )}
+            >
+              <div className="min-w-0 flex-1">
+                <p className="font-medium">{field.label}</p>
+                <p className="truncate font-mono text-xs text-muted-foreground">
+                  {field.expression}
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setEditingField(calculatedFieldRow(field))}
+              >
+                Edit
+              </Button>
+            </div>
           ))}
         </div>
         {source.libraryMetrics.length ? (
@@ -2702,7 +2765,17 @@ function DatasourceDialog({
           open={newFieldOpen}
           onOpenChange={setNewFieldOpen}
           dashboardId={dashboardId}
-          sourceId={source.id}
+          datasource={source}
+          onSaved={onRefresh}
+        />
+        <CalculatedFieldDialog
+          open={Boolean(editingField)}
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) setEditingField(undefined);
+          }}
+          dashboardId={dashboardId}
+          datasource={source}
+          field={editingField}
           onSaved={onRefresh}
         />
       </DialogContent>
@@ -2731,7 +2804,7 @@ function DatasourceFieldRow({
     setSavingField(true);
     setSaveError(undefined);
     try {
-      if (field.columnName)
+      if ('columnName' in field)
         await callApi({
           action: 'updateFieldMetadata',
           dashboardId,
@@ -2745,7 +2818,7 @@ function DatasourceFieldRow({
             description: value.description ?? null,
           },
         });
-      else if (field.expression)
+      else
         await callApi({
           action: 'upsertCalculatedField',
           dashboardId,
@@ -2849,193 +2922,16 @@ const fieldRoleStyles: Record<FieldRole, string> = {
   metric: 'border-l-blue-500',
 };
 
-function MetricFormulaDialog({
-  open,
-  onOpenChange,
-  dashboardId,
-  definition,
-  source,
-  onSave,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  dashboardId: string;
-  definition: QueryDefinition;
-  source?: SourceDescription;
-  onSave: (definition: WidgetDefinition) => Promise<void>;
-}) {
-  const [name, setName] = useState('Custom metric');
-  const [expression, setExpression] = useState('');
-  const [saveLibrary, setSaveLibrary] = useState(false);
-  const [dialogError, setDialogError] = useState<string>();
-  const [submitting, setSubmitting] = useState(false);
-  const submittingRef = useRef(false);
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    if (submittingRef.current) return;
-    submittingRef.current = true;
-    setSubmitting(true);
-    setDialogError(undefined);
-    const metric = {
-      source: { kind: 'expression' as const, expression },
-      userDefinedName: name,
-      dataType: 'number' as const,
-    };
-    const next =
-      'metric' in definition
-        ? { ...definition, metric }
-        : 'metrics' in definition
-          ? { ...definition, metrics: [...definition.metrics, metric] }
-          : definition;
-    try {
-      if (saveLibrary) {
-        if (!source) throw new Error('Datasource fields are still loading.');
-        await callApi({
-          action: 'upsertLibraryMetric',
-          dashboardId,
-          name,
-          expression,
-          semanticType: 'count',
-        });
-      }
-      await onSave(next);
-      onOpenChange(false);
-    } catch (caught) {
-      setDialogError(message(caught));
-    } finally {
-      submittingRef.current = false;
-      setSubmitting(false);
-    }
-  }
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Add metric</DialogTitle>
-          <DialogDescription>
-            Use canonical field names. Saving only checks the formula.
-          </DialogDescription>
-        </DialogHeader>
-        <form onSubmit={submit}>
-          <FieldGroup>
-            {dialogError ? (
-              <Alert variant="destructive">
-                <AlertDescription>{dialogError}</AlertDescription>
-              </Alert>
-            ) : null}
-            <Field>
-              <FieldLabel>Name</FieldLabel>
-              <Input value={name} onChange={(event) => setName(event.target.value)} />
-            </Field>
-            <Field>
-              <FieldLabel>Aggregate formula</FieldLabel>
-              <Textarea
-                value={expression}
-                onChange={(event) => setExpression(event.target.value)}
-                placeholder="sum(media_cost) / sum(impressions)"
-              />
-            </Field>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={saveLibrary}
-                onChange={(event) => setSaveLibrary(event.target.checked)}
-              />{' '}
-              Save to workspace library
-            </label>
-            <Button type="submit" disabled={submitting || !name.trim() || !expression.trim()}>
-              {submitting ? 'Adding...' : 'Add metric'}
-            </Button>
-          </FieldGroup>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function CalculatedFieldDialog({
-  open,
-  onOpenChange,
-  dashboardId,
-  sourceId,
-  onSaved,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  dashboardId: string;
-  sourceId: string;
-  onSaved: () => Promise<void>;
-}) {
-  const [name, setName] = useState('');
-  const [expression, setExpression] = useState('');
-  const [role, setRole] = useState<'dimension' | 'metric'>('dimension');
-  const [error, setError] = useState<string>();
-  const [submitting, setSubmitting] = useState(false);
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    if (submitting) return;
-    setSubmitting(true);
-    setError(undefined);
-    try {
-      await callApi({
-        action: 'upsertCalculatedField',
-        dashboardId,
-        dataSourceId: sourceId,
-        name,
-        expression,
-        role,
-        semanticType: role === 'metric' ? 'count' : 'text',
-        defaultAggregation: role === 'metric' ? 'sum' : null,
-      });
-      onOpenChange(false);
-      await onSaved();
-    } catch (caught) {
-      setError(message(caught));
-    } finally {
-      setSubmitting(false);
-    }
-  }
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Add calculated field</DialogTitle>
-          <DialogDescription>
-            This creates a reusable row-level field on the selected datasource.
-          </DialogDescription>
-        </DialogHeader>
-        <form onSubmit={submit}>
-          <FieldGroup>
-            <Field>
-              <FieldLabel>Name</FieldLabel>
-              <Input value={name} onChange={(event) => setName(event.target.value)} />
-            </Field>
-            <Field>
-              <FieldLabel>Formula</FieldLabel>
-              <Textarea
-                value={expression}
-                onChange={(event) => setExpression(event.target.value)}
-              />
-            </Field>
-            <Field>
-              <FieldLabel>Role</FieldLabel>
-              <NativeSelect
-                value={role}
-                onChange={(event) => setRole(event.target.value as typeof role)}
-              >
-                <NativeSelectOption value="dimension">Dimension</NativeSelectOption>
-                <NativeSelectOption value="metric">Metric</NativeSelectOption>
-              </NativeSelect>
-            </Field>
-            {error ? <p className="text-sm text-destructive">{error}</p> : null}
-            <Button type="submit" disabled={submitting || !name.trim() || !expression.trim()}>
-              {submitting ? 'Creating…' : 'Create dimension'}
-            </Button>
-          </FieldGroup>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
+function calculatedFieldRow(
+  field: DatasourceDescription['calculatedFields'][number],
+): DatasourceFieldRow {
+  return {
+    ...field,
+    key: `calculated:${field.id}`,
+    origin: 'calculated',
+    description: field.description ?? '',
+    editable: true,
+  };
 }
 
 async function defaultDefinition(

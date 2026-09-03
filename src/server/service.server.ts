@@ -67,6 +67,11 @@ import {
   verifyDatasourceUploadCleanupToken,
 } from '#/domain/datasource-upload';
 import { ingestCsv } from '#/query/duckdb.server';
+import {
+  assertCalculatedFieldNameAvailable,
+  validateAggregateFormula,
+  validateRowFormula,
+} from '#/query/compiler';
 import { recordProductMetric } from '#/observability';
 import type { DataSourceRecord } from '#/query/types';
 import { requireSession, type SessionContext } from './auth.server';
@@ -166,6 +171,12 @@ async function dispatchRequest(request: ApiRequest): Promise<unknown> {
       return updateFieldMetadata(request);
     case 'upsertCalculatedField':
       return upsertCalculatedField(request);
+    case 'validateCalculatedField':
+      return validateCalculatedField(request);
+    case 'previewCalculatedFieldValues':
+      return previewCalculatedFieldValues(request);
+    case 'validateMetricExpression':
+      return validateMetricExpression(request);
     case 'upsertLibraryMetric':
       return upsertLibraryMetric(request);
     case 'shareDashboard':
@@ -1185,34 +1196,20 @@ async function updateFieldMetadata(
 async function upsertCalculatedField(
   request: Extract<ApiRequest, { action: 'upsertCalculatedField' }>,
 ) {
-  const session = await requireSession();
-  if (!session.isAdmin) {
-    if (!request.dashboardId)
-      throw new ApiError(
-        403,
-        'dashboard_editor_required',
-        'Calculated fields require editor access to a dashboard.',
-      );
-    const access = await authorizeDashboard(request.dashboardId, 'editor');
-    if (!dashboardUsesDataSource(access.document, request.dataSourceId))
-      throw new ApiError(
-        403,
-        'dashboard_datasource_required',
-        'The authorized dashboard does not use this datasource.',
-      );
-  }
-  const dataSource = await loadDataSource(request.dataSourceId, session.workspace.id);
-  const metadata = await loadQueryMetadata(dataSource.id, session.workspace.id);
+  const { session, dataSource, metadata, canonicalName } = await calculatedFieldContext(request);
+  validateCalculatedFieldExpression(request, metadata, canonicalName);
   await datasourceOperation(() =>
     connectorFor(dataSource).validateExpression(dataSource, {
       kind: 'calculatedField',
+      id: request.id,
+      canonicalName,
       expression: request.expression,
       semanticType: request.semanticType,
       metadata,
     }),
   );
   const mutableValues = {
-    canonicalName: request.canonicalName ?? slug(request.name),
+    canonicalName,
     label: request.name,
     expression: request.expression,
     role: request.role,
@@ -1246,6 +1243,147 @@ async function upsertCalculatedField(
   };
   const [created] = await db.insert(calculatedFields).values(values).returning();
   return created;
+}
+
+async function validateCalculatedField(
+  request: Extract<ApiRequest, { action: 'validateCalculatedField' }>,
+) {
+  const { metadata, canonicalName } = await calculatedFieldContext(request);
+  try {
+    const compiled = validateCalculatedFieldExpression(request, metadata, canonicalName);
+    return { valid: true as const, type: compiled.type, identifiers: compiled.identifiers };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const position = formulaErrorPosition(message, request.expression);
+    return { valid: false as const, error: { message, ...position } };
+  }
+}
+
+async function previewCalculatedFieldValues(
+  request: Extract<ApiRequest, { action: 'previewCalculatedFieldValues' }>,
+) {
+  const { dataSource, metadata, canonicalName } = await calculatedFieldContext(request);
+  validateCalculatedFieldExpression(request, metadata, canonicalName);
+  const field = {
+    id: request.id ?? '__preview__',
+    dataSourceId: request.dataSourceId,
+    canonicalName,
+    label: request.name,
+    expression: request.expression,
+    role: 'dimension' as const,
+    semanticType: request.semanticType,
+    description: null,
+  };
+  const rows = await datasourceOperation(() =>
+    connectorFor(dataSource).executeQuery<{ value: unknown }>(dataSource, {
+      kind: 'controlOptions',
+      field,
+      metadata,
+      direction: 'ASC',
+    }),
+  );
+  return { values: rows.slice(0, 10).map((row) => normalize(row.value)) };
+}
+
+/**
+ * Checks a custom metric formula without saving it. Aggregate formulas must wrap every
+ * field reference in an aggregate function, which is the mistake this surfaces early.
+ */
+async function validateMetricExpression(
+  request: Extract<ApiRequest, { action: 'validateMetricExpression' }>,
+) {
+  const { metadata } = await datasourceFormulaContext(request);
+  try {
+    if (!request.expression.trim()) throw new Error('A formula is required.');
+    const compiled = validateAggregateFormula(request.expression, metadata);
+    return { valid: true as const, type: compiled.type, identifiers: compiled.identifiers };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const position = formulaErrorPosition(message, request.expression);
+    return { valid: false as const, error: { message, ...position } };
+  }
+}
+
+/**
+ * Writing a formula against a datasource needs workspace admin rights, or editor access
+ * to a dashboard that actually uses that datasource.
+ */
+async function datasourceFormulaContext(request: { dashboardId?: string; dataSourceId: string }) {
+  const session = await requireSession();
+  if (!session.isAdmin) {
+    if (!request.dashboardId)
+      throw new ApiError(
+        403,
+        'dashboard_editor_required',
+        'Formulas require editor access to a dashboard.',
+      );
+    const access = await authorizeDashboard(request.dashboardId, 'editor');
+    if (!dashboardUsesDataSource(access.document, request.dataSourceId))
+      throw new ApiError(
+        403,
+        'dashboard_datasource_required',
+        'The authorized dashboard does not use this datasource.',
+      );
+  }
+  const dataSource = await loadDataSource(request.dataSourceId, session.workspace.id);
+  const metadata = await loadQueryMetadata(dataSource.id, session.workspace.id);
+  return { session, dataSource, metadata };
+}
+
+async function calculatedFieldContext(
+  request: Extract<
+    ApiRequest,
+    { action: 'upsertCalculatedField' | 'validateCalculatedField' | 'previewCalculatedFieldValues' }
+  >,
+) {
+  const { session, dataSource, metadata } = await datasourceFormulaContext(request);
+  const existing = request.id
+    ? metadata.calculatedFields.find((field) => field.id === request.id)
+    : undefined;
+  const canonicalName = existing?.canonicalName ?? request.canonicalName ?? slug(request.name);
+  if (!canonicalName)
+    throw new ApiError(
+      400,
+      'calculated_field_name_invalid',
+      'The field name must contain a letter or number.',
+    );
+  return { session, dataSource, metadata, canonicalName };
+}
+
+function validateCalculatedFieldExpression(
+  request: Extract<
+    ApiRequest,
+    { action: 'upsertCalculatedField' | 'validateCalculatedField' | 'previewCalculatedFieldValues' }
+  >,
+  metadata: Awaited<ReturnType<typeof loadQueryMetadata>>,
+  canonicalName: string,
+) {
+  assertCalculatedFieldNameAvailable(canonicalName, metadata, request.id);
+  const semanticType = request.semanticType;
+  const calculatedFields = [
+    ...metadata.calculatedFields.filter((field) => field.id !== request.id),
+    {
+      id: request.id ?? '__candidate__',
+      dataSourceId: request.dataSourceId,
+      canonicalName,
+      label: request.name,
+      expression: request.expression,
+      role: 'dimension' as const,
+      semanticType: semanticType ?? 'text',
+      description: null,
+    },
+  ];
+  return validateRowFormula(
+    request.expression,
+    { fields: metadata.fields, calculatedFields },
+    semanticType,
+  );
+}
+
+function formulaErrorPosition(message: string, expression: string) {
+  const match = message.match(/position (\d+)/iu);
+  const from = match ? Math.max(0, Number(match[1]) - 1) : 0;
+  return { from: Math.min(from, expression.length), to: Math.min(from + 1, expression.length) };
 }
 
 async function upsertLibraryMetric(

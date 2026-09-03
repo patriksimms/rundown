@@ -48,6 +48,36 @@ describe('datasource upload API contracts', () => {
   });
 });
 
+describe('calculated field API contracts', () => {
+  it('allows type inference for validation but requires a type for saving and previews', () => {
+    const validation = {
+      action: 'validateCalculatedField',
+      dataSourceId: 'source-1',
+      name: 'Net cost',
+      expression: 'cost * 0.8',
+    };
+    expect(apiRequestSchema.safeParse(validation).success).toBe(true);
+    expect(
+      apiRequestSchema.safeParse({ ...validation, action: 'previewCalculatedFieldValues' }).success,
+    ).toBe(false);
+    expect(
+      apiRequestSchema.safeParse({ ...validation, action: 'upsertCalculatedField' }).success,
+    ).toBe(false);
+  });
+});
+
+describe('metric expression API contracts', () => {
+  it('accepts an empty aggregate formula so the editor can check as you type', () => {
+    const request = {
+      action: 'validateMetricExpression',
+      dataSourceId: 'source-1',
+      expression: '',
+    };
+    expect(apiRequestSchema.safeParse(request).success).toBe(true);
+    expect(apiRequestSchema.safeParse({ ...request, dataSourceId: '' }).success).toBe(false);
+  });
+});
+
 describe('dashboard layout API contracts', () => {
   it('updates placements and canvas height in one request', () => {
     expect(

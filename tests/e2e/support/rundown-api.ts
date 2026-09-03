@@ -123,6 +123,19 @@ const fields = [
   },
 ];
 
+const calculatedFields = [
+  {
+    id: 'calc_vtr',
+    canonicalName: 'vtr',
+    label: 'VTR',
+    expression: 'impressions / 100',
+    role: 'metric',
+    semanticType: 'ratio',
+    defaultAggregation: 'average',
+    description: null,
+  },
+];
+
 const location = { kind: 'object', key: 'ws/demo/report.csv', format: 'csv' } as const;
 
 const description = () => ({
@@ -130,7 +143,7 @@ const description = () => ({
   name: 'Reporting example',
   location,
   fields: fields.map((field) => ({ ...field })),
-  calculatedFields: [],
+  calculatedFields: calculatedFields.map((field) => ({ ...field })),
   libraryMetrics: [],
 });
 
@@ -196,6 +209,10 @@ export async function mockRundownApi(page: Page, options: MockOptions = {}) {
           ),
         };
         return ok(route, { ok: true });
+      // The dialogs compile formulas locally too, so a permissive stub still exercises the rules.
+      case 'validateCalculatedField':
+      case 'validateMetricExpression':
+        return ok(route, { valid: true, type: 'number', identifiers: ['impressions'] });
       case 'getControlOptions':
         return ok(route, { values: ['FB', 'IG', 'TikTok'] });
       case 'queryWidget':

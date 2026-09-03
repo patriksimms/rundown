@@ -20,6 +20,7 @@ describe('WebMCP input schemas', () => {
       inputSchemaFor('updateLayout', dashboardId),
       inputSchemaFor('copyWidget', dashboardId),
       inputSchemaFor('previewWidget', dashboardId),
+      inputSchemaFor('validateCalculatedField', dashboardId),
       inputSchemaFor('upsertCalculatedField', dashboardId),
       inputSchemaFor('updateFieldMetadata', dashboardId),
       inputSchemaFor('upsertLibraryMetric', dashboardId),

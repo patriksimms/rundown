@@ -69,7 +69,8 @@ describe('signed-in application shell', () => {
 
     expect(nav).toContain('hidden');
     expect(nav).toContain('sm:flex');
-    for (const href of ['/', '/datasources', '/metrics']) expect(nav).toContain(`href="${href}"`);
+    for (const href of ['/', '/datasources']) expect(nav).toContain(`href="${href}"`);
+    expect(nav).not.toContain('href="/metrics"');
   });
 
   it('offers a menu button that only exists below sm', () => {
@@ -107,7 +108,7 @@ describe('active section marking', () => {
 
     expect(navLinkFor(markup, '/datasources')).toContain('border-foreground');
     expect(navLinkFor(markup, '/datasources')).toContain('text-foreground');
-    expect(navLinkFor(markup, '/metrics')).toContain('text-muted-foreground');
+    expect(navLinkFor(markup, '/')).toContain('text-muted-foreground');
   });
 
   it('keeps datasources marked on a datasource detail route', () => {

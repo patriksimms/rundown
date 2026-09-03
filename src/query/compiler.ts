@@ -15,6 +15,7 @@ import type {
 } from './types';
 import {
   compileFormula,
+  formulaIdentifiers,
   formulaTypeForSemanticType,
   type FormulaField,
   type FormulaType,
@@ -242,7 +243,13 @@ function fieldExpression(fieldId: string, context: QueryContext) {
   }
   const calculated = context.calculatedFields.find((item) => item.id === fieldId);
   if (!calculated) throw new Error(`Unknown field ${fieldId}.`);
-  return `(${compileFormula(calculated.expression, { mode: 'row', fields: rawFormulaFields(context.fields) }).sql})`;
+  const resolved = formulaFields(context).find(
+    (field) =>
+      field.canonicalName.toLocaleLowerCase('en-US') ===
+      calculated.canonicalName.toLocaleLowerCase('en-US'),
+  );
+  if (!resolved) throw new Error(`Unknown calculated field ${calculated.canonicalName}.`);
+  return resolved.sql;
 }
 
 export function compileLibraryExpression(
@@ -271,12 +278,12 @@ export function validateAggregateFormula(
 
 export function validateRowFormula(
   expression: string,
-  context: Pick<QueryContext, 'fields'>,
+  context: Pick<QueryContext, 'fields' | 'calculatedFields'>,
   semanticType?: SemanticType,
 ) {
   const compiled = compileFormula(expression, {
     mode: 'row',
-    fields: rawFormulaFields(context.fields),
+    fields: formulaFields(context),
   });
   const expected = semanticType ? formulaTypeForSemanticType(semanticType) : undefined;
   if (expected && compiled.type !== expected && compiled.type !== 'null')
@@ -397,22 +404,76 @@ function rawFormulaFields(fields: FieldRecord[]): FormulaField[] {
   }));
 }
 
-function formulaFields(context: Pick<QueryContext, 'fields' | 'calculatedFields'>): FormulaField[] {
+export function formulaFields(
+  context: Pick<QueryContext, 'fields' | 'calculatedFields'>,
+): FormulaField[] {
   const raw = rawFormulaFields(context.fields);
   const rawNames = new Set(raw.map((field) => field.canonicalName.toLocaleLowerCase('en-US')));
-  return [
-    ...raw,
-    ...context.calculatedFields
-      .filter((field) => !rawNames.has(field.canonicalName.toLocaleLowerCase('en-US')))
-      .map((field) => {
-        const compiled = compileFormula(field.expression, { mode: 'row', fields: raw });
-        return {
-          canonicalName: field.canonicalName,
-          sql: `(${compiled.sql})`,
-          type: compiled.type,
-        };
-      }),
-  ];
+  const calculatedByName = new Map<string, CalculatedFieldRecord>();
+  for (const field of context.calculatedFields) {
+    const key = field.canonicalName.toLocaleLowerCase('en-US');
+    // Keep reading legacy data that predates collision checks. Raw fields have always won.
+    if (rawNames.has(key)) continue;
+    if (calculatedByName.has(key))
+      throw new Error(`Calculated field name ${field.canonicalName} is ambiguous.`);
+    calculatedByName.set(key, field);
+  }
+  const resolved = new Map<string, FormulaField>();
+  const resolving: string[] = [];
+
+  const resolve = (key: string): FormulaField => {
+    const cached = resolved.get(key);
+    if (cached) return cached;
+    const cycleStart = resolving.indexOf(key);
+    if (cycleStart >= 0) {
+      const cycle = [...resolving.slice(cycleStart), key].map(
+        (name) => calculatedByName.get(name)?.canonicalName ?? name,
+      );
+      throw new Error(`Calculated field cycle: ${cycle.join(' -> ')}.`);
+    }
+    const field = calculatedByName.get(key);
+    if (!field) throw new Error(`Unknown calculated field ${key}.`);
+    resolving.push(key);
+    try {
+      for (const identifier of formulaIdentifiers(field.expression)) {
+        const dependency = identifier.toLocaleLowerCase('en-US');
+        if (calculatedByName.has(dependency)) resolve(dependency);
+      }
+      const compiled = compileFormula(field.expression, {
+        mode: 'row',
+        fields: [...raw, ...resolved.values()],
+      });
+      const result: FormulaField = {
+        canonicalName: field.canonicalName,
+        sql: `(${compiled.sql})`,
+        type: compiled.type,
+      };
+      resolved.set(key, result);
+      return result;
+    } finally {
+      resolving.pop();
+    }
+  };
+
+  for (const key of calculatedByName.keys()) resolve(key);
+  return [...raw, ...resolved.values()];
+}
+
+export function assertCalculatedFieldNameAvailable(
+  canonicalName: string,
+  context: Pick<QueryContext, 'fields' | 'calculatedFields'>,
+  editingId?: string,
+) {
+  const key = canonicalName.toLocaleLowerCase('en-US');
+  const raw = context.fields.find(
+    (field) => field.canonicalName.toLocaleLowerCase('en-US') === key,
+  );
+  if (raw) throw new Error(`Field ID ${canonicalName} is already used by raw field ${raw.label}.`);
+  const calculated = context.calculatedFields.find(
+    (field) => field.id !== editingId && field.canonicalName.toLocaleLowerCase('en-US') === key,
+  );
+  if (calculated)
+    throw new Error(`Field ID ${canonicalName} is already used by ${calculated.label}.`);
 }
 
 function assertAggregationType(
@@ -426,10 +487,11 @@ function assertAggregationType(
   const type = field
     ? formulaTypeForSemanticType(field.semanticType)
     : calculated
-      ? compileFormula(calculated.expression, {
-          mode: 'row',
-          fields: rawFormulaFields(context.fields),
-        }).type
+      ? formulaFields(context).find(
+          (candidate) =>
+            candidate.canonicalName.toLocaleLowerCase('en-US') ===
+            calculated.canonicalName.toLocaleLowerCase('en-US'),
+        )?.type
       : undefined;
   if (!type) throw new Error(`Unknown field ${fieldId}.`);
   if (type !== 'number')
