@@ -64,6 +64,19 @@ export const dateRangeSchema = z
 
 const stylingSchema = z.record(z.string(), z.unknown()).optional();
 
+// Presentation-only text options shared by text widgets and card titles. Unset properties keep the
+// element's own default, so a widget that never sets a style still renders like the rest of the app.
+export const textStyleSchema = z.object({
+  size: z.enum(['xs', 'sm', 'base', 'lg', 'xl', '2xl']).optional(),
+  weight: z.enum(['normal', 'medium', 'semibold', 'bold']).optional(),
+  transform: z.enum(['none', 'uppercase']).optional(),
+  align: z.enum(['left', 'center', 'right']).optional(),
+  tone: z.enum(['default', 'muted', 'primary']).optional(),
+});
+// One shared instance so the emitted WebMCP JSON Schema references it instead of inlining a copy
+// into every widget variant.
+const optionalTextStyle = textStyleSchema.optional();
+
 export const dateGranularitySchema = z.enum([
   'auto',
   'raw',
@@ -151,6 +164,7 @@ const sortSchema = z.object({
 
 const cardBase = {
   title: z.string().trim().min(1),
+  titleStyle: optionalTextStyle,
   dataSourceId: z.string().min(1),
   dateRangeFieldId: z.string().min(1),
   filter: filterSchema.optional(),
@@ -177,7 +191,7 @@ export const widgetDefinitionSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('text'),
     content: z.object({ schemaVersion: z.string().min(1), document: z.unknown() }),
-    styling: stylingSchema,
+    textStyle: optionalTextStyle,
   }),
   z.object({
     ...cardBase,
@@ -312,6 +326,7 @@ export type FieldRole = z.infer<typeof fieldRoleSchema>;
 export type SemanticType = z.infer<typeof semanticTypeSchema>;
 export type Aggregation = z.infer<typeof aggregationSchema>;
 export type DataSourceLocation = z.infer<typeof dataSourceLocationSchema>;
+export type TextStyle = z.infer<typeof textStyleSchema>;
 
 export const defaultDateRange: DateRange = {
   startDate: { relative: { amount: 30, unit: 'day', direction: 'past', anchor: 'startOfDay' } },

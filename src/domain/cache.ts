@@ -72,9 +72,14 @@ function queryDefinition(definition: WidgetDefinition) {
   const {
     styling: _styling,
     title: _title,
+    titleStyle: _titleStyle,
+    textStyle: _textStyle,
     ...query
   } = definition as WidgetDefinition & {
+    styling?: unknown;
     title?: string;
+    titleStyle?: unknown;
+    textStyle?: unknown;
   };
   if ('metric' in query) return { ...query, metric: withoutMetricPresentation(query.metric) };
   if ('metrics' in query)

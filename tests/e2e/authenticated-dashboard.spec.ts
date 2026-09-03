@@ -56,6 +56,18 @@ test.describe('signed-in dashboard flow', () => {
       'All values',
     );
 
+    // Preview the dashboard as a viewer: the builder steps aside for the stored dashboard, and
+    // the preview survives a reload because it lives in the URL.
+    const viewerMode = page.getByRole('switch', { name: 'Viewer mode' });
+    await viewerMode.click();
+    await expect(page.getByRole('button', { name: 'Edit Revenue, verified' })).toHaveCount(0);
+    await expect(page.getByText('Revenue, verified')).toBeVisible();
+    await page.reload();
+    await expect(viewerMode).toBeChecked();
+    await expect(page.getByRole('button', { name: 'Edit Revenue, verified' })).toHaveCount(0);
+    await viewerMode.click();
+    await expect(page.getByRole('button', { name: 'Edit Revenue, verified' })).toBeVisible();
+
     // Share the dashboard and open the link without a session.
     await page.getByRole('button', { name: 'Share' }).click();
     const shareLink = page.getByRole('link', { name: /\/share\// });

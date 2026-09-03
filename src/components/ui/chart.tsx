@@ -222,7 +222,9 @@ function ChartTooltipContent({
                     )}
                     <div
                       className={cn(
-                        'flex flex-1 justify-between leading-none',
+                        // The gap keeps a long series name from touching its value, which the
+                        // `justify-between` row otherwise allows once the tooltip runs out of width.
+                        'flex flex-1 justify-between gap-4 leading-none',
                         nestLabel ? 'items-end' : 'items-center',
                       )}
                     >

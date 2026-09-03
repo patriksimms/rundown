@@ -13,6 +13,8 @@ import { DashboardSharing, type SharingState } from '#/components/dashboard-shar
 import { DashboardView, dashboardDateControlRange } from '#/components/dashboard-view';
 import { ErrorState, LoadingState } from '#/components/request-state';
 import { Badge } from '#/components/ui/badge';
+import { Label } from '#/components/ui/label';
+import { Switch } from '#/components/ui/switch';
 import {
   dateRangeSearchValue,
   parseDateRangeSearch,
@@ -23,7 +25,12 @@ import { pageTitle, usePageTitle } from '#/lib/page-title';
 import { useWebMcpTools } from '#/webmcp/use-webmcp-tools';
 
 export const Route = createFileRoute('/dashboards/$dashboardId')({
-  validateSearch: z.object({ dateRange: z.string().optional().catch(undefined) }),
+  validateSearch: z.object({
+    dateRange: z.string().optional().catch(undefined),
+    // Editors can preview the dashboard the way a viewer sees it. It lives in the URL so a
+    // reload keeps the preview and the state is shareable while checking a viewer report.
+    preview: z.literal('viewer').optional().catch(undefined),
+  }),
   component: DashboardPage,
   head: () => ({ meta: [{ title: pageTitle('Dashboard') }] }),
 });
@@ -61,12 +68,16 @@ function DashboardContent() {
   }, [dashboardId]);
   useEffect(() => void refresh().catch(() => undefined), [refresh]);
   const canEdit = payload?.role === 'admin' || payload?.role === 'editor';
+  const previewingAsViewer = canEdit && search.preview === 'viewer';
+  // Editing chrome, the builder, and the WebMCP write tools all follow this one flag, so the
+  // preview shows the same surface a viewer gets instead of an editor page with buttons hidden.
+  const editing = canEdit && !previewingAsViewer;
   usePageTitle(payload?.dashboard.name ?? 'Dashboard');
   useWebMcpTools({
     dashboardId,
     canCreate: Boolean(payload),
-    canEdit,
-    isAdmin: payload?.role === 'admin',
+    canEdit: editing,
+    isAdmin: payload?.role === 'admin' && editing,
     onMutation: refresh,
   });
   return (
@@ -81,11 +92,28 @@ function DashboardContent() {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-3xl font-semibold tracking-tight">{payload.dashboard.name}</h1>
-                <Badge variant="secondary">{payload.role}</Badge>
+                <Badge variant="secondary">{previewingAsViewer ? 'viewer' : payload.role}</Badge>
               </div>
             </div>
+            {/* The editor controls stay put in both modes so the switch never moves under the
+                cursor, even though a real viewer sees neither of them. */}
             {canEdit ? (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3">
+                <Label className="text-muted-foreground" htmlFor="viewer-mode">
+                  Viewer mode
+                  <Switch
+                    id="viewer-mode"
+                    checked={previewingAsViewer}
+                    onCheckedChange={(checked) =>
+                      void navigate({
+                        search: (current) => ({
+                          ...current,
+                          preview: checked ? ('viewer' as const) : undefined,
+                        }),
+                      })
+                    }
+                  />
+                </Label>
                 <SaveStatusIndicator status={saveStatus} />
                 <DashboardSharing
                   dashboardId={dashboardId}
@@ -95,7 +123,7 @@ function DashboardContent() {
               </div>
             ) : null}
           </header>
-          {canEdit ? (
+          {editing ? (
             <DashboardBuilder
               dashboard={payload.dashboard}
               dataSources={payload.dataSources}

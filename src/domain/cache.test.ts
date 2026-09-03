@@ -125,6 +125,25 @@ describe('widget dependency cache state', () => {
     expect(formatted).toBe(before);
   });
 
+  it('keeps cached results across title restyling', async () => {
+    const metadata = {
+      fields: [baseField],
+      calculatedFields: [],
+      libraryMetrics: [
+        { id: 'metric_spend', canonicalName: 'spend', name: 'Spend', expression: 'SUM(cost)' },
+      ],
+    };
+    const before = await hashJson(widgetDependencyState(definition, metadata));
+    const restyled = await hashJson(
+      widgetDependencyState(
+        { ...definition, titleStyle: { size: 'lg', transform: 'uppercase' } },
+        metadata,
+      ),
+    );
+
+    expect(restyled).toBe(before);
+  });
+
   it('separates resolved date boundaries and dashboard timezones', async () => {
     const state = {
       definitionHash: 'definition',

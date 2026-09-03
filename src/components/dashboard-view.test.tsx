@@ -4,6 +4,7 @@ import type { QueryResultColumn } from '#/domain/query-result';
 import type { DashboardWidget } from '#/domain/schema';
 import {
   formatAxisValue,
+  formatDimensionLabel,
   formatValue,
   lineChartAxes,
   lineMetricAxis,
@@ -365,6 +366,28 @@ describe('widget result rendering', () => {
     );
     expect(formatValue('9223372036854775807', dimension)).toBe('9223372036854775807');
     expect(formatValue('9223372036854775807', currency)).toBe('9223372036854775807');
+  });
+
+  it('renders date dimensions in the visitor locale instead of the stored timestamp', () => {
+    const date: QueryResultColumn = {
+      key: 'dimension_1',
+      label: 'Day',
+      kind: 'dimension',
+      dataType: 'date',
+    };
+    const day = formatDimensionLabel('2026-03-27 00:00:00', date);
+    expect(day).not.toContain('00:00:00');
+    expect(day).toBe(
+      new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(2026, 2, 27)),
+    );
+    // A bucket that carries a real time keeps it, midnight buckets do not.
+    expect(formatDimensionLabel('2026-03-27T14:30:00', date)).toBe(
+      new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(
+        new Date(2026, 2, 27, 14, 30),
+      ),
+    );
+    expect(formatDimensionLabel('not a date', date)).toBe('not a date');
+    expect(formatDimensionLabel('Account 7', dimension)).toBe('Account 7');
   });
 
   it('abbreviates thousands on chart axes with k', () => {

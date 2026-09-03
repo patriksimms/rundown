@@ -42,8 +42,10 @@ function SharedDashboard() {
   }, [refresh]);
   usePageTitle(dashboard?.name ?? 'Shared dashboard');
   useWebMcpTools({ dashboardId: dashboard?.id, shareToken: token });
+  // The main width matches the signed-in dashboard, so an editor previewing viewer mode sees
+  // what a share-link recipient gets.
   return (
-    <main className="mx-auto min-h-screen w-full max-w-7xl px-4 py-6 sm:px-6">
+    <main className="mx-auto min-h-screen w-full max-w-[100rem] px-4 py-6 sm:px-6">
       <header className="mb-6">
         <p className="text-sm font-medium text-muted-foreground">Rundown</p>
         <h1 className="text-3xl font-semibold tracking-tight">

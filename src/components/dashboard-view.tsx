@@ -2,6 +2,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Label,
   Line,
   LineChart,
   Pie,
@@ -29,6 +30,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '#/components/ui/popover
 import { Skeleton } from '#/components/ui/skeleton';
 import { widgetQueryRequest } from '#/domain/widget-query';
 import { cn } from '#/lib/utils';
+import { textStyleClasses } from '#/domain/text-style';
 import { controlDefaultValues, toggleControlValue } from '#/domain/control-state';
 import {
   pieBreakdownRows,
@@ -166,7 +168,9 @@ function Widget({
     return (
       <Card>
         <CardContent className="pt-(--card-spacing)">
-          <p className="whitespace-pre-wrap">{richText(widget.definition.content.document)}</p>
+          <p className={cn('whitespace-pre-wrap', textStyleClasses(widget.definition.textStyle))}>
+            {richText(widget.definition.content.document)}
+          </p>
         </CardContent>
       </Card>
     );
@@ -525,7 +529,9 @@ function QueryCard({
   return (
     <Card className="h-full min-h-0">
       <CardHeader className="shrink-0">
-        <CardTitle>{definition.title}</CardTitle>
+        <CardTitle className={textStyleClasses(definition.titleStyle)}>
+          {definition.title}
+        </CardTitle>
         {error ? <CardDescription>{error}</CardDescription> : null}
       </CardHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col overflow-auto">
@@ -723,7 +729,10 @@ export function Result({
                   key={index}
                   className={cn(
                     startsGroup && 'border-t-2 border-t-foreground/20',
-                    (subtotal || grandTotal) && 'bg-muted/60 font-medium',
+                    // Totals carry the numbers people actually read off the table, so they get a
+                    // rule above them and a heavier weight rather than a faint tint alone.
+                    subtotal && 'border-t border-t-foreground/20 bg-muted font-semibold',
+                    grandTotal && 'border-t-2 border-t-foreground/40 bg-muted font-semibold',
                   )}
                 >
                   {tableColumns.map((column, columnIndex) => {
@@ -749,7 +758,7 @@ export function Result({
               );
             })}
             {summary && !pivotSeries ? (
-              <TableRow className="font-medium">
+              <TableRow className="border-t-2 border-t-foreground/40 bg-muted font-semibold">
                 {columns.map((column, columnIndex) => (
                   <TableCell
                     key={column.key}
@@ -923,6 +932,12 @@ export function Result({
     <ChartTooltip
       content={
         <ChartTooltipContent
+          // Recharts hands over the raw dimension value as the label, which for dates is the stored
+          // timestamp. Read it back off the row so it can be rendered in the visitor's locale.
+          labelFormatter={(_, items) => {
+            const row = items?.[0]?.payload as Record<string, unknown> | undefined;
+            return formatDimensionLabel(row?.[dimension.key], dimension);
+          }}
           valueFormatter={(value, name) =>
             formatValue(
               value,
@@ -976,6 +991,7 @@ export function Result({
               dataKey={item.key}
               fill={`var(--color-${item.key})`}
               fillOpacity={item.isComparison ? 0.5 : 1}
+              radius={6}
               isAnimationActive={false}
             />
           ))}
@@ -1002,8 +1018,21 @@ export function Result({
             key={metric.key}
             yAxisId={yAxisId}
             orientation={orientation}
+            width={axes.length > 1 ? 76 : undefined}
             tickFormatter={(value) => formatAxisValue(value, metric)}
-          />
+          >
+            {/* Two scales are unreadable without saying which metric each one belongs to. A single
+                axis needs no caption because the legend already names the metric. */}
+            {axes.length > 1 ? (
+              <Label
+                value={metric.label}
+                angle={orientation === 'left' ? -90 : 90}
+                position={orientation === 'left' ? 'insideLeft' : 'insideRight'}
+                className="fill-muted-foreground text-[11px]"
+                style={{ textAnchor: 'middle' }}
+              />
+            ) : null}
+          </YAxis>
         ))}
         {tooltip}
         {series.map((item) => (
@@ -1127,10 +1156,38 @@ function normalizeMetricValues(rows: Record<string, unknown>[], metrics: QueryRe
   );
 }
 
+// Date dimensions arrive as `YYYY-MM-DD` or as a full timestamp. Both are read as local wall clock
+// so the rendered day is the bucket the query produced, not that bucket shifted by the viewer's zone.
+function dimensionDate(value: unknown) {
+  if (value instanceof Date) return Number.isNaN(value.valueOf()) ? undefined : value;
+  if (typeof value !== 'string') return undefined;
+  const parts = /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}(?::\d{2})?))?/u.exec(value);
+  if (!parts) return undefined;
+  const date = new Date(`${parts[1]}T${parts[2] ?? '00:00'}`);
+  return Number.isNaN(date.valueOf()) ? undefined : date;
+}
+
+/**
+ * Label for tooltips and other places with room for a full value. Dates get the visitor's locale
+ * format instead of the stored timestamp; everything else falls back to the compact axis format.
+ */
+export function formatDimensionLabel(value: unknown, column: QueryResultColumn) {
+  if (column.kind === 'dimension' && column.dataType === 'date') {
+    const date = dimensionDate(value);
+    if (date)
+      return new Intl.DateTimeFormat(undefined, {
+        dateStyle: 'medium',
+        // Buckets sit at midnight, so a time is only worth showing when the data carries one.
+        ...(date.getHours() || date.getMinutes() ? { timeStyle: 'short' } : {}),
+      }).format(date);
+  }
+  return formatAxisValue(value, column);
+}
+
 export function formatAxisValue(value: unknown, column: QueryResultColumn) {
-  if (column.kind === 'dimension' && column.dataType === 'date' && typeof value === 'string') {
-    const date = new Date(`${value.slice(0, 10)}T00:00:00`);
-    if (!Number.isNaN(date.valueOf()))
+  if (column.kind === 'dimension' && column.dataType === 'date') {
+    const date = dimensionDate(value);
+    if (date)
       return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date);
   }
   const number = numericMetricValue(value, column);

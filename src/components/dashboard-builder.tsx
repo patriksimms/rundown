@@ -91,6 +91,7 @@ import {
 } from '#/domain/widget-editing';
 import { remapWidgetDefinition } from '#/domain/remap';
 import { replacePlainTextDocument, textDocument } from '#/domain/text-content';
+import { textStyleClasses } from '#/domain/text-style';
 import { withoutWidgetControlState } from '#/domain/control-state';
 import { sameDateRange } from '#/domain/date-range-search';
 import { yearToDateRange } from '#/domain/dates';
@@ -102,7 +103,7 @@ import {
   rollbackFailedLayoutState,
   rowInsertionCuts,
 } from '#/domain/layout';
-import { fieldRoleSchema } from '#/domain/schema';
+import { fieldRoleSchema, textStyleSchema } from '#/domain/schema';
 import type {
   ControlState,
   Aggregation,
@@ -112,6 +113,7 @@ import type {
   DateRange,
   FieldRole,
   SemanticType,
+  TextStyle,
   WidgetDefinition,
 } from '#/domain/schema';
 
@@ -1089,46 +1091,60 @@ function WidgetSettings({
         </Alert>
       ) : null}
       {'title' in definition ? (
-        <Field>
-          <FieldLabel htmlFor={`title-${widget.id}`}>Title</FieldLabel>
-          <Input
-            id={`title-${widget.id}`}
-            value={definition.title}
-            onChange={(event) => setLocalDefinition({ ...definition, title: event.target.value })}
-            onBlur={() => void commit(definition)}
+        <>
+          <Field>
+            <FieldLabel htmlFor={`title-${widget.id}`}>Title</FieldLabel>
+            <Input
+              id={`title-${widget.id}`}
+              value={definition.title}
+              onChange={(event) => setLocalDefinition({ ...definition, title: event.target.value })}
+              onBlur={() => void commit(definition)}
+            />
+          </Field>
+          <TextStyleSettings
+            legend="Title style"
+            value={definition.titleStyle}
+            onChange={(titleStyle) => void commit({ ...definition, titleStyle })}
           />
-        </Field>
+        </>
       ) : null}
       {definition.type === 'text' ? (
-        <Field>
-          <FieldLabel htmlFor={`text-${widget.id}`}>Text</FieldLabel>
-          <Textarea
-            id={`text-${widget.id}`}
-            value={textDocument(definition.content.document)}
-            readOnly={typeof definition.content.document !== 'string'}
-            onChange={(event) =>
-              typeof definition.content.document === 'string' &&
-              setLocalDefinition({
-                ...definition,
-                content: {
-                  ...definition.content,
-                  document: replacePlainTextDocument(
-                    definition.content.document,
-                    event.target.value,
-                  ),
-                },
-              })
-            }
-            onBlur={() => {
-              if (typeof definition.content.document === 'string') void commit(definition);
-            }}
+        <>
+          <Field>
+            <FieldLabel htmlFor={`text-${widget.id}`}>Text</FieldLabel>
+            <Textarea
+              id={`text-${widget.id}`}
+              value={textDocument(definition.content.document)}
+              readOnly={typeof definition.content.document !== 'string'}
+              onChange={(event) =>
+                typeof definition.content.document === 'string' &&
+                setLocalDefinition({
+                  ...definition,
+                  content: {
+                    ...definition.content,
+                    document: replacePlainTextDocument(
+                      definition.content.document,
+                      event.target.value,
+                    ),
+                  },
+                })
+              }
+              onBlur={() => {
+                if (typeof definition.content.document === 'string') void commit(definition);
+              }}
+            />
+            {typeof definition.content.document !== 'string' ? (
+              <FieldDescription>
+                Structured text is read-only here so its document format stays intact.
+              </FieldDescription>
+            ) : null}
+          </Field>
+          <TextStyleSettings
+            legend="Text style"
+            value={definition.textStyle}
+            onChange={(textStyle) => void commit({ ...definition, textStyle })}
           />
-          {typeof definition.content.document !== 'string' ? (
-            <FieldDescription>
-              Structured text is read-only here so its document format stays intact.
-            </FieldDescription>
-          ) : null}
-        </Field>
+        </>
       ) : null}
       {definition.type === 'dateControl' ? (
         <Field>
@@ -1402,6 +1418,126 @@ function dimensionForField(
   const { dateGranularity: _dateGranularity, ...rest } = dimension;
   const date = fields.some((field) => field.id === fieldId && field.semanticType === 'date');
   return date ? { ...rest, fieldId, dateGranularity: dateDefault } : { ...rest, fieldId };
+}
+
+const textStyleFields = [
+  {
+    key: 'size',
+    label: 'Size',
+    // Short labels because each option renders at its own size, so a long word would overflow the
+    // popup at the larger steps. The preview carries the meaning, not the wording.
+    options: { xs: 'XS', sm: 'S', base: 'M', lg: 'L', xl: 'XL', '2xl': '2XL' },
+  },
+  {
+    key: 'weight',
+    label: 'Weight',
+    options: { normal: 'Normal', medium: 'Medium', semibold: 'Semibold', bold: 'Bold' },
+  },
+  { key: 'transform', label: 'Case', options: { none: 'As typed', uppercase: 'Uppercase' } },
+  { key: 'align', label: 'Align', options: { left: 'Left', center: 'Center', right: 'Right' } },
+  {
+    key: 'tone',
+    label: 'Tone',
+    options: { default: 'Normal', muted: 'Muted', primary: 'Accent' },
+    // A swatch rather than coloured label text: the highlighted option recolours its own text and
+    // every descendant, which would hide exactly the preview the user is looking at.
+    swatches: { default: 'bg-foreground', muted: 'bg-muted-foreground', primary: 'bg-primary' },
+  },
+] as const satisfies ReadonlyArray<{
+  key: keyof TextStyle;
+  label: string;
+  options: Record<string, string>;
+  swatches?: Record<string, string>;
+}>;
+
+// The option previews itself by running through the same mapping that styles the real widget, so a
+// preview can never drift from the render. Unknown values (the unset "Default") produce no classes.
+function textStylePreview(key: keyof TextStyle, option: string) {
+  const parsed = textStyleSchema.safeParse({ [key]: option });
+  return parsed.success ? textStyleClasses(parsed.data) : undefined;
+}
+
+/**
+ * Presentation controls for a text widget or a card title. Every property can stay unset, in which
+ * case the widget renders with the app defaults, and a style with nothing set is stored as absent.
+ */
+function TextStyleSettings({
+  legend,
+  value,
+  onChange,
+}: {
+  legend: string;
+  value: TextStyle | undefined;
+  onChange: (style: TextStyle | undefined) => void;
+}) {
+  const update = (key: keyof TextStyle, selected: string | null) => {
+    const draft: Record<string, string | undefined> = { ...value };
+    if (selected) draft[key] = selected;
+    else delete draft[key];
+    const parsed = textStyleSchema.safeParse(draft);
+    onChange(parsed.success && Object.keys(draft).length ? parsed.data : undefined);
+  };
+  return (
+    <Field>
+      <FieldLabel>{legend}</FieldLabel>
+      <div className="grid grid-cols-2 gap-2">
+        {textStyleFields.map((setting) => {
+          const options: Record<string, string> = setting.options;
+          const swatches: Record<string, string> | undefined =
+            'swatches' in setting ? setting.swatches : undefined;
+          // `w-full` is what lets the align preview work: the label fills the row, so `text-right`
+          // actually moves it. The other properties are unaffected by the extra width.
+          const optionContent = (option: string, preview: boolean) => (
+            <>
+              {/* The empty slot for the unset option keeps every label in the list on one line. */}
+              {swatches ? (
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    'size-2.5 shrink-0 rounded-full',
+                    swatches[option] ?? 'bg-transparent',
+                  )}
+                />
+              ) : null}
+              <span className={cn('w-full', preview && textStylePreview(setting.key, option))}>
+                {options[option] ?? 'Default'}
+              </span>
+            </>
+          );
+          return (
+            <div key={setting.key} className="grid gap-1">
+              <span className="text-xs text-muted-foreground">{setting.label}</span>
+              <Select
+                value={value?.[setting.key] ?? ''}
+                onValueChange={(selected) => update(setting.key, selected)}
+              >
+                <SelectTrigger
+                  aria-label={`${legend}: ${setting.label.toLowerCase()}`}
+                  className="w-full"
+                >
+                  {/* The trigger stays at the control's own size so the two columns keep an even
+                      height. Only the options preview themselves. */}
+                  <SelectValue>
+                    {(selected: string | null) => optionContent(selected ?? '', false)}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent className="min-w-40" align="start" alignItemWithTrigger={false}>
+                  <SelectGroup>
+                    <SelectItem value="">{optionContent('', false)}</SelectItem>
+                    {Object.keys(options).map((option) => (
+                      <SelectItem key={option} value={option}>
+                        {optionContent(option, true)}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+          );
+        })}
+      </div>
+    </Field>
+  );
 }
 
 function DateGranularitySetting({
